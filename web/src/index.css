@@ -241,3 +241,11 @@ body {
 .animate-soft-pulse {
   animation: fluxus-pulse 1.4s ease-in-out infinite;
 }
+
+/* Carrousel : défilement horizontal sans barre visible */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

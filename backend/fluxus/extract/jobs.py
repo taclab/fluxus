@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +11,16 @@ from .clean import html_to_text
 from .service import ExtractionError, extract_article
 
 log = logging.getLogger(__name__)
+
+_IMG_SRC_RE = re.compile(r'<img[^>]+src="(https?://[^"]+)"', re.IGNORECASE)
+
+
+def first_image(html: str | None) -> str | None:
+    """Première image http(s) d'un HTML nettoyé, pour servir de couverture."""
+    if not html:
+        return None
+    m = _IMG_SRC_RE.search(html)
+    return m.group(1) if m else None
 
 
 async def run_extraction(session: AsyncSession, entry: Entry, mode: str | None = None) -> Entry:
@@ -37,6 +48,10 @@ async def run_extraction(session: AsyncSession, entry: Entry, mode: str | None =
     entry.extraction_error = None
     meta = dict(entry.meta or {})
     meta["extraction_method"] = result.method
+    if not meta.get("cover"):
+        cover = first_image(result.html)
+        if cover:
+            meta["cover"] = cover
     entry.meta = meta
     return entry
 

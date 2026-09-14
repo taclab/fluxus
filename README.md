@@ -116,8 +116,10 @@ Les résumés coûtent uniquement quand vous cliquez. Le compteur de tokens cumu
 ### Tableau de bord
 
 Page d'accueil (`/`, touche `h`). Sans configuration, il affiche une vue d'ensemble (non lus, lus
-aujourd'hui, favoris, non lus par catégorie, flux en erreur), un widget « Nouveautés » par
-catégorie, une grille des dernières vidéos YouTube, les derniers favoris et les derniers résumés.
+aujourd'hui, favoris, non lus par catégorie, flux en erreur), un carrousel « Fil d'actualité »,
+un widget « Nouveautés » en mode magazine par catégorie, une grille des dernières vidéos YouTube,
+les derniers favoris et les derniers résumés. Les articles sans image reçoivent un visuel de
+substitution coloré portant l'icône du flux.
 Cette disposition automatique suit vos catégories jusqu'à votre première personnalisation.
 
 **Personnaliser** (en haut à droite) active le mode édition :
@@ -130,7 +132,7 @@ Cette disposition automatique suit vos catégories jusqu'à votre première pers
 
 | Widget | Contenu |
 |---|---|
-| Nouveautés | derniers articles d'une catégorie, d'un flux ou de tout ; bouton « tout marquer lu » ; liste ou cartes |
+| Nouveautés | derniers articles d'une catégorie, d'un flux ou de tout ; bouton « tout marquer lu » ; quatre affichages : **carrousel** (grandes cartes horizontales), **magazine** (vignette, titre, source, extrait), cartes, liste ; favori et lu/non lu directement sur chaque article |
 | Vidéos YouTube | miniatures des dernières vidéos non vues, toutes chaînes ou une catégorie |
 | Favoris | derniers articles mis en favori |
 | Résumés récents | derniers articles résumés, avec les premières lignes du résumé |

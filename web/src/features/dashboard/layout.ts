@@ -20,7 +20,9 @@ interface WidgetBase {
   title?: string
 }
 
-export type NewsWidget = WidgetBase & { type: 'news'; source: EntrySource; limit: number; display: 'list' | 'cards'; unreadOnly: boolean }
+export type NewsDisplay = 'list' | 'cards' | 'magazine' | 'carousel'
+export const DISPLAY_LABEL: Record<NewsDisplay, string> = { list: 'Liste', magazine: 'Magazine', carousel: 'Carrousel', cards: 'Cartes' }
+export type NewsWidget = WidgetBase & { type: 'news'; source: EntrySource; limit: number; display: NewsDisplay; unreadOnly: boolean }
 export type YoutubeWidget = WidgetBase & { type: 'youtube'; source: YoutubeSource; limit: number; unreadOnly: boolean }
 export type StarredWidget = WidgetBase & { type: 'starred'; limit: number }
 export type SummariesWidget = WidgetBase & { type: 'summaries'; limit: number }
@@ -81,7 +83,8 @@ function normalizeWidget(raw: unknown): AnyWidget | null {
       const src = (r.source as EntrySource | undefined) ?? { kind: 'all' }
       const source: EntrySource =
         src.kind === 'category' && typeof src.id === 'number' ? { kind: 'category', id: src.id } : src.kind === 'feed' && typeof src.id === 'number' ? { kind: 'feed', id: src.id } : { kind: 'all' }
-      return { ...base, type: 'news', source, limit: clampLimit(r.limit, 8), display: r.display === 'cards' ? 'cards' : 'list', unreadOnly: r.unreadOnly !== false }
+      const display: NewsDisplay = r.display === 'cards' || r.display === 'magazine' || r.display === 'carousel' ? r.display : 'list'
+      return { ...base, type: 'news', source, limit: clampLimit(r.limit, 8), display, unreadOnly: r.unreadOnly !== false }
     }
     case 'youtube': {
       const src = (r.source as YoutubeSource | undefined) ?? { kind: 'all_youtube' }
@@ -145,15 +148,13 @@ export function serializeLayout(layout: DashboardLayout): string {
 export function buildDefaultLayout(categories: Category[], feeds: Feed[]): DashboardLayout {
   const widgets: Widget[] = []
   widgets.push({ id: 'default-stats', type: 'stats', width: 6, show: { unreadByCategory: true, readToday: true, feedErrors: true, tokens: true } })
+  widgets.push({ id: 'default-feed', type: 'news', width: 6, title: 'Fil d’actualité', source: { kind: 'all' }, limit: 12, display: 'carousel', unreadOnly: true })
   const sorted = [...categories].sort((a, b) => a.position - b.position || a.title.localeCompare(b.title, 'fr'))
   for (const cat of sorted) {
-    widgets.push({ id: `default-cat-${cat.id}`, type: 'news', width: 3, source: { kind: 'category', id: cat.id }, limit: 8, display: 'list', unreadOnly: true })
+    widgets.push({ id: `default-cat-${cat.id}`, type: 'news', width: 3, source: { kind: 'category', id: cat.id }, limit: 5, display: 'magazine', unreadOnly: true })
   }
-  if (feeds.some((f) => f.category_id == null)) {
-    widgets.push({ id: 'default-uncategorized', type: 'news', width: 3, title: 'Sans catégorie', source: { kind: 'all' }, limit: 8, display: 'list', unreadOnly: true })
-  }
-  if (categories.length === 0 && !feeds.some((f) => f.category_id == null)) {
-    widgets.push({ id: 'default-all', type: 'news', width: 6, source: { kind: 'all' }, limit: 12, display: 'list', unreadOnly: true })
+  if (feeds.some((f) => f.category_id == null) && categories.length > 0) {
+    widgets.push({ id: 'default-uncategorized', type: 'news', width: 3, title: 'Sans catégorie', source: { kind: 'all' }, limit: 5, display: 'magazine', unreadOnly: true })
   }
   if (feeds.some((f) => f.is_youtube)) {
     widgets.push({ id: 'default-youtube', type: 'youtube', width: 6, source: { kind: 'all_youtube' }, limit: 12, unreadOnly: true })
@@ -200,7 +201,7 @@ export function blankWidget(type: WidgetType): Widget {
   const base = { id: newWidgetId(), width: 3 as WidgetWidth }
   switch (type) {
     case 'news':
-      return { ...base, type, source: { kind: 'all' }, limit: 8, display: 'list', unreadOnly: true }
+      return { ...base, type, source: { kind: 'all' }, limit: 6, display: 'magazine', unreadOnly: true }
     case 'youtube':
       return { ...base, type, width: 6, source: { kind: 'all_youtube' }, limit: 12, unreadOnly: true }
     case 'starred':

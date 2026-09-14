@@ -71,14 +71,21 @@ export function WidgetFrame({ widgetId, widgetType, title, count, editing, width
           </button>
         )}
         {onOpen && !orphan ? (
-          <button type="button" onClick={onOpen} className="group flex items-center gap-1 min-w-0 text-left" title="Ouvrir">
-            <h2 className="truncate text-sm font-semibold">{title}</h2>
-            <ChevronRight className="size-3.5 text-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+          <button type="button" onClick={onOpen} className="group flex items-center gap-2 min-w-0 text-left" title="Ouvrir">
+            <h2 className="truncate text-[15px] font-semibold tracking-tight">{title}</h2>
+            {count !== undefined && count > 0 && (
+              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted group-hover:bg-accent-100 group-hover:text-accent-700 dark:group-hover:bg-accent-900/40 dark:group-hover:text-accent-200">
+                {count > 999 ? `${Math.floor(count / 1000)}k+` : count}
+                <ChevronRight className="size-3" />
+              </span>
+            )}
           </button>
         ) : (
-          <h2 className={clsx('truncate text-sm font-semibold', orphan && 'text-muted italic')}>{title}</h2>
+          <>
+            <h2 className={clsx('truncate text-[15px] font-semibold tracking-tight', orphan && 'text-muted italic')}>{title}</h2>
+            {count !== undefined && count > 0 && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted">{count > 999 ? `${Math.floor(count / 1000)}k+` : count}</span>}
+          </>
         )}
-        {count !== undefined && count > 0 && <span className="text-xs tabular-nums text-muted shrink-0">{count > 999 ? '999+' : count}</span>}
         <div className="flex-1" />
         {onMarkAllRead && !editing && !orphan && (
           <IconButton label="Tout marquer comme lu" size="sm" onClick={onMarkAllRead} disabled={empty}>

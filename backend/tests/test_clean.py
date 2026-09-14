@@ -29,3 +29,11 @@ def test_html_to_text():
     text = html_to_text("<p>Un &amp; deux</p><p>Trois<br>Quatre</p>")
     assert text == "Un & deux\n\nTrois\nQuatre"
     assert html_to_text(None) == ""
+
+
+def test_first_image_from_extracted_html():
+    from fluxus.extract.jobs import first_image
+
+    assert first_image('<p>x</p><img src="https://a.fr/i.jpg" alt=""><img src="https://a.fr/j.jpg">') == "https://a.fr/i.jpg"
+    assert first_image('<img src="data:image/png;base64,xx">') is None
+    assert first_image(None) is None

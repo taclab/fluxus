@@ -152,7 +152,9 @@ worker.schedule_due_feeds ─► jobs(fetch_feed, dedupe "fetch_feed:<id>")
          3. fetcher/parse.parse_feed (feedparser)
             · normalise les URL (https, minuscules, suppression utm_*, fbclid…)
             · nettoie le HTML (extract/clean.sanitize_html)
-            · calcule guid, hash, meta (youtube_id, cover, enclosures)
+            · calcule guid, hash, meta (youtube_id, cover, enclosures) ; cover = media:thumbnail,
+              media:content image (type absent accepté si l'URL a une extension image), enclosure
+              image ou première <img> du contenu
          4. _insert_new_entries : ignore ce qui existe déjà par guid OU hash
          5. met à jour titre/site/icône si manquants, etag, last_modified,
             fetch_interval_min (÷2 si ≥5 nouveautés, ×1.5 si aucune, bornes 10 min – 24 h)
@@ -178,6 +180,7 @@ POST /api/entries/{id}/fetch-content   (synchrone : l'utilisateur attend)
                         on garde le meilleur des deux
          résultat     : sanitize_html (nh3, URL absolues, iframes vidéo seulement) + html_to_text
    └► entry.content_html / content_text / extraction_status / meta.extraction_method
+      + meta.cover = première image de l'article si le flux n'en fournissait pas
       L'échec est stocké dans extraction_error, jamais levé vers l'utilisateur comme 500.
 ```
 
@@ -308,7 +311,9 @@ Dashboard ─ DashboardDataProvider (feeds, categories, unreadByFeed : 3 liveQue
 ```
 
 - **Modèle** (`layout.ts`) : `{ version, updatedAt, widgets[] }`, widgets typés (`news`, `youtube`,
-  `starred`, `summaries`, `stats`), largeur `2 | 3 | 6` colonnes sur une grille de 6. `parseLayout`
+  `starred`, `summaries`, `stats`), largeur `2 | 3 | 6` colonnes sur une grille de 6. Un widget
+  `news` a un `display` ∈ {`carousel`, `magazine`, `cards`, `list`} rendu par `widgets/NewsWidget.tsx`
+  (composant `Cover` : image `meta.cover`, miniature YouTube, sinon substitut teinté par flux). `parseLayout`
   valide défensivement et renvoie `ok | empty | newer` ; un widget de type inconnu est conservé et
   rendu « non pris en charge » ; une `version` supérieure passe le dashboard en lecture seule.
   `buildDefaultLayout` dérive une disposition des catégories quand rien n'est stocké ; elle n'est

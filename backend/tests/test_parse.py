@@ -64,6 +64,18 @@ def test_parse_rss_entries():
     assert second.hash != first.hash
 
 
+def test_media_content_without_type_is_a_cover():
+    rss = b"""<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>t</title>
+    <item><title>a</title><link>https://x.fr/a</link>
+      <media:content width="644" height="322" url="https://img.x.fr/photo.jpg"/></item>
+    <item><title>b</title><link>https://x.fr/b</link>
+      <media:content url="https://x.fr/video.mp4" type="video/mp4"/></item>
+    </channel></rss>"""
+    parsed = parse_feed(rss, "https://x.fr/rss")
+    assert parsed.entries[0].meta["cover"] == "https://img.x.fr/photo.jpg"
+    assert "cover" not in parsed.entries[1].meta
+
+
 def test_parse_youtube_feed_sets_video_id():
     parsed = parse_feed(ATOM_YT, "https://www.youtube.com/feeds/videos.xml?channel_id=UCxyz")
     assert parsed.is_youtube

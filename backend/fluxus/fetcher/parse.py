@@ -90,14 +90,25 @@ def _youtube_id(url: str | None, entry) -> str | None:
     return None
 
 
+IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|webp|gif|avif)(\?|$)", re.IGNORECASE)
+
+
+def _looks_like_image(m: dict) -> bool:
+    medium = str(m.get("medium", ""))
+    mtype = str(m.get("type", ""))
+    if medium.startswith("image") or mtype.startswith("image"):
+        return True
+    # Beaucoup de flux (Le Monde…) donnent un media:content sans type : on se fie à l'extension.
+    return not medium and not mtype and bool(IMAGE_EXT_RE.search(str(m.get("url", ""))))
+
+
 def _cover_image(entry, summary_html: str | None) -> str | None:
     for m in entry.get("media_thumbnail") or []:
         if m.get("url"):
             return m["url"]
     for m in entry.get("media_content") or []:
-        if str(m.get("medium", "")).startswith("image") or str(m.get("type", "")).startswith("image"):
-            if m.get("url"):
-                return m["url"]
+        if m.get("url") and _looks_like_image(m):
+            return m["url"]
     for link in entry.get("links") or []:
         if link.get("rel") == "enclosure" and str(link.get("type", "")).startswith("image"):
             return link.get("href")

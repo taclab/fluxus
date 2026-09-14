@@ -51,7 +51,7 @@ export function StatsWidget({ widget, editing, actions, onOpenView, handleProps,
 
   return (
     <WidgetFrame widgetId={widget.id} widgetType="stats" title={title} editing={editing} width={widget.width as WidgetWidth} actions={actions} handleProps={handleProps} dragging={dragging}>
-      <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 p-4 sm:gap-4 lg:grid-cols-4">
         <Tile icon={<Inbox className="size-4" />} label="Non lus" value={totalUnread} onClick={() => onOpenView({ kind: 'unread' })} />
         {widget.show.readToday && <Tile icon={<BookOpenCheck className="size-4" />} label="Lus aujourd’hui" value={readToday} />}
         <Tile icon={<Star className="size-4" />} label="Favoris" value={starred} onClick={() => onOpenView({ kind: 'starred' })} />

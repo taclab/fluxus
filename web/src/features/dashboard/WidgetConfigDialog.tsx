@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { Button, Dialog, Field, Input, Select } from '../../components/ui'
 import { useDashboardData } from './DashboardData'
-import { blankWidget, KNOWN_TYPES, TYPE_LABEL, WIDTHS, WIDTH_LABEL, type Widget, type WidgetType, type WidgetWidth } from './layout'
+import { blankWidget, DISPLAY_LABEL, KNOWN_TYPES, TYPE_LABEL, WIDTHS, WIDTH_LABEL, type NewsDisplay, type Widget, type WidgetType, type WidgetWidth } from './layout'
 
 interface Props {
   open: boolean
@@ -89,9 +89,12 @@ export function WidgetConfigDialog({ open, widget, onClose, onSubmit }: Props) {
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Affichage">
-                <Select value={draft.display} onChange={(e) => setDraft({ ...draft, display: e.target.value as 'list' | 'cards' })}>
-                  <option value="list">Liste</option>
-                  <option value="cards">Cartes</option>
+                <Select value={draft.display} onChange={(e) => setDraft({ ...draft, display: e.target.value as NewsDisplay })}>
+                  {(Object.keys(DISPLAY_LABEL) as NewsDisplay[]).map((d) => (
+                    <option key={d} value={d}>
+                      {DISPLAY_LABEL[d]}
+                    </option>
+                  ))}
                 </Select>
               </Field>
               <Field label="Nombre d’articles">
