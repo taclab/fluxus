@@ -24,11 +24,17 @@ echo "→ Gradle ($MODE)…"
 TASK="assembleDebug"
 [ "$MODE" = "release" ] && TASK="assembleRelease"
 docker run --rm \
-  -v "$PWD/web/android:/project" \
+  -v "$PWD/web:/web" \
   -v fluxus-gradle-cache:/root/.gradle \
-  -w /project \
+  -w /web/android \
   "$IMAGE" \
-  bash -c "chmod +x gradlew && ./gradlew --no-daemon -q $TASK"
+  bash -c '
+    # Java ignore HTTP(S)_PROXY : on traduit un éventuel proxy d environnement en propriétés système.
+    if [ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]; then
+      P="${HTTPS_PROXY:-$https_proxy}"; P="${P#*://}"; P="${P%/}"
+      export JAVA_TOOL_OPTIONS="-Dhttps.proxyHost=${P%:*} -Dhttps.proxyPort=${P##*:} -Dhttp.proxyHost=${P%:*} -Dhttp.proxyPort=${P##*:}"
+    fi
+    chmod +x gradlew && ./gradlew --no-daemon -q '"$TASK"
 
 OUT_DIR="web/android/app/build/outputs/apk/$MODE"
 mkdir -p dist

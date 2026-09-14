@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
-import { getToken } from '../api/auth'
+import { getToken, isCapacitor } from '../api/auth'
 import { ToastProvider } from '../components/ui'
 import { LoginPage } from '../features/auth/LoginPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
@@ -35,6 +35,21 @@ export function App() {
     if (!authed) return
     return startAutoSync()
   }, [authed])
+
+  // Android : le bouton retour matériel remonte l'historique au lieu de quitter l'appli.
+  useEffect(() => {
+    if (!isCapacitor()) return
+    let remove: (() => void) | undefined
+    void import('@capacitor/app').then(({ App: CapApp }) => {
+      void CapApp.addListener('backButton', ({ canGoBack }) => {
+        if (canGoBack) window.history.back()
+        else void CapApp.exitApp()
+      }).then((h) => {
+        remove = () => void h.remove()
+      })
+    })
+    return () => remove?.()
+  }, [])
 
   return (
     <ToastProvider>
