@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { Category, Feed } from '../../api/client'
+import { ThemeToggle } from '../../components/ThemeToggle'
 import { IconButton } from '../../components/ui'
 import { db } from '../../db/db'
 import { syncNow } from '../../sync/engine'
@@ -129,10 +130,12 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory }: Props) {
         )}
       </div>
 
-      <div className="border-t border-app px-2 py-2 flex items-center justify-between shrink-0">
+      <div className="border-t border-app px-2 py-2 flex items-center gap-1 shrink-0">
         <Link to="/settings" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:text-app hover:bg-muted">
           <Settings className="size-4" /> Paramètres
         </Link>
+        <ThemeToggle />
+        <div className="flex-1" />
         <SyncBadge />
       </div>
 

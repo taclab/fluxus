@@ -4,6 +4,7 @@ import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Lo
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type Feed } from '../../api/client'
+import { ThemeToggle } from '../../components/ThemeToggle'
 import { EmptyState, IconButton, Kbd, useToast } from '../../components/ui'
 import { db, toLocalEntry } from '../../db/db'
 import { fullDate, hostname } from '../../lib/format'
@@ -124,6 +125,9 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
           </IconButton>
         )}
         <div className="flex-1" />
+        <span className="md:hidden">
+          <ThemeToggle size="md" />
+        </span>
         <IconButton label={entry.read ? 'Marquer non lu (m)' : 'Marquer lu (m)'} onClick={() => void recordChange(entry.id, { read: !entry.read })}>
           {entry.read ? <CircleCheck className="size-5" /> : <Circle className="size-5" />}
         </IconButton>

@@ -4,7 +4,8 @@ import { Link, useNavigate } from 'react-router-dom'
 
 import { getServerUrl, isDeviceToken, getToken, setToken } from '../../api/auth'
 import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, type StatsOut } from '../../api/client'
-import { applyTheme, getTheme, type Theme } from '../../app/theme'
+import type { Theme } from '../../app/theme'
+import { useTheme } from '../../components/ThemeToggle'
 import { Button, Field, IconButton, Input, Select, Spinner, useToast } from '../../components/ui'
 import { clearDatabase } from '../../db/db'
 import { formatTokens, relativeDate } from '../../lib/format'
@@ -22,7 +23,7 @@ export function SettingsPage() {
   const [devices, setDevices] = useState<DeviceOut[]>([])
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
-  const [theme, setTheme] = useState<Theme>(getTheme())
+  const [theme, setTheme] = useTheme()
   const [pwd, setPwd] = useState({ current: '', next: '', confirm: '' })
   const fileRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
@@ -216,11 +217,7 @@ export function SettingsPage() {
             <Field label="Thème">
               <Select
                 value={theme}
-                onChange={(e) => {
-                  const t = e.target.value as Theme
-                  setTheme(t)
-                  applyTheme(t)
-                }}
+                onChange={(e) => setTheme(e.target.value as Theme)}
               >
                 <option value="system">Automatique (système)</option>
                 <option value="light">Clair</option>
