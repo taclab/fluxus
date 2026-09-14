@@ -70,6 +70,12 @@ body {
 @utility text-muted {
   color: var(--fg-muted);
 }
+/* Séparateurs entre éléments d'une liste : même gris discret que les bordures */
+@utility divide-app {
+  & > :not(:last-child) {
+    border-color: var(--border);
+  }
+}
 
 /* Contenu d'article : typographie de lecture */
 .prose-reader {
