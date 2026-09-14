@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
@@ -11,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
+from ..jobs.queue import enqueue
 from ..models import Entry, Feed
-from .http import UnsafeURLError, assert_public_url, make_client
+from .http import UnsafeURLError, assert_public_url_async, make_client, safe_get
 from .parse import ParsedFeed, parse_feed
 
 log = logging.getLogger(__name__)
@@ -32,7 +34,8 @@ def _next_interval(feed: Feed, parsed: ParsedFeed | None, new_entries: int) -> i
     lo, hi = settings.min_fetch_interval_min, settings.max_fetch_interval_min
     current = feed.fetch_interval_min or settings.default_fetch_interval_min
     if parsed is None:
-        return current
+        # 304 Not Modified : rien de neuf, on espace progressivement.
+        return min(hi, int(current * 1.5))
     if new_entries >= 5:
         return max(lo, current // 2)
     if new_entries == 0:
@@ -50,7 +53,7 @@ def _favicon_fallback(site_url: str | None) -> str | None:
 async def refresh_feed(session: AsyncSession, feed: Feed) -> FetchResult:
     now = datetime.now(UTC)
     try:
-        assert_public_url(feed.url)
+        await assert_public_url_async(feed.url)
     except UnsafeURLError as exc:
         return await _record_error(session, feed, str(exc), now)
 
@@ -62,8 +65,8 @@ async def refresh_feed(session: AsyncSession, feed: Feed) -> FetchResult:
 
     try:
         async with make_client() as client:
-            response = await client.get(feed.url, headers=headers)
-    except httpx.HTTPError as exc:
+            response = await safe_get(client, feed.url, headers=headers, max_bytes=MAX_FEED_BYTES)
+    except (httpx.HTTPError, UnsafeURLError) as exc:
         return await _record_error(session, feed, f"Erreur réseau: {exc}", now)
 
     if response.status_code == 304:
@@ -77,19 +80,20 @@ async def refresh_feed(session: AsyncSession, feed: Feed) -> FetchResult:
     if response.status_code >= 400:
         return await _record_error(session, feed, f"HTTP {response.status_code}", now)
 
-    body = response.content[:MAX_FEED_BYTES]
-    parsed = parse_feed(body, str(response.url))
+    # feedparser est synchrone et coûteux sur un gros flux : hors de la boucle d'événements.
+    parsed = await asyncio.to_thread(parse_feed, response.content, str(response.url))
     if parsed.bozo_error and not parsed.entries:
         return await _record_error(session, feed, f"Flux illisible: {parsed.bozo_error}", now)
 
     if not feed.title and parsed.title:
         feed.title = parsed.title[:500]
     if parsed.site_url:
-        feed.site_url = parsed.site_url
+        feed.site_url = parsed.site_url[:2048]
     if parsed.description and not feed.description:
         feed.description = parsed.description[:2000]
     if not feed.icon_url:
-        feed.icon_url = parsed.icon_url or _favicon_fallback(feed.site_url)
+        icon = parsed.icon_url or _favicon_fallback(feed.site_url)
+        feed.icon_url = icon[:2048] if icon else None
     if parsed.is_youtube:
         feed.is_youtube = True
 
@@ -123,25 +127,39 @@ async def _insert_new_entries(session: AsyncSession, feed: Feed, parsed: ParsedF
 
     new_count = 0
     seen_in_batch: set[str] = set()
+    new_entries: list[Entry] = []
     for pe in parsed.entries:
-        if pe.guid in known_guids or pe.hash in known_hashes or pe.guid in seen_in_batch:
+        if pe.guid in known_guids or pe.hash in known_hashes or pe.guid in seen_in_batch or pe.hash in seen_in_batch:
             continue
         seen_in_batch.add(pe.guid)
-        session.add(
-            Entry(
-                feed_id=feed.id,
-                guid=pe.guid,
-                url=pe.url,
-                title=pe.title,
-                author=pe.author,
-                published_at=pe.published_at,
-                summary_html=pe.summary_html,
-                hash=pe.hash,
-                meta=pe.meta,
-            )
+        seen_in_batch.add(pe.hash)
+        entry = Entry(
+            feed_id=feed.id,
+            guid=pe.guid,
+            url=pe.url,
+            title=pe.title,
+            author=pe.author,
+            published_at=pe.published_at,
+            summary_html=pe.summary_html,
+            hash=pe.hash,
+            meta=pe.meta,
         )
+        session.add(entry)
+        new_entries.append(entry)
         new_count += 1
     await session.flush()
+    # Mode d'extraction explicite (http ou browser) = « toujours récupérer l'article complet » :
+    # on planifie l'extraction en arrière-plan pour que l'article soit lisible hors-ligne.
+    if feed.extraction_mode in ("http", "browser"):
+        for entry in new_entries:
+            if entry.url:
+                await enqueue(
+                    session,
+                    "extract_entry",
+                    {"entry_id": entry.id, "mode": feed.extraction_mode},
+                    dedupe_key=f"extract_entry:{entry.id}",
+                    max_attempts=2,
+                )
     return new_count
 
 
@@ -162,8 +180,8 @@ async def _record_error(session: AsyncSession, feed: Feed, message: str, now: da
 
 async def fetch_feed_preview(url: str) -> tuple[ParsedFeed, str]:
     """Télécharge et parse un flux sans rien écrire. Renvoie (flux parsé, URL finale)."""
-    assert_public_url(url)
     async with make_client() as client:
-        response = await client.get(url)
+        response = await safe_get(client, url, max_bytes=MAX_FEED_BYTES)
     response.raise_for_status()
-    return parse_feed(response.content[:MAX_FEED_BYTES], str(response.url)), str(response.url)
+    parsed = await asyncio.to_thread(parse_feed, response.content, str(response.url))
+    return parsed, str(response.url)

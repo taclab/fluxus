@@ -81,7 +81,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Change Password */
+        /**
+         * Change Password
+         * @description Change le mot de passe et invalide toutes les sessions web ; renvoie un nouveau JWT pour la session courante.
+         */
         post: operations["change_password_api_auth_password_post"];
         delete?: never;
         options?: never;
@@ -530,6 +533,11 @@ export interface components {
             current_password: string;
             /** New Password */
             new_password: string;
+            /**
+             * Revoke Devices
+             * @default false
+             */
+            revoke_devices: boolean;
         };
         /** DeviceCreate */
         DeviceCreate: {
@@ -892,6 +900,8 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
+            /** Retention Days */
+            retention_days: number;
             /** Categories */
             categories: components["schemas"]["CategoryOut"][];
             /** Feeds */
@@ -1083,11 +1093,13 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

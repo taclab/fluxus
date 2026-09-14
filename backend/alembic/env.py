@@ -3,7 +3,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy.ext.asyncio import async_engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 
 from fluxus.config import get_settings
 from fluxus.db import Base
@@ -13,7 +13,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# configparser interprète `%` : on l'échappe pour les mots de passe qui en contiennent.
+config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 
@@ -41,7 +42,13 @@ async def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
+        # Verrou consultatif : deux instances qui démarrent en même temps ne migrent pas en parallèle.
+        await connection.execute(text("SELECT pg_advisory_lock(727001)"))
+        try:
+            await connection.run_sync(do_run_migrations)
+            await connection.commit()
+        finally:
+            await connection.execute(text("SELECT pg_advisory_unlock(727001)"))
     await connectable.dispose()
 
 

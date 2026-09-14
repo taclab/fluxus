@@ -138,7 +138,12 @@ async def create_feed(body: FeedCreate, _: Auth, session: Session) -> FeedOut:
         except Exception:  # noqa: BLE001
             found = []
         if len(found) == 1:
-            parsed, final_url = await fetch_feed_preview(found[0].url)
+            try:
+                parsed, final_url = await fetch_feed_preview(found[0].url)
+            except UnsafeURLError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+            except httpx.HTTPError as exc:
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Flux injoignable: {exc}") from exc
         elif found:
             raise HTTPException(
                 status.HTTP_300_MULTIPLE_CHOICES,
@@ -190,6 +195,9 @@ async def update_feed(feed_id: int, body: FeedUpdate, _: Auth, session: Session)
     if body.title is not None:
         feed.title = body.title
     if body.url is not None and body.url != feed.url:
+        other = await session.execute(select(Feed.id).where(Feed.url == body.url, Feed.id != feed.id))
+        if other.scalar_one_or_none() is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Un autre flux utilise déjà cette adresse")
         feed.url = body.url
         feed.etag = None
         feed.last_modified = None
@@ -245,9 +253,14 @@ async def refresh_all(_: Auth, session: Session) -> dict:
 # --- OPML --------------------------------------------------------------------
 
 
+MAX_OPML_BYTES = 5 * 1024 * 1024
+
+
 @router.post("/opml/import", response_model=OpmlImportResult)
 async def opml_import(file: UploadFile, _: Auth, session: Session) -> OpmlImportResult:
-    data = await file.read()
+    data = await file.read(MAX_OPML_BYTES + 1)
+    if len(data) > MAX_OPML_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Fichier OPML trop volumineux (5 Mo maximum)")
     try:
         items = parse_opml(data)
     except Exception as exc:  # noqa: BLE001
@@ -257,11 +270,12 @@ async def opml_import(file: UploadFile, _: Auth, session: Session) -> OpmlImport
     cats = {c.title.lower(): c for c in (await session.execute(select(Category))).scalars().all()}
     imported = skipped = created_cats = 0
     for item in items:
-        if not item.url.startswith(("http://", "https://")) or item.url in existing_urls:
+        if not item.url.startswith(("http://", "https://")) or len(item.url) > 2048 or item.url in existing_urls:
             skipped += 1
             continue
         cat = None
         if item.category:
+            item.category = item.category[:200]
             cat = cats.get(item.category.lower())
             if cat is None:
                 cat = Category(title=item.category, position=len(cats) + 1)
@@ -271,8 +285,8 @@ async def opml_import(file: UploadFile, _: Auth, session: Session) -> OpmlImport
                 created_cats += 1
         feed = Feed(
             url=item.url,
-            site_url=item.site_url,
-            title=item.title or item.url,
+            site_url=(item.site_url or None) and item.site_url[:2048],
+            title=(item.title or item.url)[:500],
             category_id=cat.id if cat else None,
             is_youtube="youtube.com/feeds" in item.url,
             next_fetch_at=datetime.now(UTC),

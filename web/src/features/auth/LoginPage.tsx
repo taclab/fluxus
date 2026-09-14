@@ -13,21 +13,27 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // Statut du serveur interrogé sur l'adresse saisie (pas sur le client courant), avec un léger délai.
   useEffect(() => {
     let cancelled = false
     setSetupRequired(null)
-    api()
-      .GET('/api/auth/status')
-      .then((r) => {
-        if (!cancelled) setSetupRequired(r.data?.setup_required ?? false)
-      })
-      .catch(() => {
-        if (!cancelled) setSetupRequired(false)
-      })
+    const base = serverUrl.trim().replace(/\/+$/, '')
+    if (showServer && !/^https?:\/\/[^\s/]+/i.test(base)) return
+    const timer = window.setTimeout(() => {
+      fetch(`${base}/api/auth/status`, { headers: { Accept: 'application/json' } })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d: { setup_required?: boolean }) => {
+          if (!cancelled) setSetupRequired(Boolean(d.setup_required))
+        })
+        .catch(() => {
+          if (!cancelled) setSetupRequired(false)
+        })
+    }, 400)
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
-  }, [serverUrl])
+  }, [serverUrl, showServer])
 
   async function submit(e: FormEvent) {
     e.preventDefault()

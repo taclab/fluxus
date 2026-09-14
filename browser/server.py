@@ -4,8 +4,12 @@ Usage interne uniquement (réseau compose). POST /render {"url": "..."} -> {"htm
 """
 
 import asyncio
+import ipaddress
 import os
+import socket
 from contextlib import asynccontextmanager
+from functools import lru_cache
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException
 from playwright.async_api import Browser, async_playwright
@@ -22,6 +26,34 @@ BLOCKED_HOST_FRAGMENTS = (
 
 _browser: Browser | None = None
 _semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+
+# Noms des services Compose : jamais joignables depuis une page rendue.
+INTERNAL_HOSTS = {"localhost", "postgres", "api", "worker", "browser"}
+
+
+def _is_private(ip: str) -> bool:
+    a = ipaddress.ip_address(ip)
+    return a.is_private or a.is_loopback or a.is_link_local or a.is_multicast or a.is_reserved or a.is_unspecified
+
+
+@lru_cache(maxsize=4096)
+def host_is_public(host: str) -> bool:
+    """Vrai si l'hôte résout uniquement vers des adresses publiques. Mis en cache : appelé pour chaque sous-ressource."""
+    host = host.lower().rstrip(".")
+    if not host or host in INTERNAL_HOSTS or host.endswith((".local", ".localhost", ".internal")):
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    return bool(infos) and all(not _is_private(i[4][0]) for i in infos)
+
+
+def url_is_public(url: str) -> bool:
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return parts.scheme in ("data", "blob", "about")  # ressources inline, sans réseau
+    return host_is_public(parts.hostname or "")
 
 
 @asynccontextmanager
@@ -59,6 +91,8 @@ async def health() -> dict:
 @app.post("/render", response_model=RenderResponse)
 async def render(req: RenderRequest) -> RenderResponse:
     assert _browser is not None
+    if not await asyncio.to_thread(url_is_public, str(req.url)):
+        raise HTTPException(status_code=400, detail="Adresse réseau privée ou interne refusée")
     timeout = req.timeout_ms or RENDER_TIMEOUT_MS
     async with _semaphore:
         context = await _browser.new_context(
@@ -79,8 +113,12 @@ async def render(req: RenderRequest) -> RenderResponse:
                     frag in request.url for frag in BLOCKED_HOST_FRAGMENTS
                 ):
                     await route.abort()
-                else:
-                    await route.continue_()
+                    return
+                # Redirections et sous-ressources : chaque requête sortante est revalidée (anti-SSRF).
+                if not await asyncio.to_thread(url_is_public, request.url):
+                    await route.abort("blockedbyclient")
+                    return
+                await route.continue_()
 
             await page.route("**/*", route_handler)
             try:

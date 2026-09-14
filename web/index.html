@@ -7,19 +7,7 @@
     <meta name="theme-color" content="#0f172a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Fluxus</title>
-    <script>
-      // Applique le thème avant le premier rendu pour éviter le flash.
-      (function () {
-        try {
-          var t = localStorage.getItem('fluxus.theme') || 'system';
-          var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
-          if (dark) document.documentElement.classList.add('dark');
-          var r = JSON.parse(localStorage.getItem('fluxus.reading') || '{}');
-          var d = document.documentElement.dataset;
-          d.readingFont = r.font || 'editorial'; d.readingSize = r.size || 'm'; d.readingWidth = r.width || 'normal';
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

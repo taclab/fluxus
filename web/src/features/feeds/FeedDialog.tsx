@@ -60,9 +60,11 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
     setBusy(true)
     try {
       unwrap(await api().DELETE('/api/feeds/{feed_id}', { params: { path: { feed_id: feed.id } } }))
-      await db.transaction('rw', db.feeds, db.entries, async () => {
+      await db.transaction('rw', db.feeds, db.entries, db.summaries, async () => {
+        const ids = await db.entries.where('feed_id').equals(feed.id).primaryKeys()
+        await db.summaries.where('entry_id').anyOf(ids).delete()
+        await db.entries.bulkDelete(ids)
         await db.feeds.delete(feed.id)
-        await db.entries.where('feed_id').equals(feed.id).delete()
       })
       toast('Désabonné', 'success')
       onClose()
@@ -134,11 +136,11 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
             ))}
           </Select>
         </Field>
-        <Field label="Récupération de l’article complet" hint="« Automatique » essaie d’abord en HTTP puis passe par le navigateur si le résultat est pauvre.">
+        <Field label="Récupération de l’article complet" hint="« À la demande » extrait quand vous ouvrez l’article (HTTP puis navigateur si besoin). Les modes « Toujours » extraient chaque nouvel article en arrière-plan, pour la lecture hors-ligne.">
           <Select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-            <option value="auto">Automatique</option>
-            <option value="http">HTTP uniquement (rapide)</option>
-            <option value="browser">Navigateur (sites JavaScript)</option>
+            <option value="auto">À la demande (automatique)</option>
+            <option value="http">Toujours, en HTTP</option>
+            <option value="browser">Toujours, via le navigateur (sites JavaScript)</option>
             <option value="none">Jamais (contenu du flux seulement)</option>
           </Select>
         </Field>

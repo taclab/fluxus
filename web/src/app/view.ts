@@ -11,6 +11,13 @@ export interface View {
   query?: string
 }
 
+/** Identifiant entier positif, sinon undefined (NaN casserait les requêtes IndexedDB). */
+function parseId(raw: string | null | undefined): number | undefined {
+  if (!raw || !/^\d+$/.test(raw)) return undefined
+  const n = Number(raw)
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined
+}
+
 export function viewPath(view: View): string {
   switch (view.kind) {
     case 'dashboard':
@@ -38,8 +45,14 @@ export function useView() {
 
   const view = useMemo<View>(() => {
     const p = location.pathname
-    if (p.startsWith('/feed/')) return { kind: 'feed', id: Number(params.id) }
-    if (p.startsWith('/category/')) return { kind: 'category', id: Number(params.id) }
+    if (p.startsWith('/feed/')) {
+      const id = parseId(params.id)
+      return id ? { kind: 'feed', id } : { kind: 'all' }
+    }
+    if (p.startsWith('/category/')) {
+      const id = parseId(params.id)
+      return id ? { kind: 'category', id } : { kind: 'all' }
+    }
     if (p === '/unread') return { kind: 'unread' }
     if (p === '/starred') return { kind: 'starred' }
     if (p === '/search') return { kind: 'search', query: search.get('q') ?? '' }
@@ -47,7 +60,7 @@ export function useView() {
     return { kind: 'dashboard' }
   }, [location.pathname, params.id, search])
 
-  const entryId = search.get('entry') ? Number(search.get('entry')) : null
+  const entryId = parseId(search.get('entry')) ?? null
   const unreadOnly = search.get('unread') === '1'
 
   const setView = useCallback(

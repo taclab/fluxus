@@ -38,11 +38,13 @@ async def enqueue(
         dedupe_key=dedupe_key,
         max_attempts=max_attempts,
     )
-    session.add(job)
+    # SAVEPOINT : une collision de dedupe_key n'annule que cette insertion, pas les jobs déjà ajoutés
+    # dans la même transaction (sinon un seul flux en attente faisait perdre tout le lot).
     try:
-        await session.flush()
+        async with session.begin_nested():
+            session.add(job)
+            await session.flush()
     except IntegrityError:
-        await session.rollback()
         log.debug("job dédupliqué: %s", dedupe_key)
         return None
     return job

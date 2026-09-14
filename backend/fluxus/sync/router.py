@@ -21,6 +21,7 @@ from ..db import get_session
 from ..entries.router import to_entry_out
 from ..models import Category, Entry, Feed, Summary
 from ..schemas import CategoryOut, EntryOut, FeedOut, SummaryOut
+from ..settings_store import get_setting
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -30,6 +31,8 @@ MAX_ENTRIES = 500
 
 class SyncPull(BaseModel):
     server_time: datetime
+    # Horizon de conservation locale (jours), réglage `sync_prefetch_days`.
+    retention_days: int
     categories: list[CategoryOut]
     feeds: list[FeedOut]
     feed_ids: list[int]
@@ -48,11 +51,16 @@ def _encode_cursor(updated_at: datetime, entry_id: int, min_published: datetime 
     return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
 
 
+def _aware(dt: datetime) -> datetime:
+    """Une date sans fuseau est interprétée en UTC (asyncpg refuse de comparer naïf et timestamptz)."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
 def _decode_cursor(cursor: str) -> tuple[datetime, int, datetime | None]:
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         ts, entry_id, min_pub = json.loads(base64.urlsafe_b64decode(padded))
-        return datetime.fromisoformat(ts), int(entry_id), datetime.fromisoformat(min_pub) if min_pub else None
+        return _aware(datetime.fromisoformat(ts)), int(entry_id), _aware(datetime.fromisoformat(min_pub)) if min_pub else None
     except Exception as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Curseur de synchronisation invalide") from exc
 
@@ -85,6 +93,10 @@ async def pull(
 ) -> SyncPull:
     """Première page : `since` (dernière passe réussie). Pages suivantes : `cursor` renvoyé par la page précédente."""
     now = datetime.now(UTC)
+    try:
+        retention_days = max(1, min(365, int(await get_setting(session, "sync_prefetch_days") or 30)))
+    except ValueError:
+        retention_days = 30
 
     cats = (await session.execute(select(Category).order_by(Category.position))).scalars().all()
     feeds = (await session.execute(select(Feed))).scalars().all()
@@ -96,12 +108,13 @@ async def pull(
         stmt = stmt.where(or_(Entry.updated_at > cur_ts, and_(Entry.updated_at == cur_ts, Entry.id > cur_id)))
     elif since:
         # Légère marge pour ne rien perdre entre deux transactions concurrentes.
-        stmt = stmt.where(Entry.updated_at > since - timedelta(seconds=2))
+        stmt = stmt.where(Entry.updated_at > _aware(since) - timedelta(seconds=2))
     else:
-        # Première synchronisation : seulement les 30 derniers jours pour rester raisonnable.
-        min_published = now - timedelta(days=30)
+        # Première synchronisation : seulement les N derniers jours (réglage sync_prefetch_days).
+        min_published = now - timedelta(days=retention_days)
     if min_published is not None:
-        stmt = stmt.where(Entry.published_at > min_published)
+        # Les favoris sont toujours envoyés, même anciens : ils sont peu nombreux et voulus.
+        stmt = stmt.where(or_(Entry.published_at > min_published, Entry.starred.is_(True)))
     stmt = stmt.order_by(Entry.updated_at.asc(), Entry.id.asc()).limit(limit + 1)
     rows = (await session.execute(stmt)).all()
     has_more = len(rows) > limit
@@ -124,6 +137,7 @@ async def pull(
     next_cursor = _encode_cursor(last.updated_at, last.id, min_published) if has_more and last else None
     return SyncPull(
         server_time=now,
+        retention_days=retention_days,
         categories=[CategoryOut(id=c.id, title=c.title, position=c.position) for c in cats],
         feeds=[FeedOut.model_validate(f, from_attributes=True) for f in feeds],
         feed_ids=[f.id for f in feeds],
@@ -144,12 +158,15 @@ async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
     if not ids:
         return SyncPushResult(applied=0, ignored=0, server_time=datetime.now(UTC))
     entries = {e.id: e for e in (await session.execute(select(Entry).where(Entry.id.in_(ids)))).scalars()}
-    for change in sorted(body.changes, key=lambda c: c.at):
+    now = datetime.now(UTC)
+    # Une horloge client en avance ne doit pas projeter updated_at dans le futur (l'entrée serait
+    # renvoyée à chaque pull et tout changement ultérieur ignoré comme « périmé »).
+    normalized = [(min(_aware(c.at), now + timedelta(seconds=30)), c) for c in body.changes]
+    for change_at, change in sorted(normalized, key=lambda x: x[0]):
         entry = entries.get(change.entry_id)
         if entry is None:
             ignored += 1
             continue
-        change_at = change.at if change.at.tzinfo else change.at.replace(tzinfo=UTC)
         if entry.updated_at and entry.updated_at > change_at and (
             (change.read is not None and entry.read != change.read)
             or (change.starred is not None and entry.starred != change.starred)
@@ -161,7 +178,7 @@ async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
             entry.read = change.read
         if change.starred is not None:
             entry.starred = change.starred
-        entry.updated_at = max(datetime.now(UTC), change_at)
+        entry.updated_at = now
         applied += 1
     await session.commit()
     return SyncPushResult(applied=applied, ignored=ignored, server_time=datetime.now(UTC))

@@ -90,6 +90,7 @@ class Entry(Base):
         Index("ix_entries_updated_at", "updated_at"),
         Index("ix_entries_feed_read", "feed_id", "read"),
         Index("ix_entries_hash", "hash"),
+        Index("ix_entries_search_vector", "search_vector", postgresql_using="gin"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

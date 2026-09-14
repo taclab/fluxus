@@ -38,7 +38,10 @@ async def run_extraction(session: AsyncSession, entry: Entry, mode: str | None =
             mode=effective_mode,
             reference_text_len=len(html_to_text(entry.summary_html)),
         )
-    except (ExtractionError, ValueError) as exc:
+    except Exception as exc:
+        # Tout échec (réseau, parseur, URL refusée) est stocké sur l'entrée, jamais remonté en 500.
+        if not isinstance(exc, (ExtractionError, ValueError)):
+            log.warning("extraction inattendue en échec pour %s: %s", entry.url, exc)
         entry.extraction_status = "failed"
         entry.extraction_error = str(exc)[:2000]
         return entry

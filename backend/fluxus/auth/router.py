@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -40,6 +40,8 @@ class TokenResponse(BaseModel):
 class ChangePasswordBody(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8, max_length=200)
+    # Révoque aussi les tokens de l'application mobile (à réappairer).
+    revoke_devices: bool = False
 
 
 class DeviceCreate(BaseModel):
@@ -62,9 +64,8 @@ class DeviceOut(BaseModel):
 
 
 def _client_key(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # Ne jamais lire X-Forwarded-For soi-même : c'est uvicorn (--proxy-headers, --forwarded-allow-ips)
+    # qui remplace request.client par l'adresse transmise par le proxy de confiance.
     return request.client.host if request.client else "unknown"
 
 
@@ -80,8 +81,10 @@ async def setup(body: PasswordBody, session: Session) -> TokenResponse:
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "Le mot de passe est déjà défini")
     await set_setting(session, "_password_hash", hash_password(body.password))
+    version = datetime.now(UTC).isoformat()
+    await set_setting(session, "_password_version", version)
     await session.commit()
-    return TokenResponse(access_token=create_access_token())
+    return TokenResponse(access_token=create_access_token(version))
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -94,21 +97,33 @@ async def login(body: PasswordBody, request: Request, session: Session) -> Token
         login_limiter.record_failure(key)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Mot de passe incorrect")
     login_limiter.reset(key)
-    return TokenResponse(access_token=create_access_token())
+    version = await get_setting(session, "_password_version", default="")
+    return TokenResponse(access_token=create_access_token(version or ""))
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(_: Auth) -> TokenResponse:
-    return TokenResponse(access_token=create_access_token())
+async def refresh(principal: Auth, session: Session) -> TokenResponse:
+    # Un token d'appareil ne peut pas se transformer en JWT : sa révocation resterait sans effet.
+    if principal != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Réservé aux sessions web")
+    version = await get_setting(session, "_password_version", default="")
+    return TokenResponse(access_token=create_access_token(version or ""))
 
 
-@router.post("/password", status_code=204)
-async def change_password(body: ChangePasswordBody, _: Auth, session: Session) -> None:
+@router.post("/password", response_model=TokenResponse)
+async def change_password(body: ChangePasswordBody, _: Auth, session: Session) -> TokenResponse:
+    """Change le mot de passe et invalide toutes les sessions web ; renvoie un nouveau JWT pour la session courante."""
     password_hash = await get_setting(session, "_password_hash", default="")
     if not password_hash or not verify_password(body.current_password, password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Mot de passe actuel incorrect")
     await set_setting(session, "_password_hash", hash_password(body.new_password))
+    version = datetime.now(UTC).isoformat()
+    await set_setting(session, "_password_version", version)
+    if body.revoke_devices:
+        for device in (await session.execute(select(DeviceToken))).scalars():
+            await session.delete(device)
     await session.commit()
+    return TokenResponse(access_token=create_access_token(version))
 
 
 @router.get("/devices", response_model=list[DeviceOut])

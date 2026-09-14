@@ -157,7 +157,9 @@ def parse_feed(raw: bytes, feed_url: str) -> ParsedFeed:
             meta["youtube_id"] = video_id
         cover = _cover_image(e, summary_html)
         if cover:
-            meta["cover"] = normalize_url(cover, url or feed_url)
+            cover_url = normalize_url(cover, url or feed_url)
+            if cover_url and len(cover_url) <= 2048:
+                meta["cover"] = cover_url
         enclosures = [
             {"url": link.get("href"), "type": link.get("type")}
             for link in e.get("links") or []
@@ -166,12 +168,15 @@ def parse_feed(raw: bytes, feed_url: str) -> ParsedFeed:
         if enclosures:
             meta["enclosures"] = enclosures
 
+        if url and len(url) > 2048:
+            url = None  # une URL de plus de 2 Ko n'est pas une URL d'article exploitable
+        author = (e.get("author") or "").strip()[:300] or None
         entries.append(
             ParsedEntry(
                 guid=guid[:2048],
                 url=url,
                 title=title[:1000],
-                author=(e.get("author") or None),
+                author=author,
                 published_at=published or datetime.now(UTC),
                 summary_html=summary_html,
                 hash=entry_hash,

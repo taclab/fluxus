@@ -30,5 +30,10 @@ COPY backend/ ./
 RUN uv sync --frozen --no-dev
 COPY --from=web /web/dist /app/static
 
+# Processus sans privilèges : une faille applicative ne donne pas root dans le conteneur.
+RUN useradd --system --uid 10001 --no-create-home fluxus && chown -R fluxus:fluxus /app
+USER fluxus
+
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn fluxus.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"]
+# FORWARDED_ALLOW_IPS : IP(s) du reverse proxy autorisées à fournir X-Forwarded-For ('*' = toutes, réseau Compose privé).
+CMD ["sh", "-c", "alembic upgrade head && uvicorn fluxus.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=\"${FORWARDED_ALLOW_IPS:-*}\""]

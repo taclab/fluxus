@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape, quoteattr
+
+from defusedxml import ElementTree as ET
 
 from ..models import Category, Feed
 

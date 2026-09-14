@@ -21,9 +21,8 @@ DEFAULTS: dict[str, str] = {
     "llm_api_key_anthropic": "",
     "llm_api_key_openai": "",
     "openai_base_url": "",
-    "sync_prefetch_days": "7",
-    "sync_prefetch_mode": "unread",  # all | unread | starred
-    "ui_theme": "system",
+    # Horizon (jours) des articles conservés sur les appareils et envoyés à la première synchronisation.
+    "sync_prefetch_days": "30",
     # Disposition du tableau de bord (JSON produit par le front ; vide = disposition par défaut).
     "dashboard_layout": "",
 }
@@ -81,4 +80,4 @@ def mask_secret(value: str) -> str:
         return ""
     if len(value) <= 8:
         return "••••"
-    return f"{value[:4]}…{value[-4:]}"
+    return f"••••…{value[-4:]}"

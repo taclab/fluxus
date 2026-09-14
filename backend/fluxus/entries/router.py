@@ -32,7 +32,8 @@ def _decode_cursor(cursor: str) -> tuple[datetime, int]:
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         published, entry_id = json.loads(base64.urlsafe_b64decode(padded))
-        return datetime.fromisoformat(published), int(entry_id)
+        dt = datetime.fromisoformat(published)
+        return (dt if dt.tzinfo else dt.replace(tzinfo=UTC)), int(entry_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Curseur invalide") from exc
 

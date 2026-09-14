@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 # L'import enregistre les handlers auprès du registre.
 from . import handlers  # noqa: F401
-from .config import get_settings
+from .config import get_settings, validate_runtime_config
 from .db import session_scope
 from .jobs import queue
 from .jobs.registry import get_handler
@@ -60,6 +60,7 @@ async def schedule_due_feeds() -> int:
 
 async def main() -> None:
     settings = get_settings()
+    validate_runtime_config(settings)
     logging.basicConfig(
         level=settings.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )

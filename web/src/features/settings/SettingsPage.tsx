@@ -1,6 +1,6 @@
 import { ChevronLeft, Download, Trash2, Upload } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
 import { getServerUrl, isDeviceToken, getToken, setToken } from '../../api/auth'
 import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, type StatsOut } from '../../api/client'
@@ -8,7 +8,8 @@ import type { Theme } from '../../app/theme'
 import { useTheme } from '../../components/ThemeToggle'
 import { TypographyPicker } from '../../components/TypographyPicker'
 import { Button, Field, IconButton, Input, Select, Spinner, useToast } from '../../components/ui'
-import { clearDatabase, db } from '../../db/db'
+import { clearDatabase } from '../../db/db'
+import { resetDashboardLayout } from '../dashboard/useDashboardLayout'
 import { formatTokens, relativeDate } from '../../lib/format'
 import { resetAndSync, syncNow } from '../../sync/engine'
 
@@ -25,7 +26,7 @@ export function SettingsPage() {
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [theme, setTheme] = useTheme()
-  const [pwd, setPwd] = useState({ current: '', next: '', confirm: '' })
+  const [pwd, setPwd] = useState({ current: '', next: '', confirm: '', revokeDevices: false })
   const fileRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
   const navigate = useNavigate()
@@ -116,9 +117,14 @@ export function SettingsPage() {
       return
     }
     try {
-      unwrap(await api().POST('/api/auth/password', { body: { current_password: pwd.current, new_password: pwd.next } }))
-      toast('Mot de passe modifié', 'success')
-      setPwd({ current: '', next: '', confirm: '' })
+      const res = unwrap(
+        await api().POST('/api/auth/password', { body: { current_password: pwd.current, new_password: pwd.next, revoke_devices: pwd.revokeDevices } }),
+      )
+      // Les anciennes sessions sont invalidées : on garde celle-ci avec le jeton renvoyé.
+      setToken(res.access_token)
+      toast(pwd.revokeDevices ? 'Mot de passe modifié, appareils déconnectés' : 'Mot de passe modifié, autres sessions déconnectées', 'success')
+      setPwd({ current: '', next: '', confirm: '', revokeDevices: false })
+      void load()
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Erreur', 'error')
     }
@@ -144,11 +150,9 @@ export function SettingsPage() {
   return (
     <div className="h-full overflow-y-auto bg-app">
       <header className="sticky top-0 z-10 flex items-center gap-2 h-14 px-2 border-b border-app bg-panel">
-        <Link to="/">
-          <IconButton label="Retour">
-            <ChevronLeft className="size-5" />
-          </IconButton>
-        </Link>
+        <IconButton label="Retour" onClick={() => navigate('/')}>
+          <ChevronLeft className="size-5" />
+        </IconButton>
         <h1 className="font-semibold">Paramètres</h1>
         <div className="flex-1" />
         <Button variant="primary" size="sm" onClick={() => void save()} loading={saving} disabled={!settings}>
@@ -243,9 +247,7 @@ export function SettingsPage() {
                 variant="ghost"
                 onClick={async () => {
                   try {
-                    unwrap(await api().PATCH('/api/settings', { body: { values: { dashboard_layout: '' } } }))
-                    await db.meta.delete('dashboard.layout')
-                    await db.meta.delete('dashboard.layout.dirty')
+                    await resetDashboardLayout()
                     toast('Tableau de bord réinitialisé', 'success')
                   } catch (err) {
                     toast(err instanceof Error ? err.message : 'Erreur', 'error')
@@ -286,7 +288,16 @@ export function SettingsPage() {
             )}
           </Section>
 
-          <Section title="Hors-ligne" description="Les articles des 30 derniers jours sont conservés sur cet appareil, avec leur contenu complet.">
+          <Section title="Hors-ligne" description="Les articles des N derniers jours sont conservés sur chaque appareil avec leur contenu complet ; les favoris le sont toujours.">
+            <Field label="Horizon de conservation (jours)" hint="S’applique à la première synchronisation d’un appareil et au ménage local. Enregistrer pour appliquer.">
+              <Select value={values.sync_prefetch_days ?? '30'} onChange={(e) => set('sync_prefetch_days', e.target.value)}>
+                {['7', '14', '30', '60', '90', '180'].map((d) => (
+                  <option key={d} value={d}>
+                    {d} jours
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => void syncNow()}>Synchroniser maintenant</Button>
               <Button variant="ghost" onClick={() => void resetAndSync()}>
@@ -322,6 +333,10 @@ export function SettingsPage() {
                 <Input type="password" value={pwd.confirm} onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })} minLength={8} autoComplete="new-password" />
               </Field>
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={pwd.revokeDevices} onChange={(e) => setPwd({ ...pwd, revokeDevices: e.target.checked })} className="size-4 accent-accent-600" />
+              Déconnecter aussi les appareils mobiles (à réappairer)
+            </label>
             <Button onClick={() => void changePassword()} disabled={!pwd.current || pwd.next.length < 8}>
               Changer le mot de passe
             </Button>

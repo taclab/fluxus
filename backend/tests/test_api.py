@@ -54,6 +54,21 @@ async def test_auth_flow(client: AsyncClient):
     client.headers["Authorization"] = f"Bearer {token}"
 
 
+async def test_password_change_invalidates_sessions(client: AsyncClient):
+    old = client.headers["Authorization"]
+    r = await client.post("/api/auth/password", json={"current_password": "motdepasse", "new_password": "motdepasse2"})
+    assert r.status_code == 200
+    new_token = r.json()["access_token"]
+    r = await client.get("/api/feeds", headers={"Authorization": old})
+    assert r.status_code == 401
+    client.headers["Authorization"] = f"Bearer {new_token}"
+    r = await client.get("/api/feeds")
+    assert r.status_code == 200
+    # on remet l'ancien mot de passe pour les tests suivants
+    r = await client.post("/api/auth/password", json={"current_password": "motdepasse2", "new_password": "motdepasse"})
+    client.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+
+
 async def test_device_token(client: AsyncClient):
     r = await client.post("/api/auth/devices", json={"name": "Téléphone", "password": "motdepasse"})
     assert r.status_code == 201
@@ -125,6 +140,7 @@ async def test_entries_and_sync(client: AsyncClient):
     r = await client.get("/api/sync")
     body = r.json()
     assert len(body["entries"]) == 3 and body["has_more"] is False
+    assert body["retention_days"] == 30
     # La marge de sécurité de 2 s renvoie encore les entrées tout juste modifiées ; au-delà, plus rien.
     later = (datetime.now(UTC) + timedelta(seconds=3)).isoformat()
     r = await client.get("/api/sync", params={"since": later})
@@ -243,3 +259,63 @@ async def test_sync_pagination_with_identical_timestamps(client: AsyncClient):
 
     r = await client.get("/api/sync", params={"cursor": "n-importe-quoi"})
     assert r.status_code == 400
+
+
+async def test_spa_path_traversal_is_blocked(client: AsyncClient, tmp_path, monkeypatch):
+    """Le repli SPA ne doit servir que des fichiers sous le dossier statique."""
+    import importlib
+
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>ok</html>")
+    (static / "app.js").write_text("js")
+    (tmp_path / "secret.txt").write_text("SECRET")
+    monkeypatch.setenv("FLUXUS_STATIC_DIR", str(static))
+    from fluxus import config, main
+
+    config.get_settings.cache_clear()
+    module = importlib.reload(main)
+    async with AsyncClient(transport=ASGITransport(app=module.app), base_url="http://test") as c:
+        assert (await c.get("/app.js")).text == "js"
+        assert (await c.get("/n-importe-quoi")).text == "<html>ok</html>"
+        for path in ("/..%2Fsecret.txt", "/%2e%2e/secret.txt", "/a/../../secret.txt"):
+            r = await c.get(path)
+            assert "SECRET" not in r.text, path
+    monkeypatch.delenv("FLUXUS_STATIC_DIR")
+    config.get_settings.cache_clear()
+    importlib.reload(main)
+
+
+async def test_enqueue_collision_keeps_other_jobs(client: AsyncClient):
+    from sqlalchemy import delete, select
+
+    from fluxus.db import session_scope
+    from fluxus.jobs.queue import enqueue
+    from fluxus.models import Job
+
+    async with session_scope() as session:
+        await session.execute(delete(Job))
+        assert await enqueue(session, "fetch_feed", {"feed_id": 2}, dedupe_key="fetch_feed:2")
+    async with session_scope() as session:
+        results = [await enqueue(session, "fetch_feed", {"feed_id": i}, dedupe_key=f"fetch_feed:{i}") is not None for i in (1, 2, 3)]
+    assert results == [True, False, True]
+    async with session_scope() as session:
+        keys = sorted((await session.execute(select(Job.dedupe_key))).scalars())
+    assert keys == ["fetch_feed:1", "fetch_feed:2", "fetch_feed:3"]
+
+
+async def test_sync_push_clamps_future_clock(client: AsyncClient):
+    entry_id = (await client.get("/api/entries", params={"limit": 1})).json()["items"][0]["id"]
+    future = (datetime.now(UTC) + timedelta(days=400)).isoformat()
+    r = await client.post("/api/sync", json={"changes": [{"entry_id": entry_id, "starred": True, "at": future}]})
+    assert r.json()["applied"] == 1
+    updated_at = datetime.fromisoformat((await client.get(f"/api/entries/{entry_id}")).json()["updated_at"])
+    assert updated_at < datetime.now(UTC) + timedelta(minutes=1)
+    # Un changement correctement daté peut ensuite reprendre la main.
+    r = await client.post("/api/sync", json={"changes": [{"entry_id": entry_id, "starred": False, "at": datetime.now(UTC).isoformat()}]})
+    assert r.json()["applied"] == 1
+
+
+async def test_naive_dates_are_accepted(client: AsyncClient):
+    r = await client.get("/api/sync", params={"since": "2026-01-01T00:00:00"})
+    assert r.status_code == 200

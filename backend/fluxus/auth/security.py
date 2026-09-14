@@ -26,7 +26,8 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token() -> str:
+def create_access_token(password_version: str = "") -> str:
+    """`password_version` : horodatage du dernier changement de mot de passe ; un changement invalide les JWT antérieurs."""
     settings = get_settings()
     now = datetime.now(UTC)
     payload = {
@@ -34,6 +35,7 @@ def create_access_token() -> str:
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(hours=settings.access_token_hours)).timestamp()),
         "typ": "access",
+        "pv": password_version,
     }
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
@@ -57,21 +59,33 @@ def hash_device_token(token: str) -> str:
 
 
 class LoginRateLimiter:
-    """Limiteur en mémoire : N tentatives par fenêtre glissante et par IP."""
+    """Limiteur en mémoire : N tentatives par fenêtre glissante et par IP, plus un plafond global.
 
-    def __init__(self, max_attempts: int = 5, window_seconds: int = 60) -> None:
+    Le plafond global (toutes IP confondues) rend inutile la falsification d'adresse : sur une
+    instance mono-utilisateur, personne n'a de raison légitime d'échouer 20 fois par minute.
+    """
+
+    GLOBAL_KEY = "*"
+
+    def __init__(self, max_attempts: int = 5, window_seconds: int = 60, global_max: int = 20) -> None:
         self.max_attempts = max_attempts
+        self.global_max = global_max
         self.window = window_seconds
         self._attempts: dict[str, list[float]] = defaultdict(list)
 
-    def check(self, key: str) -> bool:
+    def _recent(self, key: str) -> list[float]:
         now = time.monotonic()
         attempts = [t for t in self._attempts[key] if now - t < self.window]
         self._attempts[key] = attempts
-        return len(attempts) < self.max_attempts
+        return attempts
+
+    def check(self, key: str) -> bool:
+        return len(self._recent(key)) < self.max_attempts and len(self._recent(self.GLOBAL_KEY)) < self.global_max
 
     def record_failure(self, key: str) -> None:
-        self._attempts[key].append(time.monotonic())
+        now = time.monotonic()
+        self._attempts[key].append(now)
+        self._attempts[self.GLOBAL_KEY].append(now)
 
     def reset(self, key: str) -> None:
         self._attempts.pop(key, None)

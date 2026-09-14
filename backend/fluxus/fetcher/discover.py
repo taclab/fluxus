@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from lxml import html as lxml_html
 
-from .http import assert_public_url, make_client
+from .http import UnsafeURLError, assert_public_url_async, make_client, safe_get
 
 FEED_TYPES = {
     "application/rss+xml",
@@ -46,7 +46,7 @@ async def _youtube_feed(url: str, client: httpx.AsyncClient) -> list[DiscoveredF
     channel_id = m.group(1)
     if not channel_id:
         # Handle @nom ou /c/nom : il faut lire la page pour trouver l'identifiant du canal.
-        response = await client.get(url)
+        response = await safe_get(client, url)
         found = re.search(r'"channelId":"(UC[\w-]+)"', response.text) or re.search(
             r'channel_id=(UC[\w-]+)', response.text
         )
@@ -64,12 +64,12 @@ async def _youtube_feed(url: str, client: httpx.AsyncClient) -> list[DiscoveredF
 async def discover_feeds(url: str) -> list[DiscoveredFeed]:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    assert_public_url(url)
+    await assert_public_url_async(url)
     async with make_client(headers={"Accept": "text/html,application/xhtml+xml,application/xml,*/*"}) as client:
         yt = await _youtube_feed(url, client)
         if yt:
             return yt
-        response = await client.get(url)
+        response = await safe_get(client, url)
         response.raise_for_status()
         final_url = str(response.url)
         if _looks_like_feed(response.headers.get("content-type", ""), response.content):
@@ -101,8 +101,8 @@ async def discover_feeds(url: str) -> list[DiscoveredFeed]:
         base = f"{parts.scheme}://{parts.netloc}"
         for path in COMMON_PATHS:
             try:
-                candidate = await client.get(base + path)
-            except httpx.HTTPError:
+                candidate = await safe_get(client, base + path)
+            except (httpx.HTTPError, UnsafeURLError):
                 continue
             if candidate.status_code == 200 and _looks_like_feed(
                 candidate.headers.get("content-type", ""), candidate.content

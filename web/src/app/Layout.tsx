@@ -9,7 +9,7 @@ import { Dashboard } from '../features/dashboard/Dashboard'
 import { EntryList } from '../features/entries/EntryList'
 import { CategoryDialog, FeedDialog } from '../features/feeds/FeedDialog'
 import { Sidebar } from '../features/feeds/Sidebar'
-import { Reader } from '../features/reader/Reader'
+import { openExternal, Reader } from '../features/reader/Reader'
 import { useKeyboard } from './useKeyboard'
 import { useView } from './view'
 
@@ -87,7 +87,7 @@ export function Layout() {
       ArrowUp: () => move(-1),
       m: () => current && void recordChange(current.id, { read: !current.read }),
       s: () => current && void recordChange(current.id, { starred: !current.starred }),
-      v: () => current?.url && window.open(current.url, '_blank', 'noopener'),
+      v: () => openExternal(current?.url),
       f: () => current && setFullTick((t) => t + 1),
       r: () => current && setSummaryTick((t) => t + 1),
       u: () => setUnreadOnly(!unreadOnly),

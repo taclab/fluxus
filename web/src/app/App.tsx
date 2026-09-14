@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
 import { getToken, isCapacitor } from '../api/auth'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { ToastProvider } from '../components/ui'
 import { LoginPage } from '../features/auth/LoginPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
@@ -52,6 +53,7 @@ export function App() {
   }, [])
 
   return (
+    <ErrorBoundary>
     <ToastProvider>
       <BrowserRouter>
         {authed ? (
@@ -70,5 +72,6 @@ export function App() {
         )}
       </BrowserRouter>
     </ToastProvider>
+    </ErrorBoundary>
   )
 }

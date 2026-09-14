@@ -6,10 +6,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from .auth import router as auth_router
-from .config import get_settings
+from .config import get_settings, validate_runtime_config
 from .db import get_engine
 from .entries.router import router as entries_router
 from .feeds.router import router as feeds_router
@@ -25,6 +26,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_runtime_config(get_settings())
     engine = get_engine()
     yield
     await engine.dispose()
@@ -39,10 +41,52 @@ app = FastAPI(
     redoc_url=None,
 )
 
+# Politique de sécurité du contenu : scripts et polices locaux uniquement (le script de thème est
+# un fichier externe pour cette raison), images et médias distants en https, iframes vidéo connues.
+CSP = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",  # attributs style= des barres et dégradés React
+        # http: pour les favicons de vieux sites (bloqués de toute façon par le navigateur en contenu mixte sur https)
+        "img-src 'self' https: http: data: blob:",
+        "media-src 'self' https:",
+        "font-src 'self' data:",  # Vite inline les très petits sous-ensembles de police en data:
+        "connect-src 'self'",
+        "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.dailymotion.com",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if not request.url.path.startswith("/api/"):
+            response.headers.setdefault("Content-Security-Policy", CSP)
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 # En développement le front Vite tourne sur un autre port.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "capacitor://localhost", "http://localhost"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        # WebView Capacitor : `androidScheme: https` donne l'origine https://localhost.
+        "https://localhost",
+        "capacitor://localhost",
+        "http://localhost",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,11 +112,15 @@ if static_dir.is_dir():
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
+    static_root = static_dir.resolve()
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str, request: Request):
         if full_path.startswith("api/"):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
-        candidate = static_dir / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(static_dir / "index.html")
+        if full_path:
+            # Résolution complète puis vérification d'appartenance : refuse toute traversée (`..`, encodée ou non).
+            candidate = (static_root / full_path).resolve()
+            if candidate.is_relative_to(static_root) and candidate.is_file():
+                return FileResponse(candidate)
+        return FileResponse(static_root / "index.html")

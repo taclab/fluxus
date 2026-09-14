@@ -114,10 +114,14 @@ async def summarize_entry(session: AsyncSession, entry_id: int, force: bool = Fa
     yield SummaryEvent("status", {"message": "Préparation du contenu…"})
     try:
         kind, text, _ = await _prepare_source(session, entry)
+        await session.commit()
     except (TranscriptUnavailable, SummarizerError) as exc:
         yield SummaryEvent("error", {"message": str(exc)})
         return
-    await session.commit()
+    except Exception as exc:
+        log.exception("préparation du résumé en échec pour l'entrée %s", entry_id)
+        yield SummaryEvent("error", {"message": f"Préparation impossible: {exc}"})
+        return
 
     language = settings.get("llm_language", "fr")
     system = prompts.system_prompt(language)
@@ -163,16 +167,22 @@ async def summarize_entry(session: AsyncSession, entry_id: int, force: bool = Fa
         entry_id=entry.id,
         kind=kind,
         provider=summarizer.name,
-        model=summarizer.model,
+        model=summarizer.model[:100],
         prompt_version=prompts.PROMPT_VERSION,
         text_md="".join(full_text).strip(),
         input_tokens=total_usage.input_tokens,
         output_tokens=total_usage.output_tokens,
     )
-    session.add(summary)
-    entry.updated_at = datetime.now(UTC)  # déclenche la sync delta côté clients
-    await session.commit()
-    await session.refresh(summary)
+    try:
+        session.add(summary)
+        entry.updated_at = datetime.now(UTC)  # déclenche la sync delta côté clients
+        await session.commit()
+        await session.refresh(summary)
+    except Exception as exc:
+        log.exception("enregistrement du résumé en échec pour l'entrée %s", entry_id)
+        # Le texte a été produit et streamé : on le renvoie quand même, sans identifiant.
+        yield SummaryEvent("error", {"message": f"Résumé produit mais non enregistré: {exc}"})
+        return
     yield SummaryEvent("done", {"summary": _summary_dict(summary), "cached": False})
 
 

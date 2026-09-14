@@ -61,7 +61,7 @@ export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, 
       width={widget.width as WidgetWidth}
       orphan={orphan}
       loading={entries === undefined && last.current.length === 0 && !data.ready}
-      empty={items.length === 0}
+      empty={data.ready && items.length === 0}
       emptyLabel={widget.unreadOnly ? 'Tout est lu' : 'Aucun article'}
       onOpen={() => onOpenView(view)}
       onMarkAllRead={() => {
@@ -195,7 +195,7 @@ function Carousel({ items, feedMap, showFeed, onOpen }: ListProps) {
         type="button"
         aria-label="Précédent"
         onClick={() => scrollBy(-1)}
-        className="absolute left-1 top-1/2 hidden size-9 -translate-y-1/2 items-center justify-center rounded-full border border-app bg-panel/90 text-app shadow-md backdrop-blur opacity-0 transition-opacity group-hover/carousel:opacity-100 md:flex"
+        className="absolute left-1 top-1/2 hidden size-9 -translate-y-1/2 items-center justify-center rounded-full border border-app bg-panel/90 text-app shadow-md backdrop-blur opacity-0 transition-opacity group-hover/carousel:opacity-100 focus-visible:opacity-100 md:flex"
       >
         <ChevronLeft className="size-5" />
       </button>
@@ -203,7 +203,7 @@ function Carousel({ items, feedMap, showFeed, onOpen }: ListProps) {
         type="button"
         aria-label="Suivant"
         onClick={() => scrollBy(1)}
-        className="absolute right-1 top-1/2 hidden size-9 -translate-y-1/2 items-center justify-center rounded-full border border-app bg-panel/90 text-app shadow-md backdrop-blur opacity-0 transition-opacity group-hover/carousel:opacity-100 md:flex"
+        className="absolute right-1 top-1/2 hidden size-9 -translate-y-1/2 items-center justify-center rounded-full border border-app bg-panel/90 text-app shadow-md backdrop-blur opacity-0 transition-opacity group-hover/carousel:opacity-100 focus-visible:opacity-100 md:flex"
       >
         <ChevronRight className="size-5" />
       </button>

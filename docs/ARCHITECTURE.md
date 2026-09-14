@@ -145,9 +145,10 @@ Règles importantes :
 ```
 worker.schedule_due_feeds ─► jobs(fetch_feed, dedupe "fetch_feed:<id>")
    └► fetcher/jobs.fetch_feed_job ─► fetcher/service.refresh_feed
-         1. assert_public_url (anti-SSRF)
+         1. safe_get : contrôle anti-SSRF de l'URL puis de CHAQUE redirection (DNS asynchrone),
+            délai global 60 s, corps lu en flux et borné à 10 Mo
          2. GET avec If-None-Match / If-Modified-Since
-            304 → rien à faire, on rallonge l'intervalle
+            304 → rien à faire, on rallonge l'intervalle (× 1,5)
             4xx/5xx/réseau → _record_error : error_count++, next_fetch_at = now + intervalle × 2^n (≤ 24 h)
          3. fetcher/parse.parse_feed (feedparser)
             · normalise les URL (https, minuscules, suppression utm_*, fbclid…)
@@ -155,9 +156,12 @@ worker.schedule_due_feeds ─► jobs(fetch_feed, dedupe "fetch_feed:<id>")
             · calcule guid, hash, meta (youtube_id, cover, enclosures) ; cover = media:thumbnail,
               media:content image (type absent accepté si l'URL a une extension image), enclosure
               image ou première <img> du contenu
-         4. _insert_new_entries : ignore ce qui existe déjà par guid OU hash
+         4. _insert_new_entries : ignore ce qui existe déjà par guid OU hash (aussi au sein du lot) ;
+            si le flux est en mode `http` ou `browser`, met en file un `extract_entry` par nouveauté
          5. met à jour titre/site/icône si manquants, etag, last_modified,
             fetch_interval_min (÷2 si ≥5 nouveautés, ×1.5 si aucune, bornes 10 min – 24 h)
+         Toute exception inattendue (contrainte SQL…) applique quand même le recul exponentiel,
+         dans une transaction séparée : un flux ne peut pas être re-planifié toutes les 30 s.
 ```
 
 L'ajout d'un flux par l'API (`POST /api/feeds`) télécharge une première fois le flux de manière
@@ -219,10 +223,13 @@ Client                                   Serveur
 ──────                                   ───────
 pushOutbox : POST /api/sync {changes:[{entry_id, read?, starred?, at}]}
                                          dernière écriture gagne : un changement plus ancien que
-                                         entries.updated_at et contradictoire est ignoré
+                                         entries.updated_at et contradictoire est ignoré ;
+                                         horodatage client borné à now + 30 s, updated_at = now
 GET /api/sync?since=<dernière passe>     page 1 : entries.updated_at > since − 2 s
 GET /api/sync?cursor=<opaque>            pages suivantes : (updated_at, id) > curseur
-   …jusqu'à has_more = false             première sync (sans since) : published_at > now − 30 j
+   …jusqu'à has_more = false             première sync (sans since) : published_at > now − N j
+                                         (réglage sync_prefetch_days, renvoyé comme retention_days)
+                                         OU starred = true (les favoris sont toujours envoyés)
 mergeFeeds (page 1) : remplace catégories et flux, supprime les entrées orphelines
 mergeEntries : bulkPut ; un état local encore dans l'outbox n'est pas écrasé
 sync.since := server_time de la page 1   (seulement si la passe est complète)
@@ -236,13 +243,16 @@ d'entrées dans la même seconde, et une pagination par simple timestamp avec ma
 
 ```
 GET  /api/auth/status  → setup_required        POST /api/auth/setup (une seule fois)
-POST /api/auth/login   → JWT HS256, 7 jours    POST /api/auth/refresh
+POST /api/auth/login   → JWT HS256, 7 jours, claim `pv` = version du mot de passe
+POST /api/auth/refresh (sessions web seulement)   POST /api/auth/password → invalide les autres JWT
 POST /api/auth/devices {name, password} → token opaque "flx_…" (mobile), stocké haché
 Authorization: Bearer <jwt | flx_…>   (ou ?token= pour les cas sans en-tête)
 ```
 
-`auth/deps.require_auth` accepte les deux formes. Cinq échecs par minute et par IP bloquent le
-login (`LoginRateLimiter`, en mémoire, par processus).
+`auth/deps.require_auth` accepte les deux formes et rejette un JWT dont `pv` ne correspond plus à
+`settings._password_version`. Cinq échecs par minute et par IP, et vingt toutes IP confondues,
+bloquent le login (`LoginRateLimiter`, en mémoire, par processus) : le plafond global rend inutile
+la falsification de `X-Forwarded-For`.
 
 ## 6. API HTTP
 
@@ -251,7 +261,7 @@ mention) :
 
 | Domaine | Routes |
 |---|---|
-| auth | `GET status`*, `POST setup`*, `POST login`*, `POST refresh`, `POST password`, `GET/POST devices`*, `DELETE devices/{id}` |
+| auth | `GET status`*, `POST setup`*, `POST login`*, `POST refresh` (JWT seulement), `POST password` (renvoie un nouveau JWT), `GET devices`, `POST devices`*, `DELETE devices/{id}` |
 | catégories | `GET/POST categories`, `PUT/DELETE categories/{id}` |
 | flux | `GET/POST feeds`, `POST feeds/discover`, `GET/PUT/DELETE feeds/{id}`, `POST feeds/{id}/refresh`, `POST feeds/refresh-all`, `POST opml/import`, `GET opml/export` |
 | articles | `GET entries` (filtres `feed`, `category`, `status`, `starred`, `q`, `cursor`, `limit`, `order`), `GET/PATCH entries/{id}`, `POST entries/mark-read`, `POST entries/{id}/fetch-content`, `GET entries/{id}/summaries` |
@@ -367,12 +377,17 @@ plateforme par `window.Capacitor.isNativePlatform()`. Le bouton retour matériel
 
 | Risque | Mesure | Où |
 |---|---|---|
-| SSRF via une URL de flux ou d'article | Résolution DNS puis refus des IP privées, loopback, link-local ; seuls http/https | `fetcher/http.assert_public_url`, appelé par le fetcher, la découverte et l'extraction |
+| SSRF via une URL de flux ou d'article | Résolution DNS puis refus des IP privées, loopback, link-local ; seuls http/https ; **revalidé à chaque redirection** ; le service navigateur refuse la page et chaque sous-ressource vers un hôte privé ou interne, et vit sur un réseau Compose sans Postgres | `fetcher/http.safe_get`, `browser/server.py`, `docker-compose.yml` |
+| Traversée de chemin sur le repli SPA | Chemin résolu et vérifié sous le dossier statique | `main.py` |
+| Serveur au goutte-à-goutte, corps géant | Délai global 60 s, lecture en flux bornée (10 Mo / 5 Mo), upload OPML ≤ 5 Mo | `fetcher/http.safe_get`, `feeds/router.py` |
+| Secret d'exemple en production | Refus de démarrer (`validate_runtime_config`) | `config.py`, `main.py`, `worker.py` |
+| Clickjacking, sniffing, scripts injectés | CSP `script-src 'self'` (script de thème externe), `X-Frame-Options`, `nosniff`, `Referrer-Policy` | `main.py` (`SecurityHeadersMiddleware`) |
 | XSS par contenu de flux ou d'article | Nettoyage serveur (nh3, liste blanche de balises/attributs, iframes limités à YouTube/Vimeo/Dailymotion) et client (DOMPurify, liens `noopener`, images `no-referrer`) | `extract/clean.py`, `web/src/lib/markdown.ts` |
-| Force brute sur le mot de passe | Argon2, 5 tentatives / min / IP, exigence de 8 caractères | `auth/security.py`, `auth/router.py` |
+| Force brute sur le mot de passe | Argon2, 5 tentatives / min / IP + 20 / min global, exigence de 8 caractères | `auth/security.py`, `auth/router.py` |
+| Session volée | JWT 7 j invalidés au changement de mot de passe (claim `pv`), `/refresh` interdit aux tokens d'appareil, révocation optionnelle des appareils | `auth/` |
 | Fuite des clés LLM | Chiffrées au repos (Fernet), jamais renvoyées en clair (masquées `sk-a…1234`), non journalisées | `settings_store.py`, `settings_router.py` |
 | Tokens mobiles | Opaques, 256 bits, stockés hachés, révocables | `auth/security.py`, `auth/deps.py` |
-| Rendu de pages arbitraires | Chromium isolé dans son conteneur, mémoire plafonnée, pas d'exposition réseau, ressources lourdes bloquées | `browser/`, `docker-compose.yml` |
+| Rendu de pages arbitraires | Chromium en utilisateur non privilégié, mémoire et processus plafonnés, réseau `render` sans Postgres, hôtes privés refusés, ressources lourdes bloquées | `browser/`, `docker-compose.yml` |
 
 Ce qui n'est **pas** couvert : TLS (délégué au reverse proxy), protection CSRF (l'API n'utilise pas
 de cookies, seulement des en-têtes `Authorization`), multi-utilisateurs.
@@ -504,9 +519,11 @@ colonne d'`entries` doit être synchronisée, l'ajouter à `EntryOut` (`schemas.
 - **Pas de sync planifiée quand l'appli Android est fermée** : la synchronisation se fait à
   l'ouverture. Piste : Capacitor Background Runner.
 - **Le limiteur de connexion est en mémoire** : par processus, remis à zéro au redémarrage.
-- **Pas de suppression propagée d'articles individuels** : la sync ne supprime localement que les
-  entrées dont le flux a disparu (`deleted_entry_ids` est réservé mais toujours vide).
+- **Pas de rétention côté serveur ni de suppression propagée** : la table `entries` croît ; la sync
+  ne supprime localement que les entrées dont le flux a disparu (`deleted_entry_ids` réservé, vide).
+- **DNS rebinding** : le contrôle anti-SSRF et la connexion httpx sont deux résolutions distinctes.
 - **Recherche hors-ligne limitée** aux titres et extraits ; le plein texte est côté serveur.
 - **Un seul utilisateur** par instance, par conception.
-- Pistes de phase 5 : règles de filtrage par flux (mots-clés), statistiques de lecture, vue
-  magazine, notifications, sauvegarde automatisée de la base.
+- Pistes de phase 5 : règles de filtrage par flux (mots-clés), historique de lecture,
+  notifications, sauvegarde automatisée de la base, réglage de l'intervalle par flux dans l'UI.
+- Bilan détaillé et correctifs du 14/09/2026 : [AUDIT-2026-09-14.md](AUDIT-2026-09-14.md).

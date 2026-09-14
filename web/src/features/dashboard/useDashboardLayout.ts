@@ -18,6 +18,7 @@ const DIRTY_KEY = 'dashboard.layout.dirty'
 const SAVE_DELAY_MS = 1000
 
 let saveTimer: number | null = null
+let pendingJson: string | null = null
 
 async function patchServer(json: string): Promise<boolean> {
   try {
@@ -39,6 +40,17 @@ export async function flushDashboardLayout(): Promise<void> {
     return
   }
   if (await patchServer(json)) await db.meta.delete(DIRTY_KEY)
+}
+
+/** Revient à la disposition automatique : efface le cache local et la valeur serveur. */
+export async function resetDashboardLayout(): Promise<void> {
+  if (saveTimer !== null) {
+    window.clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  await db.meta.delete(META_KEY)
+  await db.meta.delete(DIRTY_KEY)
+  unwrap(await api().PATCH('/api/settings', { body: { values: { dashboard_layout: '' } } }))
 }
 
 /** Décide quelle version garder. Fonction pure, testable. */
@@ -113,17 +125,15 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
   // Fermeture de l'onglet pendant le délai d'écriture : envoi immédiat.
   useEffect(() => {
     const onHide = () => {
-      if (saveTimer === null) return
+      if (saveTimer === null || !pendingJson) return
       window.clearTimeout(saveTimer)
       saveTimer = null
-      void getMeta(META_KEY).then((json) => {
-        if (!json) return
-        void fetch(apiUrl('/api/settings'), {
-          method: 'PATCH',
-          keepalive: true,
-          headers: { ...authHeaders(), 'content-type': 'application/json' },
-          body: JSON.stringify({ values: { dashboard_layout: json } }),
-        })
+      // Synchrone : pas de lecture Dexie ici, l'onglet peut disparaître avant sa résolution.
+      void fetch(apiUrl('/api/settings'), {
+        method: 'PATCH',
+        keepalive: true,
+        headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({ values: { dashboard_layout: pendingJson } }),
       })
     }
     window.addEventListener('pagehide', onHide)
@@ -139,6 +149,7 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
       if (readOnly) return
       const next: DashboardLayout = { version: 1, updatedAt: new Date().toISOString(), widgets }
       const json = serializeLayout(next)
+      pendingJson = json
       void (async () => {
         await setMeta(META_KEY, json)
         await setMeta(DIRTY_KEY, '1')
@@ -146,6 +157,7 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
       if (saveTimer !== null) window.clearTimeout(saveTimer)
       saveTimer = window.setTimeout(() => {
         saveTimer = null
+        pendingJson = null
         void (async () => {
           if (await patchServer(json)) {
             // Ne pas effacer le drapeau si une écriture plus récente a eu lieu entre-temps.
@@ -158,15 +170,5 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
     [readOnly],
   )
 
-  const reset = useCallback(async () => {
-    if (saveTimer !== null) {
-      window.clearTimeout(saveTimer)
-      saveTimer = null
-    }
-    await db.meta.delete(META_KEY)
-    await db.meta.delete(DIRTY_KEY)
-    await patchServer('')
-  }, [])
-
-  return { layout, isDefault, readOnly, loading: cachedRaw === undefined && !serverChecked, save, reset }
+  return { layout, isDefault, readOnly, loading: cachedRaw === undefined && !serverChecked, save, reset: resetDashboardLayout }
 }

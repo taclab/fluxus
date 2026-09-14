@@ -47,7 +47,7 @@ export function YoutubeWidget({ widget, editing, actions, onOpenEntry, onOpenVie
       width={widget.width as WidgetWidth}
       orphan={orphan}
       loading={entries === undefined && last.current.length === 0 && !data.ready}
-      empty={items.length === 0}
+      empty={data.ready && items.length === 0}
       emptyLabel={feedIds.length === 0 ? 'Aucun flux YouTube' : 'Aucune vidéo non vue'}
       onOpen={openView ? () => onOpenView(openView) : undefined}
       onMarkAllRead={() => {

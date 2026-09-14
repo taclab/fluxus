@@ -86,3 +86,16 @@ def test_parse_garbage_reports_error():
     parsed = parse_feed(b"<html><body>pas un flux</body></html>", "https://exemple.fr/")
     assert parsed.entries == []
     assert parsed.bozo_error
+
+
+def test_oversized_fields_are_truncated_or_dropped():
+    long_author = "A" * 400
+    long_url = "https://exemple.fr/" + "x" * 2100
+    rss = f"""<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+    <item><title>a</title><link>{long_url}</link><author>{long_author}</author></item>
+    </channel></rss>""".encode()
+    parsed = parse_feed(rss, "https://exemple.fr/rss")
+    e = parsed.entries[0]
+    assert e.url is None
+    assert e.author is not None and len(e.author) == 300
+    assert len(e.guid) <= 2048

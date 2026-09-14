@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, isOnline, unwrap, type Feed } from '../../api/client'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { TypographyPicker } from '../../components/TypographyPicker'
-import { EmptyState, IconButton, Kbd, useToast } from '../../components/ui'
+import { EmptyState, IconButton, Kbd, Spinner, useToast } from '../../components/ui'
 import { db, toLocalEntry } from '../../db/db'
 import { fullDate, hostname } from '../../lib/format'
 import { sanitizeArticle } from '../../lib/markdown'
@@ -21,8 +21,13 @@ interface Props {
   fullContentRequested: number // compteur incrémenté par le raccourci "f"
 }
 
+/** N'ouvre que des liens http(s) : un flux ne doit pas pouvoir déclencher un autre schéma. */
+export function openExternal(url: string | null | undefined) {
+  if (url && /^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener')
+}
+
 export function Reader({ entryId, onBack, summaryRequested, fullContentRequested }: Props) {
-  const entry = useLiveQuery(() => (entryId ? db.entries.get(entryId) : undefined), [entryId])
+  const entry = useLiveQuery(async () => (entryId ? ((await db.entries.get(entryId)) ?? null) : null), [entryId])
   const feed = useLiveQuery(() => (entry ? db.feeds.get(entry.feed_id) : undefined), [entry?.feed_id]) as Feed | undefined
   const [showFull, setShowFull] = useState(true)
   const [extracting, setExtracting] = useState(false)
@@ -34,13 +39,17 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
   const playerRef = useRef<HTMLIFrameElement>(null)
   const toast = useToast()
 
-  // Réinitialisation à chaque changement d'article.
+  // Réinitialisation à chaque changement d'article (et seulement là : l'arrivée d'un résumé ou d'un
+  // changement d'état ne doit ni remonter la page ni perdre la bascule flux / article complet).
+  const initializedFor = useRef<number | null>(null)
   useEffect(() => {
+    if (!entry || initializedFor.current === entry.id) return
+    initializedFor.current = entry.id
     setShowFull(true)
-    setSummaryOpen(Boolean(entry?.has_summary))
+    setSummaryOpen(Boolean(entry.has_summary))
     setSummaryAuto(false)
     containerRef.current?.scrollTo({ top: 0 })
-  }, [entryId, entry?.has_summary])
+  }, [entry])
 
   useEffect(() => {
     if (!typoOpen) return
@@ -51,10 +60,13 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
     return () => document.removeEventListener('mousedown', close)
   }, [typoOpen])
 
-  // Marque comme lu à l'ouverture.
+  // Marque comme lu une seule fois, à l'ouverture : « marquer non lu » doit ensuite rester possible.
+  const markedRead = useRef<number | null>(null)
   useEffect(() => {
-    if (entry && !entry.read) void recordChange(entry.id, { read: true })
-  }, [entry?.id, entry?.read]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!entry || markedRead.current === entry.id) return
+    markedRead.current = entry.id
+    if (!entry.read) void recordChange(entry.id, { read: true })
+  }, [entry])
 
   const fetchFull = useCallback(
     async (mode: 'auto' | 'http' | 'browser' = 'auto') => {
@@ -93,8 +105,23 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
   }, [fullContentRequested]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!entryId || !entry) {
+    const missing = entryId !== null && entry === null
     return (
-      <div className="h-full bg-app hidden md:block">
+      <div className={clsx('flex h-full flex-col bg-app', !onBack && 'hidden md:flex')}>
+        {onBack && (
+          <header className="flex h-14 shrink-0 items-center gap-1 border-b border-app bg-panel px-2">
+            <IconButton label="Retour à la liste" onClick={onBack}>
+              <ChevronLeft className="size-5" />
+            </IconButton>
+          </header>
+        )}
+        {entryId !== null && !missing ? (
+          <div className="flex flex-1 items-center justify-center">
+            <Spinner />
+          </div>
+        ) : missing ? (
+          <EmptyState icon={<AlignLeft className="size-10" />} title="Article introuvable sur cet appareil" hint="Il n’a pas encore été synchronisé ou a été purgé de la base locale." />
+        ) : (
         <EmptyState
           icon={<AlignLeft className="size-10" />}
           title="Sélectionnez un article"
@@ -111,6 +138,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
             </div>
           }
         />
+        )}
       </div>
     )
   }
@@ -177,7 +205,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
           <Sparkles className="size-5" />
         </IconButton>
         {entry.url && (
-          <IconButton label="Ouvrir l’original (v)" onClick={() => window.open(entry.url!, '_blank', 'noopener')}>
+          <IconButton label="Ouvrir l’original (v)" onClick={() => openExternal(entry.url)}>
             <ExternalLink className="size-5" />
           </IconButton>
         )}

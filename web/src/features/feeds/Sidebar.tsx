@@ -22,10 +22,12 @@ interface Props {
 }
 
 const UNCATEGORIZED = -1
+const EMPTY_FEEDS: Feed[] = []
+const EMPTY_CATEGORIES: Category[] = []
 
 export function Sidebar({ view, onSelect, onEditFeed, onEditCategory }: Props) {
-  const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? []
-  const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? []
+  const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
+  const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? EMPTY_CATEGORIES
   const unreadByFeed = useUnreadCounts()
   const starredCount = useLiveQuery(() => db.entries.where('starredFlag').equals(1).count(), []) ?? 0
   const sync = useSyncState()

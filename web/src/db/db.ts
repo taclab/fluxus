@@ -63,13 +63,19 @@ export class FluxusDB extends Dexie {
 
 export const db = new FluxusDB()
 
+/** Millisecondes ou undefined : une clé NaN rendrait l'entrée invisible dans tous les index. */
+function safeTs(iso: string | null | undefined): number | undefined {
+  const t = iso ? new Date(iso).getTime() : NaN
+  return Number.isFinite(t) ? t : undefined
+}
+
 export function toLocalEntry(e: EntryOut): LocalEntry {
   return {
     ...e,
     readFlag: e.read ? 1 : 0,
     starredFlag: e.starred ? 1 : 0,
-    publishedTs: new Date(e.published_at).getTime(),
-    updatedTs: new Date(e.updated_at).getTime(),
+    publishedTs: safeTs(e.published_at) ?? safeTs(e.updated_at) ?? Date.now(),
+    updatedTs: safeTs(e.updated_at) ?? Date.now(),
   }
 }
 

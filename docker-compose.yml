@@ -1,15 +1,26 @@
+# Journaux avec rotation pour tous les services (uvicorn journalise chaque requête).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
+    networks: [internal]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fluxus}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      # `:?` : refuse de démarrer si le mot de passe n'est pas défini dans .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Définir POSTGRES_PASSWORD dans .env}
       POSTGRES_DB: ${POSTGRES_DB:-fluxus}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "${FLUXUS_PG_PORT:-5433}:5432"
+      # Publié sur l'hôte uniquement en local (développement) ; commenter en production.
+      - "127.0.0.1:${FLUXUS_PG_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fluxus} -d ${POSTGRES_DB:-fluxus}"]
       interval: 5s
@@ -22,9 +33,13 @@ services:
       dockerfile: backend/Dockerfile
     image: fluxus-app
     restart: unless-stopped
+    logging: *default-logging
+    networks: [internal, render]
+    mem_limit: 768m
+    pids_limit: 256
     env_file: .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://fluxus:change-me@postgres:5432/fluxus}
+      DATABASE_URL: ${DATABASE_URL:?Définir DATABASE_URL dans .env}
       FLUXUS_BROWSER_URL: http://browser:3000
       NO_PROXY: browser,postgres,localhost,127.0.0.1
     ports:
@@ -42,9 +57,13 @@ services:
   worker:
     image: fluxus-app
     restart: unless-stopped
+    logging: *default-logging
+    networks: [internal, render]
+    mem_limit: 768m
+    pids_limit: 256
     env_file: .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://fluxus:change-me@postgres:5432/fluxus}
+      DATABASE_URL: ${DATABASE_URL:?Définir DATABASE_URL dans .env}
       FLUXUS_BROWSER_URL: http://browser:3000
       NO_PROXY: browser,postgres,localhost,127.0.0.1
     command: ["python", "-m", "fluxus.worker"]
@@ -56,11 +75,19 @@ services:
     build: ./browser
     image: fluxus-browser
     restart: unless-stopped
+    logging: *default-logging
+    # Réseau `render` seulement : le navigateur ne voit ni Postgres ni le réseau interne.
+    networks: [render]
     init: true
     shm_size: 512m
     mem_limit: 1g
+    pids_limit: 512
     environment:
       RENDER_TIMEOUT_MS: "25000"
+
+networks:
+  internal:
+  render:
 
 volumes:
   pgdata:

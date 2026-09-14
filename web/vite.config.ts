@@ -45,7 +45,9 @@ export default defineConfig({
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'fluxus-images',
-              expiration: { maxEntries: 800, maxAgeSeconds: 60 * 60 * 24 * 14 },
+              // Réponses opaques (images cross-origin) : Chrome les compte avec un rembourrage de plusieurs Mo ;
+              // on borne le nombre et on purge en cas de quota dépassé pour ne jamais bloquer IndexedDB.
+              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 14, purgeOnQuotaError: true },
             },
           },
         ],

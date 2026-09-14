@@ -25,6 +25,19 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
 
+PLACEHOLDER_SECRETS = {"dev-secret-change-me-please-32-chars", "change-me-to-a-long-random-string", "change-me", "changeme"}
+
+
+def validate_runtime_config(settings: "Settings") -> None:
+    """Refuse de démarrer avec un secret d'exemple : il signerait les sessions et chiffrerait les clés LLM."""
+    secret = settings.secret_key
+    if secret in PLACEHOLDER_SECRETS or len(secret) < 32:
+        raise RuntimeError(
+            "FLUXUS_SECRET_KEY doit être une valeur aléatoire d'au moins 32 caractères "
+            "(ex. `python -c 'import secrets; print(secrets.token_urlsafe(48))'`)."
+        )
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import httpx
 import trafilatura
 from trafilatura.settings import use_config
 
 from ..config import get_settings
-from ..fetcher.http import assert_public_url, make_client
+from ..fetcher.http import UnsafeURLError, assert_public_url_async, make_client, safe_get
 from .clean import html_to_text, sanitize_html
 
 log = logging.getLogger(__name__)
@@ -24,6 +26,13 @@ JS_HEAVY_DOMAINS = (
 # Si l'extraction HTTP renvoie moins que ce ratio du contenu du flux, on tente le navigateur.
 MIN_GAIN_RATIO = 1.2
 MIN_TEXT_CHARS = 400
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+
+
+def host_matches(url: str, domains: tuple[str, ...]) -> bool:
+    """Comparaison par hôte exact ou sous-domaine ("x.com" ne doit pas matcher "linux.com")."""
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in domains)
 
 _traf_config = use_config()
 _traf_config.set("DEFAULT", "EXTRACTION_TIMEOUT", "0")
@@ -69,7 +78,7 @@ async def _fetch_http(url: str) -> str:
             "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7",
         }
     ) as client:
-        response = await client.get(url)
+        response = await safe_get(client, url, max_bytes=MAX_PAGE_BYTES)
     response.raise_for_status()
     ctype = response.headers.get("content-type", "")
     if "html" not in ctype and "xml" not in ctype and not response.text.lstrip().startswith("<"):
@@ -90,19 +99,19 @@ async def _fetch_browser(url: str) -> str:
 
 async def extract_article(url: str, mode: str = "auto", reference_text_len: int = 0) -> Extracted:
     """`mode` : http | browser | auto."""
-    assert_public_url(url)
+    await assert_public_url_async(url)
     if mode not in ("http", "browser", "auto"):
         mode = "auto"
 
     http_result: tuple[str, str] | None = None
     http_error: str | None = None
-    force_browser = mode == "browser" or (mode == "auto" and any(d in url for d in JS_HEAVY_DOMAINS))
+    force_browser = mode == "browser" or (mode == "auto" and host_matches(url, JS_HEAVY_DOMAINS))
 
     if not force_browser:
         try:
             page = await _fetch_http(url)
-            http_result = _extract_from_html(page, url)
-        except (httpx.HTTPError, ExtractionError) as exc:
+            http_result = await asyncio.to_thread(_extract_from_html, page, url)
+        except (httpx.HTTPError, ExtractionError, UnsafeURLError) as exc:
             http_error = str(exc)
             log.debug("extraction HTTP échouée pour %s: %s", url, exc)
 
@@ -118,7 +127,7 @@ async def extract_article(url: str, mode: str = "auto", reference_text_len: int 
     # Repli navigateur.
     try:
         page = await _fetch_browser(url)
-        browser_result = _extract_from_html(page, url)
+        browser_result = await asyncio.to_thread(_extract_from_html, page, url)
     except (httpx.HTTPError, ExtractionError) as exc:
         if http_result is not None:
             return Extracted(html=http_result[0], text=http_result[1], method="http")

@@ -49,11 +49,19 @@ def _absolutize(html: str, base_url: str | None) -> str:
     return _SRC_RE.sub(repl, html)
 
 
+def _iframe_host_allowed(src: str) -> bool:
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(src)
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and any(host == h or host.endswith("." + h) for h in IFRAME_ALLOWED_HOSTS)
+
+
 def _filter_iframes(html: str) -> str:
     def repl(m: re.Match) -> str:
         tag = m.group(0)
         src = re.search(r'src="([^"]+)"', tag)
-        if src and any(host in src.group(1) for host in IFRAME_ALLOWED_HOSTS):
+        if src and _iframe_host_allowed(src.group(1)):
             return tag
         return ""
 

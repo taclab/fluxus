@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..models import DeviceToken
+from ..settings_store import get_setting
 from .security import DEVICE_TOKEN_PREFIX, decode_access_token, hash_device_token
 
 bearer = HTTPBearer(auto_error=False)
@@ -19,7 +20,7 @@ async def require_auth(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> str:
     """Accepte un JWT (web) ou un token d'appareil (mobile). Renvoie le type de principal."""
-    token = creds.credentials if creds else request.query_params.get("token")
+    token = creds.credentials if creds else None
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentification requise")
 
@@ -40,6 +41,9 @@ async def require_auth(
     payload = decode_access_token(token)
     if payload is None or payload.get("typ") != "access":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expirée")
+    current_version = await get_setting(session, "_password_version", default="")
+    if (payload.get("pv") or "") != current_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session invalidée par un changement de mot de passe")
     return "owner"
 
 

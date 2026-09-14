@@ -43,8 +43,13 @@ docker compose up -d --build
 Le premier build prend quelques minutes (front Node, dépendances Python, image Chromium).
 Ensuite l'application répond sur `http://<hôte>:8000` (port `FLUXUS_HTTP_PORT`).
 
-Raccordez ce port à votre reverse proxy en HTTPS. L'API ne gère pas TLS et fait confiance aux
-en-têtes `X-Forwarded-*` pour la limitation des tentatives de connexion.
+Raccordez ce port à votre reverse proxy en HTTPS. L'API ne gère pas TLS. Renseignez
+`FORWARDED_ALLOW_IPS` avec l'adresse du proxy pour que la limitation des tentatives de connexion
+voie la vraie adresse des clients (par défaut `*`, acceptable sur un réseau Compose privé ; un
+plafond global de 20 échecs par minute s'applique dans tous les cas).
+
+Le démarrage **refuse** un `FLUXUS_SECRET_KEY` d'exemple ou de moins de 32 caractères, et Compose
+exige `POSTGRES_PASSWORD` et `DATABASE_URL` dans `.env`.
 
 Exemple Caddy :
 
@@ -80,6 +85,7 @@ les 5 minutes ; le bouton ↻ force une synchronisation.
 | `FLUXUS_HTTP_PORT` | Port publié sur l'hôte pour l'API et le front | `8000` |
 | `FLUXUS_PG_PORT` | Port hôte de Postgres, utile en développement | `5433` |
 | `FLUXUS_BROWSER_URL` | URL interne du service de rendu | `http://browser:3000` |
+| `FORWARDED_ALLOW_IPS` | IP(s) du reverse proxy autorisées à fournir `X-Forwarded-For` | `*` |
 
 Variables optionnelles, préfixe `FLUXUS_` (voir `backend/fluxus/config.py`) : `ACCESS_TOKEN_HOURS`
 (durée des sessions web, 168 h), `DEFAULT_FETCH_INTERVAL_MIN` (30), `MIN_FETCH_INTERVAL_MIN` (10),
@@ -95,12 +101,14 @@ Stockés en base (table `settings`), modifiables dans *Paramètres* :
 | Lecture | combinaison de polices (Éditorial, Littéraire, Journal, Moderne, Lisible, Système), taille du texte, largeur de colonne ; propre à l'appareil, aussi via le bouton Aa du lecteur |
 | Apparence | thème clair / sombre / automatique (aussi via le bouton en bas de la barre latérale), réinitialisation du tableau de bord |
 | Abonnements | import / export OPML, rafraîchissement global |
-| Hors-ligne | synchroniser, resynchroniser tout |
+| Hors-ligne | horizon de conservation en jours (première sync d'un appareil et ménage local), synchroniser, resynchroniser tout |
 | Appareils | liste et révocation des tokens de l'application mobile |
-| Sécurité | changement de mot de passe |
+| Sécurité | changement de mot de passe (invalide les autres sessions web ; option de déconnexion des appareils mobiles) |
 
 Par flux (double-clic ou clic droit sur un flux) : titre, catégorie, URL, mode d'extraction de
-l'article complet (`auto`, `http`, `browser`, `none`), pause.
+l'article complet, pause. Modes : *À la demande* (extraction à l'ouverture, HTTP puis navigateur),
+*Toujours en HTTP* et *Toujours via le navigateur* (chaque nouvel article est extrait en arrière-plan,
+lisible hors-ligne), *Jamais*.
 
 ### Fournisseur LLM
 
@@ -192,8 +200,9 @@ sur l'appareil.
 
 ### Hors-ligne
 
-Toutes les lectures de l'interface se font dans une base locale (IndexedDB). Les 30 derniers jours
-d'articles, avec leur contenu complet, sont conservés sur chaque appareil. Marquer lu ou favori
+Toutes les lectures de l'interface se font dans une base locale (IndexedDB). Les N derniers jours
+d'articles (30 par défaut, réglable dans *Paramètres → Hors-ligne*) et tous les favoris, avec leur
+contenu complet, sont conservés sur chaque appareil. Marquer lu ou favori
 hors-ligne est mis en file et rejoué au retour du réseau ; en cas de conflit la modification la plus
 récente gagne. Ajouter un flux, récupérer un article complet ou résumer nécessite le réseau.
 
@@ -238,8 +247,9 @@ gunzip -c fluxus-2026-09-14.sql.gz | docker compose exec -T postgres psql -U flu
 
 Remise à zéro complète : `docker compose down -v` (supprime le volume Postgres).
 
-Ressources : environ 300 Mo de RAM au repos pour l'ensemble ; le conteneur `browser` est plafonné à
-1 Go et n'est sollicité qu'en repli d'extraction.
+Ressources : environ 450 Mo de RAM au repos pour l'ensemble (api et worker plafonnés à 768 Mo,
+`browser` à 1 Go). Les journaux tournent sur 3 fichiers de 10 Mo par service. Le navigateur est
+sur un réseau Compose séparé, sans accès à Postgres, et refuse de rendre toute adresse privée.
 
 ## Développement
 
@@ -250,7 +260,8 @@ docker compose up -d postgres                       # la base seule, publiée su
 
 # Backend — Python 3.12 géré par uv
 cd backend && uv sync --all-extras
-export DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus FLUXUS_SECRET_KEY=dev-secret-32-chars-minimum
+export DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus
+export FLUXUS_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')   # 32 caractères minimum, non placeholder
 uv run alembic upgrade head
 uv run uvicorn fluxus.main:app --reload --port 8000
 uv run python -m fluxus.worker                      # second terminal
@@ -277,8 +288,9 @@ Tests de bout en bout de l'interface (Playwright dans l'image `fluxus-browser`, 
 tourne sur :8000) :
 
 ```bash
-docker run --rm --network host -v $PWD/scripts/e2e-ui.py:/out/e2e-ui.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-ui.py
-docker run --rm --network host -v $PWD/scripts/e2e-dashboard.py:/out/e2e-dashboard.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-dashboard.py
+# -u 0 : l'image tourne en utilisateur non privilégié, les captures doivent pouvoir s'écrire dans /out
+docker run --rm --network host -u 0 -v $PWD/scripts/e2e-ui.py:/out/e2e-ui.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-ui.py
+docker run --rm --network host -u 0 -v $PWD/scripts/e2e-dashboard.py:/out/e2e-dashboard.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-dashboard.py
 ```
 
 Nouvelle migration après modification de `backend/fluxus/models.py` :
@@ -295,6 +307,8 @@ Nouvelle migration après modification de `backend/fluxus/models.py` :
 | Article complet vide ou tronqué | Le site est payant ou anti-robot. Essayer « Réessayer via le navigateur » ; sinon passer le flux en `none`. |
 | L'interface ne montre pas les nouveaux articles | Bouton ↻ ; si le problème persiste, *Paramètres → Hors-ligne → Resynchroniser tout*. |
 | « Cette disposition a été enregistrée par une version plus récente » | Un autre appareil a une version de Fluxus plus récente : mettez celui-ci à jour, le tableau de bord reste consultable en attendant. |
+| L'API refuse de démarrer : « FLUXUS_SECRET_KEY doit être… » | Le secret est un exemple ou trop court. Générer une valeur aléatoire de 32 caractères ou plus, ne plus la changer ensuite. |
+| Session fermée sur tous les navigateurs après un changement de mot de passe | Comportement voulu : les anciennes sessions sont invalidées, celle qui a fait le changement reste ouverte. |
 | Conteneur `api` `unhealthy` alors qu'il répond | Un proxy HTTP injecté par Docker intercepte le test local ; le healthcheck utilise `--noproxy '*'` pour cela. Vérifier `~/.docker/config.json`. |
 | Gradle échoue derrière un proxy | `scripts/build-apk.sh` traduit `HTTPS_PROXY` en propriétés Java ; vérifier que la variable est visible dans le conteneur. |
 

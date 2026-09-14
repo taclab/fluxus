@@ -22,7 +22,8 @@ export interface SyncState {
   pendingChanges: number
 }
 
-const RETENTION_DAYS = 30
+const DEFAULT_RETENTION_DAYS = 30
+let retentionDays = DEFAULT_RETENTION_DAYS
 const listeners = new Set<Listener>()
 let state: SyncState = { status: 'idle', lastSyncAt: null, error: null, pendingChanges: 0 }
 let inFlight: Promise<void> | null = null
@@ -80,24 +81,36 @@ export async function recordBulkRead(entryIds: number[], read: boolean) {
   void pushOutbox()
 }
 
-let pushing = false
-export async function pushOutbox(): Promise<void> {
-  if (pushing || !isOnline() || !getToken()) return
-  pushing = true
-  try {
-    while (true) {
-      const batch = await db.outbox.orderBy('id').limit(200).toArray()
-      if (batch.length === 0) break
-      const changes = batch.map((b) => ({ entry_id: b.entry_id, read: b.read ?? null, starred: b.starred ?? null, at: b.at }))
-      unwrap(await api().POST('/api/sync', { body: { changes } }))
-      await db.outbox.bulkDelete(batch.map((b) => b.id!))
-    }
-  } catch (err) {
-    console.warn('push outbox échoué', err)
-  } finally {
-    pushing = false
-    await refreshPending()
+let pushInFlight: Promise<void> | null = null
+let pushRequested = false
+
+/** Pousse l'outbox. Un appel pendant un push en cours partage la promesse et demande un nouveau tour. */
+export function pushOutbox(): Promise<void> {
+  if (!isOnline() || !getToken()) return Promise.resolve()
+  if (pushInFlight) {
+    pushRequested = true
+    return pushInFlight
   }
+  pushInFlight = (async () => {
+    try {
+      do {
+        pushRequested = false
+        while (true) {
+          const batch = await db.outbox.orderBy('id').limit(200).toArray()
+          if (batch.length === 0) break
+          const changes = batch.map((b) => ({ entry_id: b.entry_id, read: b.read ?? null, starred: b.starred ?? null, at: b.at }))
+          unwrap(await api().POST('/api/sync', { body: { changes } }))
+          await db.outbox.bulkDelete(batch.map((b) => b.id!))
+        }
+      } while (pushRequested)
+    } catch (err) {
+      console.warn('push outbox échoué', err)
+    } finally {
+      pushInFlight = null
+      await refreshPending()
+    }
+  })()
+  return pushInFlight
 }
 
 async function mergeFeeds(page: SyncPull) {
@@ -139,7 +152,7 @@ async function mergeEntries(page: SyncPull) {
 }
 
 async function applyRetention() {
-  const cutoff = Date.now() - RETENTION_DAYS * 24 * 3600 * 1000
+  const cutoff = Date.now() - retentionDays * 24 * 3600 * 1000
   const old = await db.entries.where('publishedTs').below(cutoff).filter((e) => e.read && !e.starred).primaryKeys()
   if (old.length) {
     await db.entries.bulkDelete(old)
@@ -164,19 +177,22 @@ export async function syncNow(): Promise<void> {
       let runStartedAt: string | undefined
       let hasMore = true
       let pages = 0
-      while (hasMore && pages < 500) {
+      const MAX_PAGES = 500
+      while (hasMore && pages < MAX_PAGES) {
         const page = unwrap(
           await api().GET('/api/sync', { params: { query: cursor ? { cursor, limit: 300 } : { since, limit: 300 } } }),
         )
         runStartedAt ??= page.server_time
+        if (page.retention_days) retentionDays = page.retention_days
         if (pages === 0) await mergeFeeds(page)
         await mergeEntries(page)
         cursor = page.next_cursor ?? undefined
         hasMore = page.has_more && Boolean(cursor)
         pages += 1
       }
-      // Le curseur `since` n'avance qu'une fois la passe complète : une passe interrompue repart du début.
-      if (runStartedAt) await setMeta('sync.since', runStartedAt)
+      // Le curseur `since` n'avance qu'une fois la passe complète : une passe interrompue (ou plafonnée)
+      // repart du début et ne perd rien.
+      if (runStartedAt && !hasMore) await setMeta('sync.since', runStartedAt)
       await applyRetention()
       const now = new Date().toISOString()
       await setMeta('sync.lastSyncAt', now)
@@ -202,15 +218,17 @@ export function startAutoSync(intervalMs = 5 * 60 * 1000): () => void {
   void refreshPending()
   void syncNow()
   const onOnline = () => void syncNow()
+  const onOffline = () => emit({ status: 'offline' })
   const onVisible = () => {
     if (document.visibilityState === 'visible') void syncNow()
   }
   window.addEventListener('online', onOnline)
-  window.addEventListener('offline', () => emit({ status: 'offline' }))
+  window.addEventListener('offline', onOffline)
   document.addEventListener('visibilitychange', onVisible)
   timer = window.setInterval(() => void syncNow(), intervalMs)
   return () => {
     window.removeEventListener('online', onOnline)
+    window.removeEventListener('offline', onOffline)
     document.removeEventListener('visibilitychange', onVisible)
     if (timer) window.clearInterval(timer)
   }

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, isOnline, unwrap, type EntryListItem, type Feed } from '../../api/client'
 import type { View } from '../../app/view'
 import { Button, EmptyState, IconButton, Spinner } from '../../components/ui'
-import { db, type LocalEntry } from '../../db/db'
+import { db, toLocalEntry, type LocalEntry } from '../../db/db'
 import { hostname, relativeDate } from '../../lib/format'
 import { recordBulkRead } from '../../sync/engine'
 import { FeedIcon } from '../feeds/Sidebar'
@@ -26,6 +26,7 @@ interface Props {
 }
 
 const PAGE = 60
+const EMPTY_FEEDS: Feed[] = []
 
 function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string): string {
   switch (view.kind) {
@@ -54,7 +55,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   const [remote, setRemote] = useState<{ items: EntryListItem[]; loading: boolean; error?: string } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? []
+  const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
   const feedMap = useMemo(() => new Map(feeds.map((f) => [f.id, f])), [feeds])
   const category = useLiveQuery(() => (view.kind === 'category' ? db.categories.get(view.id!) : undefined), [view.kind, view.id])
 
@@ -88,12 +89,6 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         if (cancelled) return
         const page = unwrap(r)
         setRemote({ items: page.items, loading: false })
-        // On met les résultats en cache local pour pouvoir les ouvrir.
-        void Promise.all(page.items.map((i) => api().GET('/api/entries/{entry_id}', { params: { path: { entry_id: i.id } } }))).then(async (rs) => {
-          const full = rs.map((x) => x.data).filter(Boolean)
-          const { toLocalEntry } = await import('../../db/db')
-          await db.entries.bulkPut(full.map((e) => toLocalEntry(e!)))
-        })
       })
       .catch((err) => !cancelled && setRemote({ items: [], loading: false, error: err instanceof Error ? err.message : 'Erreur' }))
     return () => {
@@ -153,6 +148,19 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     }
   }, [entries?.length, limit])
 
+  /** Résultat de recherche absent de la base locale : on le récupère avant d'ouvrir le lecteur. */
+  async function select(id: number) {
+    if (remote && !(await db.entries.get(id))) {
+      try {
+        const full = unwrap(await api().GET('/api/entries/{entry_id}', { params: { path: { entry_id: id } } }))
+        await db.entries.put(toLocalEntry(full))
+      } catch {
+        /* hors-ligne ou erreur : le lecteur affichera « introuvable » */
+      }
+    }
+    onSelect(id)
+  }
+
   async function markAllRead() {
     const ids = items.filter((e) => !e.read).map((e) => e.id)
     if (ids.length === 0) return
@@ -193,6 +201,14 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Rechercher…"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setSearchOpen(false)
+                  setSearchText('')
+                  if (view.kind === 'search') onBack ? onBack() : onSearch('')
+                }
+              }}
               className="h-9 flex-1 rounded-lg bg-muted px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400"
               data-search-input
             />
@@ -247,7 +263,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         )}
         <ul className={clsx(density === 'cards' && 'p-2 space-y-2')}>
           {items.map((e) => (
-            <EntryRow key={e.id} entry={e} feed={feedMap.get(e.feed_id)} selected={e.id === selectedId} density={density} showFeed={view.kind !== 'feed'} onClick={() => onSelect(e.id)} />
+            <EntryRow key={e.id} entry={e} feed={feedMap.get(e.feed_id)} selected={e.id === selectedId} density={density} showFeed={view.kind !== 'feed'} onClick={() => void select(e.id)} />
           ))}
         </ul>
         {(entries?.length ?? 0) >= limit && !remote && (
@@ -278,7 +294,7 @@ export function EntryRow({ entry, feed, selected, density, showFeed, onClick }: 
         <div className="flex gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 text-xs text-muted mb-1">
-              {!entry.read && <span className="size-2 rounded-full bg-accent-500 shrink-0" aria-label="Non lu" />}
+              {!entry.read && <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label="Non lu" />}
               {showFeed && feed && <FeedIcon feed={feed} className="size-3.5" />}
               {showFeed && <span className="truncate">{source}</span>}
               <span className="ml-auto shrink-0 tabular-nums">{relativeDate(entry.published_at)}</span>
