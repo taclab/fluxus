@@ -36,6 +36,9 @@ docker run --rm \
     fi
     chmod +x gradlew && ./gradlew --no-daemon -q '"$TASK"
 
+# Les fichiers créés par Gradle appartiennent à root : on les rend à l'utilisateur courant.
+docker run --rm -v "$PWD/web/android:/p" alpine chown -R "$(id -u):$(id -g)" /p
+
 OUT_DIR="web/android/app/build/outputs/apk/$MODE"
 mkdir -p dist
 cp "$OUT_DIR"/*.apk dist/

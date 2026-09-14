@@ -99,13 +99,23 @@ export async function pushOutbox(): Promise<void> {
   }
 }
 
-async function mergePull(page: SyncPull) {
-  await db.transaction('rw', db.entries, db.feeds, db.categories, db.summaries, db.outbox, async () => {
+async function mergeFeeds(page: SyncPull) {
+  await db.transaction('rw', db.entries, db.feeds, db.categories, db.summaries, async () => {
     await db.categories.clear()
     await db.categories.bulkPut(page.categories)
     await db.feeds.clear()
     await db.feeds.bulkPut(page.feeds)
+    // Entrées dont le flux a été supprimé côté serveur.
+    const orphanIds = await db.entries.where('feed_id').noneOf(page.feed_ids).primaryKeys()
+    if (orphanIds.length) {
+      await db.entries.bulkDelete(orphanIds)
+      await db.summaries.where('entry_id').anyOf(orphanIds).delete()
+    }
+  })
+}
 
+async function mergeEntries(page: SyncPull) {
+  await db.transaction('rw', db.entries, db.summaries, db.outbox, async () => {
     // Un changement local encore en attente ne doit pas être écrasé par la version serveur.
     const pendingIds = new Set((await db.outbox.toArray()).map((o) => o.entry_id))
     const incoming: LocalEntry[] = []
@@ -124,11 +134,6 @@ async function mergePull(page: SyncPull) {
     }
     await db.entries.bulkPut(incoming)
     if (page.summaries.length) await db.summaries.bulkPut(page.summaries)
-
-    // Entrées dont le flux a été supprimé côté serveur.
-    const feedIds = new Set(page.feed_ids)
-    const orphanIds = (await db.entries.toArray()).filter((e) => !feedIds.has(e.feed_id)).map((e) => e.id)
-    if (orphanIds.length) await db.entries.bulkDelete(orphanIds)
   })
 }
 
@@ -152,17 +157,24 @@ export async function syncNow(): Promise<void> {
     emit({ status: 'syncing', error: null })
     try {
       await pushOutbox()
-      let since = (await getMeta('sync.since')) ?? undefined
+      const since = (await getMeta('sync.since')) ?? undefined
+      let cursor: string | undefined
+      let runStartedAt: string | undefined
       let hasMore = true
       let pages = 0
-      while (hasMore && pages < 50) {
-        const page = unwrap(await api().GET('/api/sync', { params: { query: { since, limit: 300 } } }))
-        await mergePull(page)
-        since = page.next_since
-        hasMore = page.has_more
+      while (hasMore && pages < 500) {
+        const page = unwrap(
+          await api().GET('/api/sync', { params: { query: cursor ? { cursor, limit: 300 } : { since, limit: 300 } } }),
+        )
+        runStartedAt ??= page.server_time
+        if (pages === 0) await mergeFeeds(page)
+        await mergeEntries(page)
+        cursor = page.next_cursor ?? undefined
+        hasMore = page.has_more && Boolean(cursor)
         pages += 1
-        await setMeta('sync.since', since)
       }
+      // Le curseur `since` n'avance qu'une fois la passe complète : une passe interrompue repart du début.
+      if (runStartedAt) await setMeta('sync.since', runStartedAt)
       await applyRetention()
       const now = new Date().toISOString()
       await setMeta('sync.lastSyncAt', now)

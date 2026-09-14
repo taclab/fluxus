@@ -198,3 +198,35 @@ async def test_summarize_sse_with_mocked_provider(client: AsyncClient, monkeypat
     r = await client.post(f"/api/entries/{entry_id}/summarize")
     assert '"cached": true' in r.text
     assert "event: delta" not in r.text
+
+
+async def test_sync_pagination_with_identical_timestamps(client: AsyncClient):
+    """Des centaines d'entrées créées dans la même seconde ne doivent pas bloquer le curseur."""
+    from fluxus.db import session_scope
+    from fluxus.models import Entry, Feed
+
+    same_time = datetime.now(UTC)
+    async with session_scope() as session:
+        feed = Feed(url="https://bulk.example/rss", title="Bulk")
+        session.add(feed)
+        await session.flush()
+        for i in range(7):
+            session.add(
+                Entry(feed_id=feed.id, guid=f"bulk{i}", title=f"Bulk {i}", published_at=same_time, hash=f"bh{i}", updated_at=same_time)
+            )
+
+    seen: list[int] = []
+    since = (same_time - timedelta(seconds=1)).isoformat()
+    params: dict = {"since": since, "limit": 3}
+    for _ in range(10):
+        r = await client.get("/api/sync", params=params)
+        body = r.json()
+        seen += [e["id"] for e in body["entries"] if e["title"].startswith("Bulk")]
+        if not body["has_more"]:
+            assert body["next_cursor"] is None
+            break
+        params = {"cursor": body["next_cursor"], "limit": 3}
+    assert len(seen) == 7 and len(set(seen)) == 7
+
+    r = await client.get("/api/sync", params={"cursor": "n-importe-quoi"})
+    assert r.status_code == 400

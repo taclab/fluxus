@@ -455,7 +455,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Pull */
+        /**
+         * Pull
+         * @description Première page : `since` (dernière passe réussie). Pages suivantes : `cursor` renvoyé par la page précédente.
+         */
         get: operations["pull_api_sync_get"];
         put?: never;
         /**
@@ -903,6 +906,8 @@ export interface components {
             deleted_entry_ids: number[];
             /** Has More */
             has_more: boolean;
+            /** Next Cursor */
+            next_cursor: string | null;
             /**
              * Next Since
              * Format: date-time
@@ -1960,6 +1965,7 @@ export interface operations {
         parameters: {
             query?: {
                 since?: string | null;
+                cursor?: string | null;
                 limit?: number;
                 include_content?: boolean;
             };
