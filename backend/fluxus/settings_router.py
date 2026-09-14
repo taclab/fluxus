@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,6 +17,21 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 EDITABLE_KEYS = set(DEFAULTS.keys())
+MAX_LAYOUT_BYTES = 64 * 1024
+
+
+def _validate_layout(value: str) -> None:
+    """Garde-fou : un client bogué ne doit pas pouvoir écraser la disposition avec du texte corrompu."""
+    if not value:
+        return
+    if len(value.encode()) > MAX_LAYOUT_BYTES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Disposition invalide : trop volumineuse")
+    try:
+        data = json.loads(value)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Disposition invalide : JSON illisible") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("widgets"), list):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Disposition invalide : structure inattendue")
 
 
 class SettingsOut(BaseModel):
@@ -55,6 +71,8 @@ async def patch_settings(body: SettingsPatch, _: Auth, session: Session) -> Sett
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Paramètre inconnu: {key}")
         if key in SECRET_KEYS and value and "…" in value:
             continue  # valeur masquée renvoyée telle quelle par le front : on ne touche pas
+        if key == "dashboard_layout":
+            _validate_layout(value)
         await set_setting(session, key, value.strip())
     await session.commit()
     return await get_settings_view(_, session)

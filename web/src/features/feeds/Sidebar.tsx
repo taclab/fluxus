@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, ChevronRight, Folder, Inbox, Play, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, Inbox, LayoutDashboard, Play, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -12,6 +12,7 @@ import { syncNow } from '../../sync/engine'
 import { useSyncState } from '../../sync/useSync'
 import { viewPath, type View } from '../../app/view'
 import { AddFeedDialog } from './AddFeedDialog'
+import { useUnreadCounts } from './useUnreadCounts'
 
 interface Props {
   view: View
@@ -25,11 +26,7 @@ const UNCATEGORIZED = -1
 export function Sidebar({ view, onSelect, onEditFeed, onEditCategory }: Props) {
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? []
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? []
-  const unreadByFeed = useLiveQuery(async () => {
-    const counts = new Map<number, number>()
-    await db.entries.where('readFlag').equals(0).each((e) => counts.set(e.feed_id, (counts.get(e.feed_id) ?? 0) + 1))
-    return counts
-  }, []) ?? new Map<number, number>()
+  const unreadByFeed = useUnreadCounts()
   const starredCount = useLiveQuery(() => db.entries.where('starredFlag').equals(1).count(), []) ?? 0
   const sync = useSyncState()
   const [addOpen, setAddOpen] = useState(false)
@@ -78,6 +75,7 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory }: Props) {
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
+        <NavItem icon={<LayoutDashboard className="size-4" />} label="Tableau de bord" count={0} active={isActive({ kind: 'dashboard' })} onClick={() => onSelect({ kind: 'dashboard' })} />
         <NavItem icon={<Inbox className="size-4" />} label="Tous les articles" count={totalUnread} active={isActive({ kind: 'all' })} onClick={() => onSelect({ kind: 'all' })} />
         <NavItem icon={<Rss className="size-4" />} label="Non lus" count={totalUnread} active={isActive({ kind: 'unread' })} onClick={() => onSelect({ kind: 'unread' })} />
         <NavItem icon={<Star className="size-4" />} label="Favoris" count={starredCount} muted active={isActive({ kind: 'starred' })} onClick={() => onSelect({ kind: 'starred' })} />

@@ -28,7 +28,10 @@ with sync_playwright() as p:
     page.fill("input[type=password]", PASSWORD)
     page.click("button[type=submit]")
     page.wait_for_selector("text=Tous les articles", timeout=15000)
-    # attendre la sync initiale
+    # La page d'accueil est le tableau de bord ; la liste classique est sur /all.
+    page.wait_for_selector("[data-widget]", timeout=30000)
+    page.locator("nav button:has-text('Tous les articles')").click()
+    page.wait_for_url("**/all**")
     page.wait_for_selector("[data-entry-id]", timeout=30000)
     page.wait_for_timeout(1500)
     shot(page, "02-list")

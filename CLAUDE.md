@@ -22,6 +22,8 @@ npm run gen:api                                # après tout changement de route
 - Les résumés LLM ne sont jamais déclenchés automatiquement.
 - Nouveau réglage : `settings_store.DEFAULTS` (+ `SECRET_KEYS` si secret) puis `SettingsPage`.
 - Nouveau job : handler `@job_handler`, importé dans `handlers.py`, idempotent.
+- Nouveau widget de tableau de bord : `features/dashboard/layout.ts` (type, normalisation, titre) → `queries.ts` → `widgets/` → `DashboardGrid.WidgetSwitch` + `WidgetConfigDialog`.
+- Toute requête Dexie d'un widget doit passer par un index de `db.ts` ; pas de scan de table dans un widget.
 - Migration : `uv run alembic revision --autogenerate`, relire le fichier (triggers et index partiels non détectés).
 
 ## Pièges connus sur la machine de développement

@@ -57,6 +57,7 @@ export function App() {
         {authed ? (
           <Routes>
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/all" element={<Layout />} />
             <Route path="/feed/:id" element={<Layout />} />
             <Route path="/category/:id" element={<Layout />} />
             <Route path="/unread" element={<Layout />} />

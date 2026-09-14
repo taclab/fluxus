@@ -9,6 +9,7 @@
 import { api, isOnline, unwrap, type EntryOut, type SyncPull } from '../api/client'
 import { getToken } from '../api/auth'
 import { db, getMeta, setMeta, toLocalEntry, type LocalEntry } from '../db/db'
+import { flushDashboardLayout } from '../features/dashboard/useDashboardLayout'
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error'
 
@@ -52,7 +53,7 @@ export async function recordChange(entryId: number, change: { read?: boolean; st
   await db.transaction('rw', db.entries, db.outbox, async () => {
     const entry = await db.entries.get(entryId)
     if (entry) {
-      const patch: Partial<LocalEntry> = { updated_at: at }
+      const patch: Partial<LocalEntry> = { updated_at: at, updatedTs: Date.parse(at) }
       if (change.read !== undefined) {
         patch.read = change.read
         patch.readFlag = change.read ? 1 : 0
@@ -72,7 +73,7 @@ export async function recordChange(entryId: number, change: { read?: boolean; st
 export async function recordBulkRead(entryIds: number[], read: boolean) {
   const at = new Date().toISOString()
   await db.transaction('rw', db.entries, db.outbox, async () => {
-    await db.entries.where('id').anyOf(entryIds).modify({ read, readFlag: read ? 1 : 0, updated_at: at })
+    await db.entries.where('id').anyOf(entryIds).modify({ read, readFlag: read ? 1 : 0, updated_at: at, updatedTs: Date.parse(at) })
     await db.outbox.bulkAdd(entryIds.map((entry_id) => ({ entry_id, read, at })))
   })
   await refreshPending()
@@ -157,6 +158,7 @@ export async function syncNow(): Promise<void> {
     emit({ status: 'syncing', error: null })
     try {
       await pushOutbox()
+      await flushDashboardLayout()
       const since = (await getMeta('sync.since')) ?? undefined
       let cursor: string | undefined
       let runStartedAt: string | undefined

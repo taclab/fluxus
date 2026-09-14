@@ -7,7 +7,7 @@ import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, typ
 import type { Theme } from '../../app/theme'
 import { useTheme } from '../../components/ThemeToggle'
 import { Button, Field, IconButton, Input, Select, Spinner, useToast } from '../../components/ui'
-import { clearDatabase } from '../../db/db'
+import { clearDatabase, db } from '../../db/db'
 import { formatTokens, relativeDate } from '../../lib/format'
 import { resetAndSync, syncNow } from '../../sync/engine'
 
@@ -233,6 +233,24 @@ export function SettingsPage() {
                 <option value="dark">Sombre</option>
               </Select>
             </Field>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                onClick={async () => {
+                  try {
+                    unwrap(await api().PATCH('/api/settings', { body: { values: { dashboard_layout: '' } } }))
+                    await db.meta.delete('dashboard.layout')
+                    await db.meta.delete('dashboard.layout.dirty')
+                    toast('Tableau de bord réinitialisé', 'success')
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : 'Erreur', 'error')
+                  }
+                }}
+              >
+                Réinitialiser le tableau de bord
+              </Button>
+              <span className="text-xs text-muted">Revient à la disposition automatique : un widget par catégorie.</span>
+            </div>
           </Section>
 
           <Section title="Abonnements" description="Import et export au format OPML, compatible avec tous les lecteurs.">

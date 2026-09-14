@@ -152,6 +152,19 @@ async def test_settings_secrets_masked(client: AsyncClient):
     assert r.status_code == 400
 
 
+async def test_dashboard_layout_setting(client: AsyncClient):
+    layout = '{"version": 1, "updatedAt": "2026-09-14T15:00:00Z", "widgets": [{"id": "a", "type": "stats", "width": 6}]}'
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": layout}})
+    assert r.status_code == 200
+    assert r.json()["values"]["dashboard_layout"] == layout
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": "pas du json"}})
+    assert r.status_code == 400
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": '{"widgets": 3}'}})
+    assert r.status_code == 400
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": ""}})
+    assert r.status_code == 200 and r.json()["values"]["dashboard_layout"] == ""
+
+
 async def test_summarize_sse_with_mocked_provider(client: AsyncClient, monkeypatch):
     """Vérifie la chaîne SSE complète avec un fournisseur simulé (aucune clé API nécessaire)."""
     from fluxus.summarize import service

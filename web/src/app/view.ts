@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-export type ViewKind = 'all' | 'unread' | 'starred' | 'feed' | 'category' | 'search'
+export type ViewKind = 'dashboard' | 'all' | 'unread' | 'starred' | 'feed' | 'category' | 'search'
 
 export interface View {
   kind: ViewKind
@@ -13,8 +13,10 @@ export interface View {
 
 export function viewPath(view: View): string {
   switch (view.kind) {
-    case 'all':
+    case 'dashboard':
       return '/'
+    case 'all':
+      return '/all'
     case 'unread':
       return '/unread'
     case 'starred':
@@ -41,7 +43,8 @@ export function useView() {
     if (p === '/unread') return { kind: 'unread' }
     if (p === '/starred') return { kind: 'starred' }
     if (p === '/search') return { kind: 'search', query: search.get('q') ?? '' }
-    return { kind: 'all' }
+    if (p === '/all') return { kind: 'all' }
+    return { kind: 'dashboard' }
   }, [location.pathname, params.id, search])
 
   const entryId = search.get('entry') ? Number(search.get('entry')) : null
@@ -68,6 +71,18 @@ export function useView() {
     [search, setSearch],
   )
 
+  /** Ouvre un article dans le contexte d'une vue (depuis le tableau de bord). */
+  const openEntryIn = useCallback(
+    (v: View, id: number) => {
+      const base = viewPath(v).split('?')[0]
+      const qs = new URLSearchParams()
+      if (v.kind === 'search') qs.set('q', v.query ?? '')
+      qs.set('entry', String(id))
+      navigate(`${base}?${qs.toString()}`)
+    },
+    [navigate],
+  )
+
   const setUnreadOnly = useCallback(
     (value: boolean) => {
       const next = new URLSearchParams(search)
@@ -79,5 +94,5 @@ export function useView() {
     [search, setSearch],
   )
 
-  return { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly }
+  return { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly, openEntryIn }
 }

@@ -41,6 +41,8 @@ function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string):
       return categoryTitle ?? 'Catégorie'
     case 'search':
       return `Recherche : ${view.query}`
+    default:
+      return 'Tableau de bord'
   }
 }
 
@@ -260,7 +262,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   )
 }
 
-function EntryRow({ entry, feed, selected, density, showFeed, onClick }: { entry: LocalEntry | EntryListItem; feed?: Feed; selected: boolean; density: Density; showFeed: boolean; onClick: () => void }) {
+export function EntryRow({ entry, feed, selected, density, showFeed, onClick }: { entry: LocalEntry | EntryListItem; feed?: Feed; selected: boolean; density: Density; showFeed: boolean; onClick: () => void }) {
   const source = feed?.title || hostname(entry.url)
   return (
     <li data-entry-id={entry.id}>

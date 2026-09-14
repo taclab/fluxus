@@ -6,6 +6,7 @@ ses appareils. Il apporte ce que les lecteurs open source classiques n'offrent p
 - **Article complet** récupéré depuis le site (HTTP + repli navigateur Chromium pour les sites JavaScript).
 - **Résumé LLM à la demande** des articles, en streaming, jamais automatique.
 - **Résumé de vidéos YouTube** à partir des sous-titres, avec chapitres horodatés cliquables.
+- **Tableau de bord** en page d'accueil : widgets configurables (nouveautés par catégorie ou flux, vidéos YouTube, favoris, résumés, statistiques), glisser-déposer, trois largeurs, disposition partagée entre appareils.
 - **Interface web** trois volets, raccourcis clavier, thème clair / sombre, recherche plein texte.
 - **Application Android** (Capacitor) avec lecture **hors-ligne** et synchronisation des états lu / favori.
 - Gestion des flux et catégories, découverte de flux depuis l'URL d'un site, import / export OPML.
@@ -56,6 +57,7 @@ fluxus.mondomaine.fr {
 ## Premiers pas
 
 1. Ouvrez l'interface : elle demande de **créer le mot de passe** (compte unique).
+   L'accueil est le **tableau de bord** ; il se remplit tout seul d'un widget par catégorie.
 2. Ajoutez des flux avec le bouton **+** en haut de la barre latérale. Vous pouvez coller l'URL
    d'un site (les flux sont découverts automatiquement), d'un flux RSS/Atom ou d'une chaîne YouTube.
    Ou importez un fichier OPML depuis *Paramètres → Abonnements*.
@@ -90,7 +92,7 @@ Stockés en base (table `settings`), modifiables dans *Paramètres* :
 | Section | Réglages |
 |---|---|
 | Résumés | fournisseur (`anthropic` ou `openai` et compatibles), clé API (chiffrée), modèle, effort de raisonnement, langue des résumés, URL de base OpenAI |
-| Apparence | thème clair / sombre / automatique (aussi via le bouton en bas de la barre latérale) |
+| Apparence | thème clair / sombre / automatique (aussi via le bouton en bas de la barre latérale), réinitialisation du tableau de bord |
 | Abonnements | import / export OPML, rafraîchissement global |
 | Hors-ligne | synchroniser, resynchroniser tout |
 | Appareils | liste et révocation des tokens de l'application mobile |
@@ -111,6 +113,37 @@ Les résumés coûtent uniquement quand vous cliquez. Le compteur de tokens cumu
 
 ## Utilisation
 
+### Tableau de bord
+
+Page d'accueil (`/`, touche `h`). Sans configuration, il affiche une vue d'ensemble (non lus, lus
+aujourd'hui, favoris, non lus par catégorie, flux en erreur), un widget « Nouveautés » par
+catégorie, une grille des dernières vidéos YouTube, les derniers favoris et les derniers résumés.
+Cette disposition automatique suit vos catégories jusqu'à votre première personnalisation.
+
+**Personnaliser** (en haut à droite) active le mode édition :
+
+- **glisser** un widget par sa poignée ⋮⋮ (souris, doigt avec appui long, ou clavier : Espace,
+  flèches, Espace) ;
+- menu ⋯ de chaque widget : **Monter / Descendre**, **largeur** ⅓ ½ 1, **Configurer**, **Retirer** ;
+- **Ajouter un widget** : type, source (une catégorie, un flux ou tout), nombre d'éléments,
+  affichage liste ou cartes, non lus seulement, titre personnalisé.
+
+| Widget | Contenu |
+|---|---|
+| Nouveautés | derniers articles d'une catégorie, d'un flux ou de tout ; bouton « tout marquer lu » ; liste ou cartes |
+| Vidéos YouTube | miniatures des dernières vidéos non vues, toutes chaînes ou une catégorie |
+| Favoris | derniers articles mis en favori |
+| Résumés récents | derniers articles résumés, avec les premières lignes du résumé |
+| Statistiques | non lus, lus aujourd'hui, favoris, résumés et tokens, barres par catégorie, flux en erreur |
+
+Cliquer un article ouvre le lecteur dans le contexte de sa catégorie (la liste correspondante à
+gauche, `j`/`k` disponibles) ; le bouton retour ramène au tableau de bord. Sur mobile, chaque
+widget occupe toute la largeur et se réordonne par le menu ⋯.
+
+La disposition est enregistrée sur le serveur, donc identique sur le web et sur Android, et mise en
+cache localement pour le hors-ligne. *Paramètres → Apparence → Réinitialiser le tableau de bord*
+revient à la disposition automatique.
+
 ### Interface
 
 Trois volets : **abonnements** (catégories dépliables, compteurs de non-lus, point rouge sur un flux
@@ -125,6 +158,7 @@ navigateur fonctionnent.
 
 | Touche | Action | Touche | Action |
 |---|---|---|---|
+| `h` | tableau de bord | | |
 | `j` / `k` ou ↓ / ↑ | article suivant / précédent | `f` | article complet : récupérer, ou basculer flux ↔ complet |
 | `m` | lu / non lu | `r` | résumer |
 | `s` | favori | `u` | filtre « non lus » |
@@ -228,8 +262,13 @@ DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus_test uv run
 cd ../web && npm run typecheck && npm run lint
 ```
 
-Test de bout en bout de l'interface (Playwright dans l'image `fluxus-browser`, contre une pile qui
-tourne sur :8000) : `docker run --rm --network host -v $PWD/scripts/e2e-ui.py:/out/e2e-ui.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-ui.py`.
+Tests de bout en bout de l'interface (Playwright dans l'image `fluxus-browser`, contre une pile qui
+tourne sur :8000) :
+
+```bash
+docker run --rm --network host -v $PWD/scripts/e2e-ui.py:/out/e2e-ui.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-ui.py
+docker run --rm --network host -v $PWD/scripts/e2e-dashboard.py:/out/e2e-dashboard.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-dashboard.py
+```
 
 Nouvelle migration après modification de `backend/fluxus/models.py` :
 `uv run alembic revision --autogenerate -m "description"`, puis relire le fichier généré.
@@ -244,6 +283,7 @@ Nouvelle migration après modification de `backend/fluxus/models.py` :
 | « Cette vidéo n'a pas de sous-titres » | Comportement attendu : pas de transcription audio. |
 | Article complet vide ou tronqué | Le site est payant ou anti-robot. Essayer « Réessayer via le navigateur » ; sinon passer le flux en `none`. |
 | L'interface ne montre pas les nouveaux articles | Bouton ↻ ; si le problème persiste, *Paramètres → Hors-ligne → Resynchroniser tout*. |
+| « Cette disposition a été enregistrée par une version plus récente » | Un autre appareil a une version de Fluxus plus récente : mettez celui-ci à jour, le tableau de bord reste consultable en attendant. |
 | Conteneur `api` `unhealthy` alors qu'il répond | Un proxy HTTP injecté par Docker intercepte le test local ; le healthcheck utilise `--noproxy '*'` pour cela. Vérifier `~/.docker/config.json`. |
 | Gradle échoue derrière un proxy | `scripts/build-apk.sh` traduit `HTTPS_PROXY` en propriétés Java ; vérifier que la variable est visible dans le conteneur. |
 

@@ -24,6 +24,8 @@ DEFAULTS: dict[str, str] = {
     "sync_prefetch_days": "7",
     "sync_prefetch_mode": "unread",  # all | unread | starred
     "ui_theme": "system",
+    # Disposition du tableau de bord (JSON produit par le front ; vide = disposition par défaut).
+    "dashboard_layout": "",
 }
 
 

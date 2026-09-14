@@ -126,7 +126,7 @@ jobs            settings (clé/valeur)          device_tokens
 | `summaries` | résumés produits | `kind` ∈ {`article`,`video`} · `provider`, `model`, `prompt_version` · `text_md` · `input_tokens`, `output_tokens` |
 | `transcripts` | sous-titres YouTube | `language`, `text`, `segments` JSONB (`start`, `duration`, `text`) |
 | `jobs` | file de travail | `type`, `payload` JSONB · `status` ∈ {`queued`,`running`,`done`,`failed`} · `run_at`, `attempts`, `max_attempts`, `locked_at` · `dedupe_key` (index unique partiel) |
-| `settings` | réglages et secrets | `key`, `value` ; les clés listées dans `SECRET_KEYS` sont chiffrées (Fernet dérivé de `FLUXUS_SECRET_KEY`) ; `_password_hash` est le mot de passe Argon2 |
+| `settings` | réglages et secrets | `key`, `value` ; les clés listées dans `SECRET_KEYS` sont chiffrées (Fernet dérivé de `FLUXUS_SECRET_KEY`) ; `_password_hash` est le mot de passe Argon2 ; `dashboard_layout` est le JSON de la disposition du tableau de bord (validé : JSON, ≤ 64 Ko, tableau `widgets`) |
 | `device_tokens` | tokens de l'appli mobile | `token_hash` (SHA-256 du token `flx_…`), `last_seen_at` |
 
 Règles importantes :
@@ -288,10 +288,48 @@ suivent le format FastAPI `{"detail": …}` ; `300 Multiple Choices` sur `POST f
 
 ### Navigation et état d'interface
 
-La vue courante vit dans l'URL (`app/view.ts`) : `/`, `/unread`, `/starred`, `/feed/:id`,
-`/category/:id`, `/search?q=`, plus `?entry=<id>` et `?unread=1`. Le layout (`app/Layout.tsx`)
-choisit un, deux ou trois volets selon la largeur (`md` 768 px, `lg` 1024 px) et gère les raccourcis
-clavier globaux (`app/useKeyboard.ts`, désactivés dans les champs et les dialogues).
+La vue courante vit dans l'URL (`app/view.ts`) : `/` (tableau de bord), `/all`, `/unread`,
+`/starred`, `/feed/:id`, `/category/:id`, `/search?q=`, plus `?entry=<id>` et `?unread=1`. Le
+layout (`app/Layout.tsx`) affiche le tableau de bord pleine largeur, ou un, deux ou trois volets
+selon la largeur (`md` 768 px, `lg` 1024 px), et gère les raccourcis clavier globaux
+(`app/useKeyboard.ts`, désactivés dans les champs et les dialogues ; réduits sur le tableau de bord
+pour laisser les flèches à dnd-kit). `openEntryIn(view, id)` ouvre un article dans le contexte
+d'une vue (`/category/3?entry=42`) : c'est ce que font les widgets.
+
+### Tableau de bord (`features/dashboard/`)
+
+```
+Dashboard ─ DashboardDataProvider (feeds, categories, unreadByFeed : 3 liveQueries partagées)
+   ├─ useDashboardLayout ── meta['dashboard.layout'] (cache) ⇄ settings.dashboard_layout (serveur)
+   ├─ DashboardGrid ── DndContext + SortableContext (stratégie neutre) ── SortableWidget × n
+   │      └─ WidgetFrame (chrome commun, menu Monter/Descendre/Largeur/Configurer/Retirer)
+   │            └─ NewsWidget | YoutubeWidget | StarredWidget | SummariesWidget | StatsWidget
+   └─ WidgetConfigDialog
+```
+
+- **Modèle** (`layout.ts`) : `{ version, updatedAt, widgets[] }`, widgets typés (`news`, `youtube`,
+  `starred`, `summaries`, `stats`), largeur `2 | 3 | 6` colonnes sur une grille de 6. `parseLayout`
+  valide défensivement et renvoie `ok | empty | newer` ; un widget de type inconnu est conservé et
+  rendu « non pris en charge » ; une `version` supérieure passe le dashboard en lecture seule.
+  `buildDefaultLayout` dérive une disposition des catégories quand rien n'est stocké ; elle n'est
+  persistée qu'à la première modification.
+- **Requêtes** (`queries.ts`) : `latestForFeeds` fait une requête indexée par flux
+  (`[feed_id+readFlag+publishedTs]`, `.reverse().limit(n)`) et fusionne : le tri mémoire est borné à
+  `flux × n`, contrairement à la liste principale qui charge toute une catégorie. « Lus aujourd'hui »
+  utilise l'index `[readFlag+updatedTs]` ajouté en **Dexie v2** (`updatedTs` dérivé de `updated_at`,
+  rempli par `upgrade()`). Les tokens viennent de `/api/settings/stats`, mis en cache 10 min dans
+  `meta`.
+- **Sauvegarde** (`useDashboardLayout.ts`) : écriture locale immédiate + drapeau `dirty`, PATCH après
+  1 s de silence, envoi `keepalive` sur `pagehide`, rejeu à `online` et dans `syncNow()` via
+  `flushDashboardLayout()`. `reconcile(local, dirty, server)` (pure) : le `updatedAt` le plus récent
+  gagne ; un serveur vide efface le cache local sauf si une modification locale attend ; `newer` →
+  lecture seule.
+- **Glisser-déposer** (`DashboardGrid.tsx`) : `@dnd-kit` avec une `SortingStrategy` neutre et un
+  réordonnancement réel du tableau dans `onDragOver` (garde `lastOverId`, `closestCorners`), pour
+  que la grille CSS reflue exactement malgré les largeurs mixtes. `DragOverlay` compact sans
+  animation de dépôt. Capteurs souris (distance 6 px), tactile (appui 250 ms, `touch-none` sur la
+  poignée seulement) et clavier (`sortableKeyboardCoordinates`). Le drag n'est actif qu'en mode
+  « Personnaliser » ; le menu Monter/Descendre couvre l'accessibilité et le mobile.
 
 ### Thème
 
@@ -352,7 +390,8 @@ browser/
   server.py                 FastAPI + Playwright : POST /render
 scripts/
   build-apk.sh              build de l'APK dans un conteneur (Dockerfile.android)
-  e2e-ui.py                 parcours Playwright de l'interface
+  e2e-ui.py                 parcours Playwright de l'interface (liste, lecteur, mobile, hors-ligne)
+  e2e-dashboard.py          parcours Playwright du tableau de bord (défaut, édition, drag, persistance, conflit)
 web/
   src/main.tsx              point d'entrée
   src/app/                  App (routes, auth, thème, bouton retour), Layout (volets, raccourcis),
@@ -362,6 +401,10 @@ web/
   src/db/db.ts              schéma Dexie, LocalEntry, meta
   src/sync/                 engine (pull/push/rétention), useSync
   src/features/
+    dashboard/              Dashboard (page), DashboardGrid (dnd-kit), WidgetFrame, WidgetConfigDialog,
+                            DashboardData (contexte), layout (modèle), queries (Dexie), useDashboardLayout,
+                            widgets/{News,Youtube,Starred,Summaries,Stats}Widget
+    feeds/useUnreadCounts   non lus par flux, partagé Sidebar / dashboard
     auth/LoginPage          création du mot de passe, connexion, adresse serveur
     feeds/Sidebar           navigation, compteurs, badge de sync, FeedIcon
     feeds/AddFeedDialog     ajout avec découverte et choix multiple
@@ -404,6 +447,16 @@ Sous-classer `Summarizer` dans `summarize/providers.py`, implémenter `stream()`
 `StreamResult` (générateur de texte + `Usage` rempli à la fin), l'ajouter dans `build_summarizer`,
 puis exposer ses réglages dans `settings_store.DEFAULTS` et `SettingsPage`.
 
+### Ajouter un type de widget
+
+1. Étendre l'union `Widget` et `normalizeWidget` / `blankWidget` / `widgetTitle` dans `layout.ts`,
+   ajouter le libellé dans `TYPE_LABEL`.
+2. Écrire la requête dans `queries.ts` en partant des index existants (`db.ts`).
+3. Créer `widgets/MonWidget.tsx` autour de `WidgetFrame`, le brancher dans `WidgetSwitch`
+   (`DashboardGrid.tsx`) et ses champs dans `WidgetConfigDialog.tsx`.
+4. Si le nouveau type change la forme du JSON existant, incrémenter `LAYOUT_VERSION` et écrire la
+   migration dans `migrate()`.
+
 ### Ajouter un réglage
 
 Ajouter la clé dans `settings_store.DEFAULTS` (et `SECRET_KEYS` si c'est un secret), puis un champ
@@ -424,7 +477,10 @@ colonne d'`entries` doit être synchronisée, l'ajouter à `EntryOut` (`schemas.
   la pagination, la recherche, la sync (pull, curseur à timestamps identiques, push last-write-wins),
   le masquage des secrets et la chaîne SSE de résumé avec un fournisseur simulé.
 - Interface : `scripts/e2e-ui.py` (Playwright) joue le parcours complet, y compris mobile et
-  hors-ligne, et produit des captures.
+  hors-ligne ; `scripts/e2e-dashboard.py` couvre le tableau de bord (disposition par défaut,
+  navigation vers le lecteur, tout marquer lu, menu, largeur, ajout, retrait, drag souris et
+  clavier, persistance serveur, conflit, lecture seule, mobile hors-ligne). Les deux produisent des
+  captures.
 
 ## 11. Limites connues et pistes
 

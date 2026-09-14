@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Category, Feed } from '../api/client'
 import { db } from '../db/db'
 import { recordChange } from '../sync/engine'
+import { Dashboard } from '../features/dashboard/Dashboard'
 import { EntryList } from '../features/entries/EntryList'
 import { CategoryDialog, FeedDialog } from '../features/feeds/FeedDialog'
 import { Sidebar } from '../features/feeds/Sidebar'
@@ -24,7 +25,8 @@ function useMediaQuery(query: string): boolean {
 }
 
 export function Layout() {
-  const { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly } = useView()
+  const { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly, openEntryIn } = useView()
+  const isDashboard = view.kind === 'dashboard'
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isTablet = useMediaQuery('(min-width: 768px)')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -59,8 +61,26 @@ export function Layout() {
     [entryId, setEntry],
   )
 
+  const goHome = useCallback(() => setView({ kind: 'dashboard' }), [setView])
+  const focusSearch = useCallback(
+    () => document.querySelector<HTMLInputElement>('[data-search-input]')?.focus() ?? document.querySelector<HTMLButtonElement>('[aria-label="Rechercher"]')?.click(),
+    [],
+  )
+  const help = useCallback(
+    () => alert('Raccourcis : h accueil · j/k naviguer · m lu/non lu · s favori · v ouvrir · f article complet · r résumer · u non lus · / rechercher · Échap retour'),
+    [],
+  )
+
+  // Sur le tableau de bord, pas d'article courant : on ne capture ni les flèches ni les touches d'article
+  // (dnd-kit utilise les flèches pour déplacer un widget au clavier).
+  const dashboardShortcuts = useMemo(
+    () => ({ h: goHome, '/': focusSearch, '?': help, Escape: () => setSidebarOpen(false) }),
+    [goHome, focusSearch, help],
+  )
+
   const shortcuts = useMemo(
     () => ({
+      h: goHome,
       j: () => move(1),
       k: () => move(-1),
       ArrowDown: () => move(1),
@@ -72,12 +92,12 @@ export function Layout() {
       r: () => current && setSummaryTick((t) => t + 1),
       u: () => setUnreadOnly(!unreadOnly),
       Escape: () => (entryId ? setEntry(null) : setSidebarOpen(false)),
-      '/': () => document.querySelector<HTMLInputElement>('[data-search-input]')?.focus() ?? document.querySelector<HTMLButtonElement>('[aria-label="Rechercher"]')?.click(),
-      '?': () => alert('Raccourcis : j/k naviguer · m lu/non lu · s favori · v ouvrir · f article complet · r résumer · u non lus · / rechercher · Échap retour'),
+      '/': focusSearch,
+      '?': help,
     }),
-    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly],
+    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly, goHome, focusSearch, help],
   )
-  useKeyboard(shortcuts)
+  useKeyboard(isDashboard ? dashboardShortcuts : shortcuts)
 
   // Mobile : une seule colonne à la fois.
   const showList = isTablet || entryId === null
@@ -99,7 +119,13 @@ export function Layout() {
         </>
       )}
 
-      {showList && (
+      {isDashboard && (
+        <div className="flex-1 min-w-0">
+          <Dashboard onOpenSidebar={() => setSidebarOpen(true)} onOpenEntry={openEntryIn} onSearch={() => setView({ kind: 'search', query: '' })} />
+        </div>
+      )}
+
+      {!isDashboard && showList && (
         <div className={clsx('shrink-0 border-r border-app', isTablet ? 'w-[24rem] xl:w-[26rem]' : 'w-full')}>
           <EntryList
             view={view}
@@ -114,7 +140,7 @@ export function Layout() {
         </div>
       )}
 
-      {showReader && (
+      {!isDashboard && showReader && (
         <div className="flex-1 min-w-0">
           <Reader entryId={entryId} onBack={isTablet ? undefined : () => setEntry(null)} summaryRequested={summaryTick} fullContentRequested={fullTick} />
         </div>

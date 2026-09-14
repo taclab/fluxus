@@ -9,6 +9,8 @@ export interface LocalEntry extends EntryOut {
   starredFlag: 0 | 1
   /** published_at en millisecondes pour trier vite. */
   publishedTs: number
+  /** updated_at en millisecondes (statistique « lus aujourd'hui »). */
+  updatedTs: number
 }
 
 export interface OutboxItem {
@@ -42,6 +44,20 @@ export class FluxusDB extends Dexie {
       outbox: '++id, entry_id',
       meta: 'key',
     })
+    // v2 : index sur la date de mise à jour pour compter les articles lus aujourd'hui.
+    this.version(2)
+      .stores({
+        entries:
+          'id, feed_id, publishedTs, readFlag, starredFlag, updatedTs, [feed_id+publishedTs], [readFlag+publishedTs], [starredFlag+publishedTs], [feed_id+readFlag+publishedTs], [readFlag+updatedTs]',
+      })
+      .upgrade((tx) =>
+        tx
+          .table('entries')
+          .toCollection()
+          .modify((e: LocalEntry) => {
+            e.updatedTs = new Date(e.updated_at).getTime()
+          }),
+      )
   }
 }
 
@@ -53,6 +69,7 @@ export function toLocalEntry(e: EntryOut): LocalEntry {
     readFlag: e.read ? 1 : 0,
     starredFlag: e.starred ? 1 : 0,
     publishedTs: new Date(e.published_at).getTime(),
+    updatedTs: new Date(e.updated_at).getTime(),
   }
 }
 
