@@ -29,7 +29,8 @@ export async function* postSse(path: string, signal?: AbortSignal): AsyncGenerat
   while (true) {
     const { value, done } = await reader.read()
     if (done) break
-    buffer += decoder.decode(value, { stream: true })
+    // Le serveur (sse-starlette) sépare les lignes par \r\n : on normalise avant de découper.
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, '\n')
     let index: number
     while ((index = buffer.indexOf('\n\n')) !== -1) {
       const raw = buffer.slice(0, index)

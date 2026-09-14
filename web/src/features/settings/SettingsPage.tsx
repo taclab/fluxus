@@ -47,7 +47,16 @@ export function SettingsPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function set(key: string, value: string) {
-    setValues((v) => ({ ...v, [key]: value }))
+    setValues((v) => {
+      const next = { ...v, [key]: value }
+      // Changer de fournisseur remet un modèle cohérent si l'actuel appartient à l'autre famille.
+      if (key === 'llm_provider') {
+        const model = v.llm_model ?? ''
+        if (value === 'openai' && (!model || model.startsWith('claude'))) next.llm_model = 'gpt-4.1-mini'
+        if (value === 'anthropic' && !model.startsWith('claude')) next.llm_model = 'claude-opus-5'
+      }
+      return next
+    })
   }
 
   async function save() {
