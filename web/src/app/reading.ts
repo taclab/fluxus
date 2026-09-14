@@ -10,13 +10,14 @@ export interface ReadingPrefs {
   width: ReadingWidth
 }
 
-export const READING_FONTS: { id: ReadingFont; label: string; body: string; heading: string; description: string }[] = [
-  { id: 'editorial', label: 'Éditorial', body: 'Source Serif 4', heading: 'Inter', description: 'Serif contemporain pour le texte, titres sans serif. Le réglage par défaut.' },
-  { id: 'literary', label: 'Littéraire', body: 'Literata', heading: 'Literata', description: 'Serif de lecture longue, tout en serif, comme un livre numérique.' },
-  { id: 'journal', label: 'Journal', body: 'Lora', heading: 'Montserrat', description: 'Serif chaleureux et titres géométriques, esprit magazine.' },
-  { id: 'modern', label: 'Moderne', body: 'Inter', heading: 'Inter', description: 'Tout en sans serif, net et compact.' },
-  { id: 'legible', label: 'Lisible', body: 'Atkinson Hyperlegible', heading: 'Atkinson Hyperlegible', description: 'Conçue pour distinguer chaque lettre, idéale en basse vision ou sur petit écran.' },
-  { id: 'system', label: 'Système', body: 'system-ui', heading: 'system-ui', description: 'Les polices natives de l’appareil, sans téléchargement.' },
+/** `body`/`heading` : noms affichés ; `bodyCss`/`headingCss` : familles CSS réelles (fontsource ajoute « Variable »). */
+export const READING_FONTS: { id: ReadingFont; label: string; body: string; heading: string; bodyCss: string; headingCss: string; description: string }[] = [
+  { id: 'editorial', label: 'Éditorial', body: 'Source Serif 4', heading: 'Inter', bodyCss: "'Source Serif 4 Variable', Georgia, serif", headingCss: "'Inter Variable', system-ui, sans-serif", description: 'Serif contemporain pour le texte, titres sans serif. Le réglage par défaut.' },
+  { id: 'literary', label: 'Littéraire', body: 'Literata', heading: 'Literata', bodyCss: "'Literata Variable', Georgia, serif", headingCss: "'Literata Variable', Georgia, serif", description: 'Serif de lecture longue, tout en serif, comme un livre numérique.' },
+  { id: 'journal', label: 'Journal', body: 'Lora', heading: 'Montserrat', bodyCss: "'Lora Variable', Georgia, serif", headingCss: "'Montserrat Variable', system-ui, sans-serif", description: 'Serif chaleureux et titres géométriques, esprit magazine.' },
+  { id: 'modern', label: 'Moderne', body: 'Inter', heading: 'Inter', bodyCss: "'Inter Variable', system-ui, sans-serif", headingCss: "'Inter Variable', system-ui, sans-serif", description: 'Tout en sans serif, net et compact.' },
+  { id: 'legible', label: 'Lisible', body: 'Atkinson Hyperlegible', heading: 'Atkinson Hyperlegible', bodyCss: "'Atkinson Hyperlegible', system-ui, sans-serif", headingCss: "'Atkinson Hyperlegible', system-ui, sans-serif", description: 'Conçue pour distinguer chaque lettre, idéale en basse vision ou sur petit écran.' },
+  { id: 'system', label: 'Système', body: 'system-ui', heading: 'system-ui', bodyCss: 'system-ui, -apple-system, sans-serif', headingCss: 'system-ui, -apple-system, sans-serif', description: 'Les polices natives de l’appareil, sans téléchargement.' },
 ]
 
 export const READING_SIZES: { id: ReadingSize; label: string; px: number }[] = [

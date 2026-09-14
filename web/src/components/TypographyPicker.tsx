@@ -36,10 +36,10 @@ export function TypographyPicker({ compact }: { compact?: boolean }) {
               )}
             >
               <span className="flex items-baseline gap-2">
-                <span className={clsx('text-2xl leading-none text-app', compact && 'text-xl')} style={{ fontFamily: `'${f.heading}', ${f.id === 'system' ? 'system-ui, sans-serif' : 'serif'}` }}>
+                <span className={clsx('text-2xl font-bold leading-none text-app', compact && 'text-xl')} style={{ fontFamily: f.headingCss }}>
                   A
                 </span>
-                <span className={clsx('text-2xl leading-none text-app', compact && 'text-xl')} style={{ fontFamily: `'${f.body}', ${f.id === 'system' ? 'system-ui, sans-serif' : 'serif'}` }}>
+                <span className={clsx('text-2xl leading-none text-app', compact && 'text-xl')} style={{ fontFamily: f.bodyCss }}>
                   a
                 </span>
                 <span className="ml-auto text-sm font-medium text-app">{f.label}</span>
