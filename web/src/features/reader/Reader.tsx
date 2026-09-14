@@ -1,10 +1,11 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, Sparkles, Star } from 'lucide-react'
+import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, Sparkles, Star, Type } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type Feed } from '../../api/client'
 import { ThemeToggle } from '../../components/ThemeToggle'
+import { TypographyPicker } from '../../components/TypographyPicker'
 import { EmptyState, IconButton, Kbd, useToast } from '../../components/ui'
 import { db, toLocalEntry } from '../../db/db'
 import { fullDate, hostname } from '../../lib/format'
@@ -27,6 +28,8 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
   const [extracting, setExtracting] = useState(false)
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [summaryAuto, setSummaryAuto] = useState(false)
+  const [typoOpen, setTypoOpen] = useState(false)
+  const typoRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<HTMLIFrameElement>(null)
   const toast = useToast()
@@ -38,6 +41,15 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
     setSummaryAuto(false)
     containerRef.current?.scrollTo({ top: 0 })
   }, [entryId, entry?.has_summary])
+
+  useEffect(() => {
+    if (!typoOpen) return
+    const close = (e: MouseEvent) => {
+      if (!typoRef.current?.contains(e.target as Node)) setTypoOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [typoOpen])
 
   // Marque comme lu à l'ouverture.
   useEffect(() => {
@@ -128,6 +140,16 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
         <span className="md:hidden">
           <ThemeToggle size="md" />
         </span>
+        <div className="relative" ref={typoRef}>
+          <IconButton label="Typographie de lecture" active={typoOpen} onClick={() => setTypoOpen((o) => !o)}>
+            <Type className="size-5" />
+          </IconButton>
+          {typoOpen && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-2xl border border-app bg-panel p-4 shadow-xl" data-typo-popover>
+              <TypographyPicker compact />
+            </div>
+          )}
+        </div>
         <IconButton label={entry.read ? 'Marquer non lu (m)' : 'Marquer lu (m)'} onClick={() => void recordChange(entry.id, { read: !entry.read })}>
           {entry.read ? <CircleCheck className="size-5" /> : <Circle className="size-5" />}
         </IconButton>
@@ -162,14 +184,14 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
       </header>
 
       <div ref={containerRef} className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-5 sm:px-8 py-8 space-y-6">
+        <div className="reader-column mx-auto px-5 sm:px-8 py-8 space-y-6">
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm text-muted">
               {feed && <FeedIcon feed={feed} />}
               <span className="truncate">{feed?.title ?? hostname(entry.url)}</span>
               {entry.author && <span className="truncate">· {entry.author}</span>}
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-app">
+            <h1 className="reader-heading text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-app">
               {entry.url ? (
                 <a href={entry.url} target="_blank" rel="noopener noreferrer" className="hover:underline decoration-accent-400 underline-offset-4">
                   {entry.title}

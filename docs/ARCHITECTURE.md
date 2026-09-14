@@ -343,6 +343,18 @@ Classe `dark` sur `<html>`, appliquée avant le premier rendu par un script inli
 `system`. Variables CSS (`--bg`, `--fg`…) exposées comme utilitaires Tailwind (`bg-app`,
 `text-muted`, `border-app`).
 
+### Typographie de lecture
+
+Préférences par appareil (`app/reading.ts`, `localStorage['fluxus.reading']`) appliquées comme
+attributs `data-reading-font|size|width` sur `<html>` par le script inline d'`index.html` puis par
+`applyReadingPrefs`. `index.css` traduit chaque attribut en variables `--reading-body`,
+`--reading-heading`, `--reading-size`, `--reading-width` consommées par `.prose-reader`,
+`.reader-heading` et `.reader-column`. Les polices viennent de paquets fontsource importés dans
+`index.css` (variables : Inter, Source Serif 4, Literata, Lora, Montserrat, JetBrains Mono ;
+statique : Atkinson Hyperlegible). Chaque fichier woff2 est découpé par alphabet avec
+`unicode-range` ; le service worker ne pré-cache que le latin et met les autres en cache à l'usage.
+`components/TypographyPicker.tsx` est partagé entre la page Paramètres et le popover Aa du lecteur.
+
 ### Mobile (Capacitor)
 
 `web/capacitor.config.ts` embarque le build (`webDir: dist`). L'adresse du serveur est saisie à la

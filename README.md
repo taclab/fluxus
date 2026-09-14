@@ -92,6 +92,7 @@ Stockés en base (table `settings`), modifiables dans *Paramètres* :
 | Section | Réglages |
 |---|---|
 | Résumés | fournisseur (`anthropic` ou `openai` et compatibles), clé API (chiffrée), modèle, effort de raisonnement, langue des résumés, URL de base OpenAI |
+| Lecture | combinaison de polices (Éditorial, Littéraire, Journal, Moderne, Lisible, Système), taille du texte, largeur de colonne ; propre à l'appareil, aussi via le bouton Aa du lecteur |
 | Apparence | thème clair / sombre / automatique (aussi via le bouton en bas de la barre latérale), réinitialisation du tableau de bord |
 | Abonnements | import / export OPML, rafraîchissement global |
 | Hors-ligne | synchroniser, resynchroniser tout |
@@ -166,6 +167,14 @@ navigateur fonctionnent.
 | `s` | favori | `u` | filtre « non lus » |
 | `v` | ouvrir l'original | `/` | rechercher |
 | `Échap` | retour à la liste | `?` | rappel des raccourcis |
+
+### Typographie de lecture
+
+Le bouton **Aa** du lecteur, ou *Paramètres → Lecture*, propose six combinaisons de polices
+embarquées avec l'application (donc identiques hors-ligne et sur Android) : Éditorial (Source
+Serif 4 + Inter, par défaut), Littéraire (Literata), Journal (Lora + Montserrat), Moderne (Inter),
+Lisible (Atkinson Hyperlegible) et Système. S'y ajoutent quatre tailles de texte et trois largeurs
+de colonne. Le choix est mémorisé par appareil et appliqué avant le premier rendu.
 
 ### Résumés
 

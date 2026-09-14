@@ -6,6 +6,7 @@ import { getServerUrl, isDeviceToken, getToken, setToken } from '../../api/auth'
 import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, type StatsOut } from '../../api/client'
 import type { Theme } from '../../app/theme'
 import { useTheme } from '../../components/ThemeToggle'
+import { TypographyPicker } from '../../components/TypographyPicker'
 import { Button, Field, IconButton, Input, Select, Spinner, useToast } from '../../components/ui'
 import { clearDatabase, db } from '../../db/db'
 import { formatTokens, relativeDate } from '../../lib/format'
@@ -220,6 +221,10 @@ export function SettingsPage() {
                 {stats.summaries} résumés produits · {formatTokens(stats.summary_input_tokens)} tokens en entrée · {formatTokens(stats.summary_output_tokens)} en sortie
               </p>
             )}
+          </Section>
+
+          <Section title="Lecture" description="Combinaison de polices, taille et largeur de colonne pour les articles. Réglage propre à cet appareil, aussi accessible par le bouton Aa du lecteur.">
+            <TypographyPicker />
           </Section>
 
           <Section title="Apparence">

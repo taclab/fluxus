@@ -32,7 +32,14 @@ export default defineConfig({
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Les polices sont découpées par alphabet ; on ne pré-cache que le latin, le reste vient à l'usage.
+        globIgnores: ['**/*-cyrillic*', '**/*-greek*', '**/*-vietnamese*', '**/*-latin-ext*'],
         runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.destination === 'font',
+            handler: 'CacheFirst',
+            options: { cacheName: 'fluxus-fonts', expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 365 } },
+          },
           {
             urlPattern: ({ request }) => request.destination === 'image',
             handler: 'StaleWhileRevalidate',
@@ -53,5 +60,6 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    chunkSizeWarningLimit: 900,
   },
 })

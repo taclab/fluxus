@@ -1,10 +1,26 @@
 @import 'tailwindcss';
 
+/* Polices embarquées (fontsource) : rendu identique partout, hors-ligne compris.
+   Chaque fichier ne se charge que si la page contient ses caractères (unicode-range). */
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/source-serif-4/wght.css';
+@import '@fontsource-variable/source-serif-4/wght-italic.css';
+@import '@fontsource-variable/literata/wght.css';
+@import '@fontsource-variable/literata/wght-italic.css';
+@import '@fontsource-variable/lora/wght.css';
+@import '@fontsource-variable/lora/wght-italic.css';
+@import '@fontsource-variable/montserrat/wght.css';
+@import '@fontsource/atkinson-hyperlegible/latin.css';
+@import '@fontsource/atkinson-hyperlegible/latin-italic.css';
+@import '@fontsource/atkinson-hyperlegible/latin-ext.css';
+@import '@fontsource-variable/jetbrains-mono/wght.css';
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-serif: 'Source Serif 4', 'Iowan Old Style', Georgia, serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Source Serif 4 Variable', 'Iowan Old Style', Georgia, serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-accent-50: #eef4ff;
   --color-accent-100: #dbe6fe;
   --color-accent-200: #bfd3fe;
@@ -19,6 +35,11 @@
 
 :root {
   color-scheme: light;
+  /* Lecture : combinaison « Éditorial » par défaut, surchargée par data-reading-* sur <html> */
+  --reading-body: 'Source Serif 4 Variable', 'Iowan Old Style', Georgia, serif;
+  --reading-heading: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --reading-size: 1.125rem;
+  --reading-width: 44rem;
   --bg: #f8fafc;
   --bg-panel: #ffffff;
   --bg-muted: #f1f5f9;
@@ -35,6 +56,42 @@
   --border: #1f2b47;
   --fg: #e2e8f0;
   --fg-muted: #8b9ab5;
+}
+
+html[data-reading-font='literary'] {
+  --reading-body: 'Literata Variable', Georgia, serif;
+  --reading-heading: 'Literata Variable', Georgia, serif;
+}
+html[data-reading-font='journal'] {
+  --reading-body: 'Lora Variable', Georgia, serif;
+  --reading-heading: 'Montserrat Variable', ui-sans-serif, system-ui, sans-serif;
+}
+html[data-reading-font='modern'] {
+  --reading-body: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --reading-heading: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+}
+html[data-reading-font='legible'] {
+  --reading-body: 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif;
+  --reading-heading: 'Atkinson Hyperlegible', ui-sans-serif, system-ui, sans-serif;
+}
+html[data-reading-font='system'] {
+  --reading-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --reading-heading: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+html[data-reading-size='s'] {
+  --reading-size: 1rem;
+}
+html[data-reading-size='l'] {
+  --reading-size: 1.25rem;
+}
+html[data-reading-size='xl'] {
+  --reading-size: 1.4375rem;
+}
+html[data-reading-width='narrow'] {
+  --reading-width: 36rem;
+}
+html[data-reading-width='wide'] {
+  --reading-width: 56rem;
 }
 
 html,
@@ -79,10 +136,10 @@ body {
 
 /* Contenu d'article : typographie de lecture */
 .prose-reader {
-  font-family: var(--font-serif);
-  font-size: 1.125rem;
-  line-height: 1.75;
-  max-width: 44rem;
+  font-family: var(--reading-body);
+  font-size: var(--reading-size);
+  line-height: 1.7;
+  max-width: var(--reading-width);
   margin: 0 auto;
   word-wrap: break-word;
 }
@@ -93,7 +150,7 @@ body {
 .prose-reader h2,
 .prose-reader h3,
 .prose-reader h4 {
-  font-family: var(--font-sans);
+  font-family: var(--reading-heading);
   font-weight: 700;
   line-height: 1.25;
   margin-top: 1.8em;
@@ -127,7 +184,7 @@ body {
   width: 100%;
 }
 .prose-reader figure figcaption {
-  font-family: var(--font-sans);
+  font-family: var(--reading-heading);
   font-size: 0.875rem;
   color: var(--fg-muted);
   text-align: center;
@@ -140,7 +197,7 @@ body {
   font-style: italic;
 }
 .prose-reader pre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.875rem;
   background: var(--bg-muted);
   padding: 1rem;
@@ -149,7 +206,7 @@ body {
   line-height: 1.5;
 }
 .prose-reader code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--bg-muted);
   padding: 0.1em 0.35em;
@@ -175,7 +232,7 @@ body {
 .prose-reader table {
   width: 100%;
   border-collapse: collapse;
-  font-family: var(--font-sans);
+  font-family: var(--reading-heading);
   font-size: 0.95rem;
 }
 .prose-reader th,
@@ -254,4 +311,12 @@ body {
 }
 .scrollbar-none::-webkit-scrollbar {
   display: none;
+}
+
+/* Titre de l'article et largeur de colonne du lecteur */
+.reader-heading {
+  font-family: var(--reading-heading);
+}
+.reader-column {
+  max-width: calc(var(--reading-width) + 4rem);
 }

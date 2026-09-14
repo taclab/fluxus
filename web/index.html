@@ -14,6 +14,9 @@
           var t = localStorage.getItem('fluxus.theme') || 'system';
           var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
           if (dark) document.documentElement.classList.add('dark');
+          var r = JSON.parse(localStorage.getItem('fluxus.reading') || '{}');
+          var d = document.documentElement.dataset;
+          d.readingFont = r.font || 'editorial'; d.readingSize = r.size || 'm'; d.readingWidth = r.width || 'normal';
         } catch (e) {}
       })();
     </script>
