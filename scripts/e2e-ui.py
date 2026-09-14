@@ -96,7 +96,7 @@ with sync_playwright() as p:
     page.evaluate("localStorage.setItem('fluxus.theme','dark')")
     mobile = browser.new_context(viewport={"width": 390, "height": 844}, locale="fr-FR", is_mobile=True, storage_state=ctx.storage_state())
     mpage = mobile.new_page()
-    mpage.goto(BASE, wait_until="networkidle")
+    mpage.goto(BASE + "/all", wait_until="networkidle")
     mpage.wait_for_selector("[data-entry-id]", timeout=30000)
     mpage.wait_for_timeout(1500)
     shot(mpage, "08-mobile-list")
