@@ -1,123 +1,251 @@
 # Fluxus
 
-Lecteur de flux RSS auto-hébergé, façon Inoreader, avec :
+Lecteur de flux RSS auto-hébergé, dans l'esprit d'Inoreader, pensé pour une seule personne et
+ses appareils. Il apporte ce que les lecteurs open source classiques n'offrent pas ensemble :
 
-- récupération de l'article complet (HTTP + repli navigateur pour les sites JavaScript) ;
-- résumé LLM **à la demande** des articles et des vidéos YouTube (via leurs sous-titres) ;
-- interface web trois volets, raccourcis clavier, mode sombre, recherche plein texte ;
-- application Android (Capacitor) avec lecture **hors-ligne** et synchronisation des états lu / favori ;
-- gestion des flux et catégories, import / export OPML.
+- **Article complet** récupéré depuis le site (HTTP + repli navigateur Chromium pour les sites JavaScript).
+- **Résumé LLM à la demande** des articles, en streaming, jamais automatique.
+- **Résumé de vidéos YouTube** à partir des sous-titres, avec chapitres horodatés cliquables.
+- **Interface web** trois volets, raccourcis clavier, thème clair / sombre, recherche plein texte.
+- **Application Android** (Capacitor) avec lecture **hors-ligne** et synchronisation des états lu / favori.
+- Gestion des flux et catégories, découverte de flux depuis l'URL d'un site, import / export OPML.
 
-Mono-utilisateur, quatre conteneurs Docker, aucune dépendance à un service tiers hormis l'API LLM de votre choix.
+Quatre conteneurs Docker, PostgreSQL comme seule dépendance, aucune file externe.
+Pour comprendre comment c'est construit : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Architecture
+---
 
-```
-reverse proxy ──> api :8000  (FastAPI + front statique)
-                    │
-        ┌───────────┼───────────┐
-     worker      postgres     browser
- (fetch, extraction,        (Playwright/Chromium,
-  résumés, YouTube)          rendu des pages JS)
-```
+## Sommaire
 
-| Dossier     | Contenu                                                        |
-|-------------|----------------------------------------------------------------|
-| `backend/`  | API FastAPI, worker de jobs (table PostgreSQL), migrations Alembic |
-| `web/`      | Front React + TypeScript + Vite, PWA, projet Capacitor Android |
-| `browser/`  | Micro-service de rendu Chromium (`POST /render`)               |
-| `scripts/`  | Build de l'APK dans un conteneur                               |
+1. [Installation](#installation)
+2. [Premiers pas](#premiers-pas)
+3. [Configuration](#configuration)
+4. [Utilisation](#utilisation)
+5. [Application Android](#application-android)
+6. [Exploitation](#exploitation)
+7. [Développement](#développement)
+8. [Dépannage](#dépannage)
+
+---
 
 ## Installation
 
-Prérequis : Docker et Docker Compose.
+Prérequis : Docker avec le plugin Compose, un reverse proxy HTTPS (Caddy, Traefik, Nginx…) déjà en place.
 
 ```bash
 git clone <ce dépôt> fluxus && cd fluxus
 cp .env.example .env
-# Éditer .env : mot de passe Postgres, FLUXUS_SECRET_KEY (32+ caractères aléatoires), ports.
+$EDITOR .env          # mot de passe Postgres, FLUXUS_SECRET_KEY, ports
 docker compose up -d --build
 ```
 
-L'interface est servie sur `http://<hôte>:8000` (port `FLUXUS_HTTP_PORT`). Raccordez-la à votre reverse proxy en HTTPS ; l'API ne gère pas TLS elle-même.
+Le premier build prend quelques minutes (front Node, dépendances Python, image Chromium).
+Ensuite l'application répond sur `http://<hôte>:8000` (port `FLUXUS_HTTP_PORT`).
 
-À la première ouverture, l'application demande de **créer le mot de passe**. Ensuite :
+Raccordez ce port à votre reverse proxy en HTTPS. L'API ne gère pas TLS et fait confiance aux
+en-têtes `X-Forwarded-*` pour la limitation des tentatives de connexion.
 
-1. Ajoutez des flux avec le bouton « + » (URL d'un site, d'un flux ou d'une chaîne YouTube) ou importez un OPML depuis *Paramètres → Abonnements*.
-2. Renseignez une clé API dans *Paramètres → Résumés* (Anthropic par défaut, modèle `claude-opus-5`, ou toute API compatible OpenAI).
-3. Ouvrez un article et cliquez sur ✨ (ou tapez `r`) pour le résumer.
+Exemple Caddy :
 
-### Variables d'environnement
+```
+fluxus.mondomaine.fr {
+    reverse_proxy 127.0.0.1:8000
+}
+```
 
-| Variable                | Rôle                                                        |
-|-------------------------|-------------------------------------------------------------|
-| `POSTGRES_*`, `DATABASE_URL` | Connexion à PostgreSQL                                 |
-| `FLUXUS_SECRET_KEY`     | Signature des JWT et chiffrement des clés LLM stockées      |
-| `FLUXUS_HTTP_PORT`      | Port publié pour l'API et le front (défaut 8000)            |
-| `FLUXUS_PG_PORT`        | Port hôte de Postgres en développement (défaut 5433)        |
-| `FLUXUS_BROWSER_URL`    | URL interne du service de rendu (défaut `http://browser:3000`) |
+## Premiers pas
 
-Les réglages fonctionnels (fournisseur LLM, modèle, langue, clé API) se font dans l'interface et sont stockés en base, clés chiffrées.
+1. Ouvrez l'interface : elle demande de **créer le mot de passe** (compte unique).
+2. Ajoutez des flux avec le bouton **+** en haut de la barre latérale. Vous pouvez coller l'URL
+   d'un site (les flux sont découverts automatiquement), d'un flux RSS/Atom ou d'une chaîne YouTube.
+   Ou importez un fichier OPML depuis *Paramètres → Abonnements*.
+3. Dans *Paramètres → Résumés*, choisissez le fournisseur LLM et saisissez la clé API.
+4. Ouvrez un article, cliquez sur ✨ ou tapez `r` : le résumé s'écrit en direct.
 
-## Raccourcis clavier
+Les flux sont rafraîchis en arrière-plan par le worker (intervalle adaptatif, 10 min à 24 h selon
+l'activité du flux). L'interface se synchronise au chargement, au retour au premier plan et toutes
+les 5 minutes ; le bouton ↻ force une synchronisation.
 
-| Touche | Action                    | Touche | Action                         |
-|--------|---------------------------|--------|--------------------------------|
-| `j` / `k` | article suivant / précédent | `f` | article complet (récupère ou bascule) |
-| `m`    | lu / non lu               | `r`    | résumer                        |
-| `s`    | favori                    | `u`    | filtre « non lus »             |
-| `v`    | ouvrir l'original         | `/`    | rechercher                     |
-| `Échap` | retour à la liste        | `?`    | aide                           |
+## Configuration
+
+### Fichier `.env`
+
+| Variable | Rôle | Défaut |
+|---|---|---|
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Compte PostgreSQL créé au premier démarrage | `fluxus` / `change-me` / `fluxus` |
+| `DATABASE_URL` | Chaîne SQLAlchemy utilisée par l'API et le worker (hôte `postgres` = service Compose) | |
+| `FLUXUS_SECRET_KEY` | Signe les JWT et chiffre les clés LLM stockées. **32 caractères aléatoires minimum, ne jamais changer ensuite** (les clés stockées deviendraient illisibles). | |
+| `FLUXUS_HTTP_PORT` | Port publié sur l'hôte pour l'API et le front | `8000` |
+| `FLUXUS_PG_PORT` | Port hôte de Postgres, utile en développement | `5433` |
+| `FLUXUS_BROWSER_URL` | URL interne du service de rendu | `http://browser:3000` |
+
+Variables optionnelles, préfixe `FLUXUS_` (voir `backend/fluxus/config.py`) : `ACCESS_TOKEN_HOURS`
+(durée des sessions web, 168 h), `DEFAULT_FETCH_INTERVAL_MIN` (30), `MIN_FETCH_INTERVAL_MIN` (10),
+`MAX_FETCH_INTERVAL_MIN` (1440), `WORKER_CONCURRENCY` (6), `HTTP_TIMEOUT_SECONDS` (20), `LOG_LEVEL`.
+
+### Réglages dans l'interface
+
+Stockés en base (table `settings`), modifiables dans *Paramètres* :
+
+| Section | Réglages |
+|---|---|
+| Résumés | fournisseur (`anthropic` ou `openai` et compatibles), clé API (chiffrée), modèle, effort de raisonnement, langue des résumés, URL de base OpenAI |
+| Apparence | thème clair / sombre / automatique (aussi via le bouton en bas de la barre latérale) |
+| Abonnements | import / export OPML, rafraîchissement global |
+| Hors-ligne | synchroniser, resynchroniser tout |
+| Appareils | liste et révocation des tokens de l'application mobile |
+| Sécurité | changement de mot de passe |
+
+Par flux (double-clic ou clic droit sur un flux) : titre, catégorie, URL, mode d'extraction de
+l'article complet (`auto`, `http`, `browser`, `none`), pause.
+
+### Fournisseur LLM
+
+- **Anthropic** (défaut) : modèle `claude-opus-5` recommandé, `claude-sonnet-5` moins cher,
+  `claude-haiku-4-5` le plus rapide. L'effort `low` suffit pour un résumé.
+- **OpenAI** : `gpt-4.1-mini` par défaut. Le champ *URL de base* permet d'utiliser toute API
+  compatible (Mistral, Groq, un Ollama distant…).
+
+Les résumés coûtent uniquement quand vous cliquez. Le compteur de tokens cumulés est affiché dans
+*Paramètres → Résumés*.
+
+## Utilisation
+
+### Interface
+
+Trois volets : **abonnements** (catégories dépliables, compteurs de non-lus, point rouge sur un flux
+en erreur), **liste d'articles** (vue compacte ou cartes, filtre « non lus », recherche, tout marquer
+lu), **lecteur** (contenu du flux ou article complet, vidéo YouTube intégrée, panneau de résumé).
+
+Sur tablette la barre latérale devient un tiroir ; sur téléphone un seul volet est affiché à la fois.
+L'URL encode la vue courante (`/feed/12?entry=345&unread=1`) : le bouton retour et les favoris du
+navigateur fonctionnent.
+
+### Raccourcis clavier
+
+| Touche | Action | Touche | Action |
+|---|---|---|---|
+| `j` / `k` ou ↓ / ↑ | article suivant / précédent | `f` | article complet : récupérer, ou basculer flux ↔ complet |
+| `m` | lu / non lu | `r` | résumer |
+| `s` | favori | `u` | filtre « non lus » |
+| `v` | ouvrir l'original | `/` | rechercher |
+| `Échap` | retour à la liste | `?` | rappel des raccourcis |
+
+### Résumés
+
+Le bouton ✨ résume l'article complet si disponible, sinon récupère l'article puis le résume, sinon
+se rabat sur le contenu du flux. Pour une vidéo YouTube, il récupère les sous-titres (français puis
+anglais puis premier disponible) et produit des chapitres ; cliquer sur un horodatage déplace la vidéo.
+Un résumé est stocké : le rouvrir ne coûte rien, ↻ le régénère. Sans sous-titres, l'application le dit
+et n'essaie pas de transcrire l'audio.
+
+### Recherche
+
+En ligne, la recherche est faite par PostgreSQL (plein texte sur titre, auteur et contenu, syntaxe
+`websearch` : `"expression exacte" -mot`). Hors-ligne, elle se limite aux titres et extraits présents
+sur l'appareil.
+
+### Hors-ligne
+
+Toutes les lectures de l'interface se font dans une base locale (IndexedDB). Les 30 derniers jours
+d'articles, avec leur contenu complet, sont conservés sur chaque appareil. Marquer lu ou favori
+hors-ligne est mis en file et rejoué au retour du réseau ; en cas de conflit la modification la plus
+récente gagne. Ajouter un flux, récupérer un article complet ou résumer nécessite le réseau.
 
 ## Application Android
 
-Le front est empaqueté avec Capacitor. Aucun SDK Android n'est requis sur la machine : le build se fait dans un conteneur.
+Le front est empaqueté avec Capacitor. Aucun SDK Android n'est nécessaire sur la machine, le build
+s'exécute dans un conteneur :
 
 ```bash
-scripts/build-apk.sh            # APK de debug -> dist/app-debug.apk
-scripts/build-apk.sh release    # APK release non signé
+scripts/build-apk.sh            # debug  -> dist/app-debug.apk (installable tel quel)
+scripts/build-apk.sh release    # release non signé -> dist/app-release-unsigned.apk
 ```
 
-Installez l'APK, saisissez l'adresse HTTPS de votre serveur et le mot de passe : l'appli s'appaire avec un **token d'appareil** longue durée (révocable dans *Paramètres → Appareils*). Les articles des 30 derniers jours sont conservés localement avec leur contenu complet ; les actions lu / favori faites hors-ligne sont rejouées au retour du réseau.
+Le premier appel construit l'image de build (JDK + SDK Android, quelques minutes) ; les suivants
+prennent une à deux minutes grâce au cache Gradle.
 
-Pour signer une release : `apksigner sign --ks ma-cle.jks dist/app-release-unsigned.apk`.
+Sur le téléphone : installez l'APK, saisissez l'adresse HTTPS du serveur et le mot de passe.
+L'application obtient un **token d'appareil** longue durée, révocable dans *Paramètres → Appareils*.
+Le bouton retour matériel navigue dans l'application. La synchronisation a lieu à l'ouverture et au
+retour au premier plan ; il n'y a pas encore de synchronisation planifiée quand l'appli est fermée.
+
+Signature d'une release : `apksigner sign --ks ma-cle.jks dist/app-release-unsigned.apk`.
+
+## Exploitation
+
+```bash
+docker compose ps                        # état des quatre services
+docker compose logs -f worker            # rafraîchissements, erreurs de flux
+docker compose logs -f api               # requêtes HTTP
+docker compose pull && docker compose up -d --build   # mise à jour
+```
+
+Les migrations de schéma s'appliquent automatiquement au démarrage du conteneur `api`
+(`alembic upgrade head`).
+
+Sauvegarde : la base contient tout (flux, articles, résumés, réglages, mot de passe).
+
+```bash
+docker compose exec -T postgres pg_dump -U fluxus fluxus | gzip > fluxus-$(date +%F).sql.gz
+gunzip -c fluxus-2026-09-14.sql.gz | docker compose exec -T postgres psql -U fluxus fluxus   # restauration
+```
+
+Remise à zéro complète : `docker compose down -v` (supprime le volume Postgres).
+
+Ressources : environ 300 Mo de RAM au repos pour l'ensemble ; le conteneur `browser` est plafonné à
+1 Go et n'est sollicité qu'en repli d'extraction.
 
 ## Développement
 
-```bash
-# Base de données seule
-docker compose up -d postgres
+Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) pour la carte du code et les flux de données.
 
-# Backend (Python 3.12 via uv)
+```bash
+docker compose up -d postgres                       # la base seule, publiée sur :5433
+
+# Backend — Python 3.12 géré par uv
 cd backend && uv sync --all-extras
-export DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus FLUXUS_SECRET_KEY=dev
+export DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus FLUXUS_SECRET_KEY=dev-secret-32-chars-minimum
 uv run alembic upgrade head
 uv run uvicorn fluxus.main:app --reload --port 8000
-uv run python -m fluxus.worker          # dans un autre terminal
+uv run python -m fluxus.worker                      # second terminal
 
-# Front (Node 22, cf. web/.nvmrc)
-cd web && npm install && npm run dev    # http://localhost:5173, proxy /api -> :8000
-npm run gen:api                         # régénère src/api/schema.d.ts depuis l'OpenAPI
+# Front — Node 22 (web/.nvmrc)
+cd web && npm install
+npm run dev                                          # http://localhost:5173, /api proxifié vers :8000
+npm run gen:api                                      # régénère src/api/schema.d.ts depuis l'OpenAPI
 ```
 
-Tests :
+La documentation interactive de l'API est servie sur `/api/docs`.
+
+Qualité :
 
 ```bash
 cd backend
-uv run pytest tests/ --ignore=tests/test_api.py                          # unitaires
-DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus_test uv run pytest tests/test_api.py  # intégration
 uv run ruff check fluxus tests
-cd ../web && npm run typecheck
+uv run pytest tests/ --ignore=tests/test_api.py                    # unitaires, sans base
+DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus_test uv run pytest tests/test_api.py   # intégration
+cd ../web && npm run typecheck && npm run lint
 ```
 
-Nouvelle migration après modification des modèles : `uv run alembic revision --autogenerate -m "description"`.
+Test de bout en bout de l'interface (Playwright dans l'image `fluxus-browser`, contre une pile qui
+tourne sur :8000) : `docker run --rm --network host -v $PWD/scripts/e2e-ui.py:/out/e2e-ui.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-ui.py`.
 
-## Sécurité
+Nouvelle migration après modification de `backend/fluxus/models.py` :
+`uv run alembic revision --autogenerate -m "description"`, puis relire le fichier généré.
 
-- Le fetcher refuse les URL pointant vers le réseau local (anti-SSRF).
-- Mot de passe hashé avec Argon2, limitation des tentatives de connexion.
-- Le HTML des articles est nettoyé côté serveur (nh3) et côté client (DOMPurify) ; seuls les iframes YouTube / Vimeo / Dailymotion sont conservés.
-- Les clés LLM sont chiffrées au repos et jamais renvoyées en clair par l'API.
+## Dépannage
+
+| Symptôme | Piste |
+|---|---|
+| Un flux a un point rouge | Survolez-le : HTTP 403/404, XML invalide, domaine disparu. Le worker réessaie avec un recul exponentiel (jusqu'à 24 h). |
+| « Aucune clé API configurée » | *Paramètres → Résumés*, saisir la clé puis Enregistrer. |
+| « Modèle inconnu » | Le modèle ne correspond pas au fournisseur choisi (ex. `claude-…` avec OpenAI). |
+| « Cette vidéo n'a pas de sous-titres » | Comportement attendu : pas de transcription audio. |
+| Article complet vide ou tronqué | Le site est payant ou anti-robot. Essayer « Réessayer via le navigateur » ; sinon passer le flux en `none`. |
+| L'interface ne montre pas les nouveaux articles | Bouton ↻ ; si le problème persiste, *Paramètres → Hors-ligne → Resynchroniser tout*. |
+| Conteneur `api` `unhealthy` alors qu'il répond | Un proxy HTTP injecté par Docker intercepte le test local ; le healthcheck utilise `--noproxy '*'` pour cela. Vérifier `~/.docker/config.json`. |
+| Gradle échoue derrière un proxy | `scripts/build-apk.sh` traduit `HTTPS_PROXY` en propriétés Java ; vérifier que la variable est visible dans le conteneur. |
 
 ## Licence
 
