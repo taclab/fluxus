@@ -1,0 +1,58 @@
+import { useEffect, useState } from 'react'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
+
+import { getToken } from '../api/auth'
+import { ToastProvider } from '../components/ui'
+import { LoginPage } from '../features/auth/LoginPage'
+import { SettingsPage } from '../features/settings/SettingsPage'
+import { startAutoSync } from '../sync/engine'
+import { Layout } from './Layout'
+import { applyTheme, getTheme, watchSystemTheme } from './theme'
+
+function useAuthed(): boolean {
+  const [authed, setAuthed] = useState(Boolean(getToken()))
+  useEffect(() => {
+    const handler = () => setAuthed(Boolean(getToken()))
+    window.addEventListener('fluxus:auth', handler)
+    window.addEventListener('storage', handler)
+    return () => {
+      window.removeEventListener('fluxus:auth', handler)
+      window.removeEventListener('storage', handler)
+    }
+  }, [])
+  return authed
+}
+
+export function App() {
+  const authed = useAuthed()
+
+  useEffect(() => {
+    applyTheme(getTheme())
+    return watchSystemTheme()
+  }, [])
+
+  useEffect(() => {
+    if (!authed) return
+    return startAutoSync()
+  }, [authed])
+
+  return (
+    <ToastProvider>
+      <BrowserRouter>
+        {authed ? (
+          <Routes>
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/feed/:id" element={<Layout />} />
+            <Route path="/category/:id" element={<Layout />} />
+            <Route path="/unread" element={<Layout />} />
+            <Route path="/starred" element={<Layout />} />
+            <Route path="/search" element={<Layout />} />
+            <Route path="*" element={<Layout />} />
+          </Routes>
+        ) : (
+          <LoginPage />
+        )}
+      </BrowserRouter>
+    </ToastProvider>
+  )
+}

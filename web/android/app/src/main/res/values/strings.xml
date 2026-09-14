@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Fluxus</string>
+    <string name="title_activity_main">Fluxus</string>
+    <string name="package_name">fr.fluxus.app</string>
+    <string name="custom_url_scheme">fr.fluxus.app</string>
+</resources>

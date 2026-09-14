@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .auth import Auth
+from .db import get_session
+from .models import Entry, Feed, Job, Summary
+from .settings_store import DEFAULTS, SECRET_KEYS, get_all_settings, mask_secret, set_setting
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
+Session = Annotated[AsyncSession, Depends(get_session)]
+
+EDITABLE_KEYS = set(DEFAULTS.keys())
+
+
+class SettingsOut(BaseModel):
+    values: dict[str, str]
+    secrets_set: dict[str, bool]
+
+
+class SettingsPatch(BaseModel):
+    values: dict[str, str]
+
+
+class StatsOut(BaseModel):
+    feeds: int
+    entries: int
+    unread: int
+    starred: int
+    summaries: int
+    jobs_queued: int
+    jobs_failed: int
+    summary_input_tokens: int
+    summary_output_tokens: int
+
+
+@router.get("", response_model=SettingsOut)
+async def get_settings_view(_: Auth, session: Session) -> SettingsOut:
+    values = await get_all_settings(session)
+    secrets_set = {k: bool(values.get(k)) for k in SECRET_KEYS}
+    for k in SECRET_KEYS:
+        values[k] = mask_secret(values.get(k, ""))
+    return SettingsOut(values=values, secrets_set=secrets_set)
+
+
+@router.patch("", response_model=SettingsOut)
+async def patch_settings(body: SettingsPatch, _: Auth, session: Session) -> SettingsOut:
+    for key, value in body.values.items():
+        if key not in EDITABLE_KEYS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Paramètre inconnu: {key}")
+        if key in SECRET_KEYS and value and "…" in value:
+            continue  # valeur masquée renvoyée telle quelle par le front : on ne touche pas
+        await set_setting(session, key, value.strip())
+    await session.commit()
+    return await get_settings_view(_, session)
+
+
+@router.get("/stats", response_model=StatsOut)
+async def stats(_: Auth, session: Session) -> StatsOut:
+    feeds = (await session.execute(select(func.count()).select_from(Feed))).scalar_one()
+    entries = (await session.execute(select(func.count()).select_from(Entry))).scalar_one()
+    unread = (await session.execute(select(func.count()).where(Entry.read.is_(False)))).scalar_one()
+    starred = (await session.execute(select(func.count()).where(Entry.starred.is_(True)))).scalar_one()
+    summaries = (await session.execute(select(func.count()).select_from(Summary))).scalar_one()
+    tokens = (
+        await session.execute(
+            select(func.coalesce(func.sum(Summary.input_tokens), 0), func.coalesce(func.sum(Summary.output_tokens), 0))
+        )
+    ).one()
+    queued = (await session.execute(select(func.count()).where(Job.status.in_(["queued", "running"])))).scalar_one()
+    failed = (await session.execute(select(func.count()).where(Job.status == "failed"))).scalar_one()
+    return StatsOut(
+        feeds=feeds,
+        entries=entries,
+        unread=unread,
+        starred=starred,
+        summaries=summaries,
+        jobs_queued=queued,
+        jobs_failed=failed,
+        summary_input_tokens=int(tokens[0]),
+        summary_output_tokens=int(tokens[1]),
+    )
