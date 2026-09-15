@@ -122,7 +122,7 @@ jobs            settings (clé/valeur)          device_tokens
 | Table | Rôle | Colonnes notables |
 |---|---|---|
 | `categories` | dossiers de la barre latérale | `title` unique, `position` |
-| `feeds` | abonnements | `url` unique · `position` (ordre manuel dans son dossier ; un nouveau flux prend `min(position) − 1`) · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` |
+| `feeds` | abonnements | `url` unique · `position` (ordre manuel dans son dossier ; sans dossier, sur la même échelle que `categories.position` : la racine mélange dossiers et flux ; un nouveau flux prend `min(position) − 1` de son conteneur) · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` |
 | `entries` | articles | `guid` unique par flux · `hash` (dédup par URL normalisée ou titre+date) · `summary_html` (contenu du flux, nettoyé) · `content_html`, `content_text`, `extraction_status` ∈ {`none`,`pending`,`done`,`failed`} · `read`, `starred` · `meta` JSONB (`youtube_id`, `cover`, `enclosures`, `extraction_method`) · `updated_at` (pivot de la synchronisation) · `search_vector` |
 | `summaries` | résumés produits | `kind` ∈ {`article`,`video`} · `provider`, `model`, `prompt_version` · `text_md` · `input_tokens`, `output_tokens` · `origin` ∈ {`manual`,`auto`} · `smart_feed_id` (SET NULL) |
 | `smart_feeds` | recherches enregistrées | `name` unique · `scope_kind` ∈ {`all`,`category`,`feed`}, `scope_id` · `mode` ∈ {`keywords`,`regex`} · `keywords_any/all/none` JSONB · `regex` (≤ 300) · `fields` JSONB (title, excerpt, author, url, content) · `auto_summary`, `summary_daily_cap` |
@@ -391,16 +391,17 @@ tactile exigent un **clic long** (300 ms, tolérance 6 px) : un clic court reste
 tactile avant le délai reste un défilement (dnd-kit annule la prise et laisse passer le geste). Pas de
 capteur clavier : Entrée et Espace doivent continuer à ouvrir la vue.
 
-Le motif est celui du tableau de bord : stratégie de tri neutre et **brouillon** (`Draft` :
-ordre des dossiers, flux par conteneur, flux intelligents) réordonné réellement dans `onDragOver`
-par `moveInDraft`, le DOM reflue donc pendant le geste. Les règles sont pures et sans React
-(`sidebarOrder.ts`) : un dossier ne survole que des dossiers, un flux ne survole que des flux, des
-en-têtes de dossier ou la zone « sans dossier » (`canDropOn`, appliqué comme filtre de détection de
-collision). Un en-tête replié attend 600 ms avant de s'ouvrir ; le dépôt sur cet en-tête s'applique
-même avant.
+Le motif est celui du tableau de bord : stratégie de tri neutre et **brouillon** (`Draft` : liste
+racine mêlant dossiers et flux sans dossier, flux par dossier, flux intelligents) réordonné réellement
+dans `onDragOver`/`onDragMove` par `moveInDraft`, le DOM reflue donc pendant le geste. Les règles sont
+pures et sans React (`sidebarOrder.ts`) : un dossier ne survole que des éléments de la racine, un flux
+survole des flux (de dossier ou racine) ou des en-têtes de dossier (`canDropOn`, appliqué comme filtre
+de détection de collision, `pointerWithin` puis `closestCenter`). Sur un en-tête, la **zone** dépend du
+pointeur : tiers supérieur → le flux se pose à la racine juste avant le dossier ; sinon → en tête du
+dossier (un dossier replié attend 600 ms avant de s'ouvrir ; le dépôt s'applique même avant).
 
-Au dépôt, `diffDraft` renumérote `0..n-1` les seules listes modifiées (dossiers, flux intelligents,
-conteneurs source et destination des flux) et produit à la fois le corps de
+Au dépôt, `diffDraft` renumérote `0..n-1` les seules listes modifiées (racine : dossiers et flux
+sans dossier ensemble, flux intelligents, dossiers source et destination des flux) et produit à la fois le corps de
 `POST /api/subscriptions/reorder` et les lignes Dexie : écriture locale optimiste, requête, puis
 `syncNow()` (le serveur fait foi ; en cas d'échec ou hors-ligne, un toast et la sync restaurent
 l'ordre serveur). Le brouillon reste affiché jusqu'à ce que Dexie reflète le dépôt, pour éviter un

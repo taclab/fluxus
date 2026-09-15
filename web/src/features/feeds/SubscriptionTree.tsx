@@ -1,13 +1,14 @@
 /**
  * Sections « Flux intelligents » et « Abonnements » de la barre latérale, réorganisables au clic long :
- * ordre des dossiers, ordre des flux, changement de dossier, sortie vers « sans dossier », ordre des
- * flux intelligents. Un seul DndContext ; la stratégie neutre réordonne réellement un brouillon pendant
- * le survol (même motif que le tableau de bord), puis le nouvel ordre est écrit dans Dexie et envoyé au
- * serveur en une requête.
+ * ordre de la racine (dossiers et flux sans dossier, au même niveau), ordre des flux dans un dossier,
+ * entrée et sortie d'un dossier, ordre des flux intelligents. Un seul DndContext ; la stratégie neutre
+ * réordonne réellement un brouillon pendant le survol (même motif que le tableau de bord), puis le
+ * nouvel ordre est écrit dans Dexie et envoyé au serveur en une requête.
  */
 
-import { closestCenter, DndContext, DragOverlay, MouseSensor, TouchSensor, useDroppable, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core'
+import { closestCenter, DndContext, DragOverlay, MouseSensor, pointerWithin, TouchSensor, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, type SortingStrategy } from '@dnd-kit/sortable'
+import { getEventCoordinates } from '@dnd-kit/utilities'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight, Folder, FolderOpen, Sparkles, Unlink } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
@@ -18,13 +19,15 @@ import { db } from '../../db/db'
 import { syncNow } from '../../sync/engine'
 import type { View } from '../../app/view'
 import { Count, FeedIcon } from './FeedIcon'
-import { buildDraft, canDropOn, diffDraft, dragId, moveInDraft, parseDragId, UNCATEGORIZED_ID, type Draft, type DragRef, type ReorderChanges } from './sidebarOrder'
+import { buildDraft, canDropOn, diffDraft, dragId, moveInDraft, parseDragId, type Draft, type DragRef, type HeaderZone, type ReorderChanges } from './sidebarOrder'
 
 const noTransform: SortingStrategy = () => null
 /** Durée du clic long avant la prise (souris et tactile). */
 const HOLD_MS = 300
 /** Survol d'un dossier replié avant qu'il ne s'ouvre pour y viser une place précise. */
 const EXPAND_MS = 600
+/** Part haute d'un en-tête de dossier où un flux se dépose « avant » le dossier, à la racine, plutôt que dedans. */
+const BEFORE_ZONE = 0.35
 /** Style anti-sélection pendant le clic long (iOS ignore user-select sur le callout). */
 const holdStyle: CSSProperties = { WebkitTouchCallout: 'none', touchAction: 'manipulation' }
 
@@ -51,10 +54,13 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
+  const [headerZone, setHeaderZone] = useState<HeaderZone>('into')
   const activeRef = useRef<string | null>(null)
   const startRef = useRef<Draft | null>(null)
-  const lastOverId = useRef<string | null>(null)
+  /** Dernier survol appliqué (cible + zone) : onDragMove ne rejoue rien tant qu'il ne change pas. */
+  const lastApplied = useRef<string | null>(null)
   const pendingHeader = useRef<DragRef | null>(null)
+  const modelRef = useRef<Draft | null>(null)
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -62,6 +68,9 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
   const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const smartById = useMemo(() => new Map(smartFeeds.map((s) => [s.id, s])), [smartFeeds])
   const model = draft ?? base
+  useEffect(() => {
+    modelRef.current = model
+  }, [model])
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { delay: HOLD_MS, tolerance: 6 } }),
@@ -80,16 +89,31 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
     pendingHeader.current = null
   }
 
-  /** Un dossier ne survole que des dossiers, un flux ne survole que des flux, des en-têtes ou « sans dossier ». */
+  /**
+   * Cible = l'élément sous le pointeur (la zone haute/basse d'un en-tête dépend du pointeur, pas du
+   * centre de l'élément saisi), sinon le centre le plus proche ; filtrée par les règles de dépôt.
+   */
   const collision = useCallback<CollisionDetection>((args) => {
     const active = parseDragId(args.active.id)
-    if (!active) return []
+    const model = modelRef.current
+    if (!active || !model) return []
     const containers = args.droppableContainers.filter((c) => {
       const ref = parseDragId(c.id)
-      return ref !== null && canDropOn(active, ref)
+      return ref !== null && canDropOn(model, active, ref)
     })
-    return closestCenter({ ...args, droppableContainers: containers })
+    const within = pointerWithin({ ...args, droppableContainers: containers })
+    return within.length ? within : closestCenter({ ...args, droppableContainers: containers })
   }, [])
+
+  /** Zone d'un en-tête de dossier sous le pointeur : haut → « avant, à la racine », sinon « dedans ». */
+  const zoneFor = (e: DragMoveEvent | DragOverEvent): HeaderZone => {
+    if (!e.over) return 'into'
+    const start = e.activatorEvent ? getEventCoordinates(e.activatorEvent) : null
+    if (!start) return 'into'
+    const y = start.y + e.delta.y
+    const r = e.over.rect
+    return y < r.top + r.height * BEFORE_ZONE ? 'before' : 'into'
+  }
 
   const onDragStart = useCallback(
     (e: DragStartEvent) => {
@@ -99,36 +123,42 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
       settleTimer.current = null
       activeRef.current = id
       startRef.current = base
-      lastOverId.current = null
+      lastApplied.current = null
       setActiveId(id)
       setOverId(null)
+      setHeaderZone('into')
       setDraft(base)
     },
     [base],
   )
 
-  const onDragOver = useCallback(
-    (e: DragOverEvent) => {
+  /** Applique le survol courant (cible + zone) au brouillon ; commun à onDragOver et onDragMove. */
+  const applyHover = useCallback(
+    (e: DragOverEvent | DragMoveEvent) => {
       const over = e.over ? String(e.over.id) : null
       setOverId(over)
-      if (!over || over === String(e.active.id) || over === lastOverId.current) return
-      lastOverId.current = over
+      if (!over || over === String(e.active.id)) return
       const a = parseDragId(e.active.id)
       const o = parseDragId(over)
       if (!a || !o) return
+      const zone: HeaderZone = a.kind === 'feed' && o.kind === 'cat' ? zoneFor(e) : 'into'
+      setHeaderZone(zone)
+      const key = `${over}|${zone}`
+      if (key === lastApplied.current) return
+      lastApplied.current = key
       clearExpandTimer()
-      if (a.kind === 'feed' && o.kind === 'cat' && collapsed.has(o.id)) {
+      if (a.kind === 'feed' && o.kind === 'cat' && zone === 'into' && collapsed.has(o.id)) {
         // Dossier replié : on attend un peu avant de l'ouvrir et d'y déposer le flux en tête.
         pendingHeader.current = o
         expandTimer.current = setTimeout(() => {
           expandTimer.current = null
           pendingHeader.current = null
           onExpandCategory(o.id)
-          setDraft((cur) => (cur ? (moveInDraft(cur, a, o) ?? cur) : cur))
+          setDraft((cur) => (cur ? (moveInDraft(cur, a, o, 'into') ?? cur) : cur))
         }, EXPAND_MS)
         return
       }
-      setDraft((cur) => (cur ? (moveInDraft(cur, a, o) ?? cur) : cur))
+      setDraft((cur) => (cur ? (moveInDraft(cur, a, o, zone) ?? cur) : cur))
     },
     [collapsed, onExpandCategory],
   )
@@ -161,12 +191,12 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
       clearExpandTimer()
       const start = startRef.current
       let final = draft
-      if (e && final) {
+      if (e && final && pendingHeader.current) {
         // Dépôt sur l'en-tête d'un dossier replié avant la fin de l'attente : on l'applique quand même.
         const a = parseDragId(e.active.id)
-        const o = e.over ? parseDragId(e.over.id) : null
-        if (a && o && o.kind === 'cat' && a.kind === 'feed' && collapsed.has(o.id)) final = moveInDraft(final, a, o) ?? final
+        if (a) final = moveInDraft(final, a, pendingHeader.current, 'into') ?? final
       }
+      pendingHeader.current = null
       activeRef.current = null
       setActiveId(null)
       setOverId(null)
@@ -185,7 +215,7 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
       }
       startRef.current = null
     },
-    [draft, collapsed, categories, feeds, smartFeeds, commit],
+    [draft, categories, feeds, smartFeeds, commit],
   )
 
   useEffect(() => () => {
@@ -196,19 +226,16 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
   const dragging = activeId !== null
   const activeRefParsed = activeId ? parseDragId(activeId) : null
   const draggingFeed = activeRefParsed?.kind === 'feed'
-  const uncategorized = useMemo(() => model.feeds.get('none') ?? [], [model])
 
   // Tous les identifiants visibles : la stratégie est neutre, seul le re-mesurage des cibles en dépend.
   const items = useMemo(() => {
     const out: string[] = model.smartFeeds.map((id) => dragId({ kind: 'smart', id }))
-    for (const cid of model.categories) {
-      out.push(dragId({ kind: 'cat', id: cid }))
-      if (!collapsed.has(cid)) for (const fid of model.feeds.get(cid) ?? []) out.push(dragId({ kind: 'feed', id: fid }))
+    for (const item of model.root) {
+      out.push(dragId(item))
+      if (item.kind === 'cat' && !collapsed.has(item.id)) for (const fid of model.feeds.get(item.id) ?? []) out.push(dragId({ kind: 'feed', id: fid }))
     }
-    out.push(UNCATEGORIZED_ID)
-    for (const fid of uncategorized) out.push(dragId({ kind: 'feed', id: fid }))
     return out
-  }, [model, collapsed, uncategorized])
+  }, [model, collapsed])
 
   const guard = (fn: () => void) => () => {
     if (!activeRef.current) fn()
@@ -227,11 +254,11 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
     if (ref.kind === 'cat') return `le dossier ${catById.get(ref.id)?.title ?? ''}`
     if (ref.kind === 'feed') return `le flux ${feedById.get(ref.id)?.title ?? ''}`
     if (ref.kind === 'smart') return `le flux intelligent ${smartById.get(ref.id)?.name ?? ''}`
-    return 'sans dossier'
+    return ''
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={finish} onDragCancel={() => finish(null)} accessibility={{ announcements }}>
+    <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragOver={applyHover} onDragMove={applyHover} onDragEnd={finish} onDragCancel={() => finish(null)} accessibility={{ announcements }}>
       <SortableContext items={items} strategy={noTransform}>
         <div className="mt-3 px-4 pb-1 flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Flux intelligents</span>
@@ -256,22 +283,31 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
           </button>
         </div>
 
-        {model.categories.map((cid) => {
+        {model.root.map((item) => {
+          if (item.kind === 'feed') {
+            const f = feedById.get(item.id)
+            return f ? (
+              <div key={dragId(item)} data-root-item={dragId(item)}>
+                <FeedRow feed={f} count={unreadByFeed.get(item.id) ?? 0} active={isActive({ kind: 'feed', id: item.id })} dimmed={activeId === dragId(item)} onClick={() => onSelect({ kind: 'feed', id: item.id })} onEdit={guard(() => onEditFeed(f))} />
+              </div>
+            ) : null
+          }
+          const cid = item.id
           const cat = catById.get(cid)
           if (!cat) return null
           const list = model.feeds.get(cid) ?? []
           const count = list.reduce((a, fid) => a + (unreadByFeed.get(fid) ?? 0), 0)
           const open = !collapsed.has(cid)
-          const id = dragId({ kind: 'cat', id: cid })
+          const id = dragId(item)
           return (
-            <div key={cid} data-category-id={cid}>
+            <div key={id} data-category-id={cid} data-root-item={id}>
               <CategoryRow
                 category={cat}
                 count={count}
                 open={open}
                 active={isActive({ kind: 'category', id: cid })}
                 dimmed={activeId === id}
-                target={draggingFeed && overId === id}
+                target={draggingFeed && overId === id && headerZone === 'into'}
                 onToggle={() => onToggleCategory(cid)}
                 onClick={() => onSelect({ kind: 'category', id: cid })}
                 onEdit={guard(() => onEditCategory(cat))}
@@ -283,12 +319,6 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
                 })}
             </div>
           )
-        })}
-
-        <UncategorizedHeader visible={uncategorized.length > 0 || draggingFeed} target={draggingFeed && overId === UNCATEGORIZED_ID} />
-        {uncategorized.map((fid) => {
-          const f = feedById.get(fid)
-          return f ? <FeedRow key={fid} feed={f} count={unreadByFeed.get(fid) ?? 0} active={isActive({ kind: 'feed', id: fid })} dimmed={activeId === dragId({ kind: 'feed', id: fid })} onClick={() => onSelect({ kind: 'feed', id: fid })} onEdit={guard(() => onEditFeed(f))} /> : null
         })}
 
         {feeds.length === 0 && (
@@ -382,17 +412,6 @@ function FeedRow({ feed, count, active, dimmed, onClick, onEdit, indent }: { fee
       {feed.error_count > 2 && <span className="size-1.5 rounded-full bg-red-500 shrink-0" title={feed.last_error ?? 'Erreur'} />}
       {count > 0 && <Count n={count} />}
     </button>
-  )
-}
-
-/** En-tête « Sans dossier » : visible s'il y a des flux hors dossier, et toujours pendant le glisser d'un flux (cible). */
-function UncategorizedHeader({ visible, target }: { visible: boolean; target: boolean }) {
-  const { setNodeRef } = useDroppable({ id: UNCATEGORIZED_ID })
-  if (!visible) return null
-  return (
-    <div ref={setNodeRef} data-testid="uncategorized-zone" className={clsx('mx-2 mt-2 mb-0.5 flex items-center gap-2 rounded-md border border-dashed px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider', target ? 'border-accent-400 text-accent-600 dark:text-accent-300 bg-accent-50/60 dark:bg-accent-900/30' : 'border-transparent text-muted')}>
-      Sans dossier
-    </div>
   )
 }
 

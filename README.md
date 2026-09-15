@@ -199,16 +199,18 @@ navigateur fonctionnent.
 Un **clic long** (souris ou doigt, environ un tiers de seconde) saisit un dossier, un flux ou un flux
 intelligent ; il suffit ensuite de le déposer :
 
-- un dossier au-dessus ou au-dessous d'un autre pour changer l'ordre des dossiers ;
+- un dossier au-dessus ou au-dessous d'un autre élément de la racine (dossier ou flux sans dossier) ;
 - un flux entre deux flux, dans son dossier ou dans un autre ;
 - un flux sur l'en-tête d'un dossier pour l'y placer en tête (un dossier replié s'ouvre après un
   court survol) ;
-- un flux sur la zone « Sans dossier », qui apparaît en bas pendant le geste, pour le sortir de tout
-  dossier ;
+- un flux sur le **bord supérieur** d'un en-tête de dossier pour le sortir de tout dossier et le
+  poser juste avant, au même niveau que les dossiers ; les flux sans dossier se déplacent ensuite
+  comme des dossiers, avant, entre ou après eux ;
 - un flux intelligent au-dessus ou au-dessous d'un autre.
 
 L'ordre est **manuel et prioritaire** : un flux ajouté, importé ou changé de dossier arrive en tête
-de son dossier, et l'ordre est le même sur tous vos appareils et dans l'export OPML. Un clic court
+de son dossier (ou de la liste, s'il n'a pas de dossier), les flux d'un dossier supprimé prennent sa
+place, et l'ordre est le même sur tous vos appareils et dans l'export OPML. Un clic court
 reste un clic, un défilement au doigt reste un défilement ; la réorganisation exige d'être en ligne.
 
 ### Raccourcis clavier

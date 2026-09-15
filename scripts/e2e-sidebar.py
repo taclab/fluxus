@@ -97,27 +97,34 @@ def run(page, ctx, errors):
     results["move_to_folder_api"] = api_feeds[moved]["category_id"] == cat_b["id"] and api_feeds[moved]["position"] <= min(f["position"] for f in api_feeds.values() if f["category_id"] == cat_b["id"])
     results["source_folder_shrunk"] = moved not in nav_feed_order(page, cat_a["id"])
 
-    # 4. Sortir ce flux vers « Sans dossier » (la zone apparaît pendant le glisser)
-    src = page.locator(f"nav [data-feed-id='{moved}']")
-    sx, sy = center(src)
-    page.mouse.move(sx, sy)
-    page.mouse.down()
-    page.wait_for_timeout(HOLD_MS)
-    page.mouse.move(sx + 3, sy + 3)
-    page.wait_for_timeout(100)
-    zone = page.locator("[data-testid=uncategorized-zone]")
-    results["uncategorized_zone_visible_while_dragging"] = zone.count() == 1
-    zone.scroll_into_view_if_needed()
-    tx, ty = center(zone)
-    for i in range(1, 15):
-        page.mouse.move(sx + (tx - sx) * i / 14, sy + (ty - sy) * i / 14)
-        page.wait_for_timeout(35)
-    page.wait_for_timeout(300)
-    page.screenshot(path="/out/81-sidebar-drag-uncategorized.png")
-    page.mouse.up()
-    page.wait_for_timeout(1500)
+    # 4. Sortir ce flux à la racine, entre deux dossiers : dépôt sur la partie haute de l'en-tête du 2e dossier
+    root_before = page.locator("nav [data-root-item]").evaluate_all("els => els.map(e => e.dataset.rootItem)")
+    second_cat = [r for r in root_before if r.startswith("cat:")][1]
+    hdr2 = page.locator(f"nav [data-root-item='{second_cat}'] button").nth(1)
+    box = hdr2.bounding_box()
+    long_drag(page, page.locator(f"nav [data-feed-id='{moved}']"), hdr2, offset_y=-box["height"] * 0.32)
+    root_after = page.locator("nav [data-root-item]").evaluate_all("els => els.map(e => e.dataset.rootItem)")
+    results["root_feed_between_folders_dom"] = f"feed:{moved}" in root_after and root_after.index(f"feed:{moved}") == root_after.index(second_cat) - 1
     api_feeds = {f["id"]: f for f in api(page, "GET", "/api/feeds").json()}
-    results["move_to_uncategorized_api"] = api_feeds[moved]["category_id"] is None
+    api_cats = {c["id"]: c for c in api(page, "GET", "/api/categories").json()}
+    first_cat_id = int([r for r in root_before if r.startswith("cat:")][0].split(":")[1])
+    second_cat_id = int(second_cat.split(":")[1])
+    results["root_feed_between_folders_api"] = api_feeds[moved]["category_id"] is None and api_cats[first_cat_id]["position"] < api_feeds[moved]["position"] < api_cats[second_cat_id]["position"]
+    page.screenshot(path="/out/81-sidebar-root-feed.png")
+
+    # 4b. Un dossier se déplace au-dessus de ce flux racine (les deux sont des éléments de la racine)
+    title2 = api_cats[second_cat_id]["title"]
+    long_drag(page, page.locator(f"nav [data-root-item='{second_cat}'] button:has-text('{title2}')").first, page.locator(f"nav [data-root-item='feed:{moved}']"), offset_y=-4)
+    root_after = page.locator("nav [data-root-item]").evaluate_all("els => els.map(e => e.dataset.rootItem)")
+    results["folder_over_root_feed_dom"] = root_after.index(second_cat) == root_after.index(f"feed:{moved}") - 1
+
+    # 4c. Le flux racine rentre dans un dossier par le bas de son en-tête
+    hdr1 = page.locator(f"nav [data-root-item='cat:{first_cat_id}'] button").nth(1)
+    box = hdr1.bounding_box()
+    long_drag(page, page.locator(f"nav [data-root-item='feed:{moved}']"), hdr1, offset_y=box["height"] * 0.25)
+    api_feeds = {f["id"]: f for f in api(page, "GET", "/api/feeds").json()}
+    results["root_feed_into_folder_api"] = api_feeds[moved]["category_id"] == first_cat_id and api_feeds[moved]["position"] <= min(f["position"] for f in api_feeds.values() if f["category_id"] == first_cat_id)
+    results["no_uncategorized_zone"] = page.locator("[data-testid=uncategorized-zone]").count() == 0
 
     # 5. Réordonner les dossiers : le 2e passe devant le 1er
     corder = nav_category_order(page)
@@ -148,7 +155,7 @@ def run(page, ctx, errors):
     page.wait_for_selector("nav [data-feed-id]", timeout=30000)
     page.wait_for_timeout(1500)
     results["persist_categories"] = nav_category_order(page)[:2] == [c1, c0]
-    results["persist_feed_uncategorized"] = page.locator(f"nav [data-category-id] [data-feed-id='{moved}']").count() == 0 and page.locator(f"nav [data-feed-id='{moved}']").count() == 1
+    results["persist_feed_in_folder"] = page.locator(f"nav [data-category-id='{first_cat_id}'] [data-feed-id='{moved}']").count() == 1
     page.screenshot(path="/out/82-sidebar-after.png")
 
     # 8. Mobile (tactile via CDP) : le tiroir défile au geste rapide, l'appui long saisit et réordonne

@@ -1,58 +1,49 @@
 /**
  * Ordre manuel de la barre latérale : modèle brouillon pendant un glisser-déposer, règles de
  * déplacement et calcul du nouvel ordre à envoyer au serveur. Aucune dépendance React.
+ *
+ * La liste racine mélange dossiers et flux sans dossier, triés ensemble par `position` : un flux
+ * sans dossier se comporte comme un dossier (avant, entre ou après les dossiers).
  */
 
 import type { Category, Feed, Schemas, SmartFeed } from '../../api/client'
 
-/** Clé d'un conteneur de flux : identifiant de dossier, ou 'none' pour « sans dossier ». */
-export type ContainerKey = number | 'none'
-export const UNCATEGORIZED_ID = 'uncategorized'
+export type RootItem = { kind: 'cat'; id: number } | { kind: 'feed'; id: number }
 
 export interface Draft {
-  categories: number[]
-  /** Flux par conteneur, dans l'ordre affiché. */
-  feeds: Map<ContainerKey, number[]>
+  /** Dossiers et flux sans dossier, dans l'ordre affiché. */
+  root: RootItem[]
+  /** Flux de chaque dossier, dans l'ordre affiché. */
+  feeds: Map<number, number[]>
   smartFeeds: number[]
 }
 
-export type DragRef = { kind: 'cat'; id: number } | { kind: 'feed'; id: number } | { kind: 'smart'; id: number } | { kind: 'uncategorized' }
+export type DragRef = { kind: 'cat'; id: number } | { kind: 'feed'; id: number } | { kind: 'smart'; id: number }
 
-export function dragId(ref: DragRef): string {
-  return ref.kind === 'uncategorized' ? UNCATEGORIZED_ID : `${ref.kind}:${ref.id}`
+/** Où déposer un flux survolant l'en-tête d'un dossier : avant lui à la racine, ou dedans en tête. */
+export type HeaderZone = 'before' | 'into'
+
+export function dragId(ref: DragRef | RootItem): string {
+  return `${ref.kind}:${ref.id}`
 }
 
 export function parseDragId(id: string | number): DragRef | null {
-  const s = String(id)
-  if (s === UNCATEGORIZED_ID) return { kind: 'uncategorized' }
-  const [kind, raw] = s.split(':')
+  const [kind, raw] = String(id).split(':')
   const n = Number(raw)
   if (!Number.isInteger(n)) return null
   if (kind === 'cat' || kind === 'feed' || kind === 'smart') return { kind, id: n }
   return null
 }
 
-/** Cibles admises pour un élément saisi : un dossier ne survole jamais un flux, et inversement. */
-export function canDropOn(active: DragRef, over: DragRef): boolean {
-  if (active.kind === 'cat') return over.kind === 'cat'
-  if (active.kind === 'smart') return over.kind === 'smart'
-  if (active.kind === 'feed') return over.kind === 'feed' || over.kind === 'cat' || over.kind === 'uncategorized'
-  return false
-}
-
-export function containerOf(feed: Pick<Feed, 'category_id'>): ContainerKey {
-  return feed.category_id ?? 'none'
-}
-
-/** Tri d'affichage des flux : position manuelle, puis titre pour les égalités (anciennes données sans position). */
+/** Tri d'affichage : position manuelle, puis titre pour les égalités (anciennes données sans position). */
 export function compareFeeds(a: Feed, b: Feed): number {
   return (a.position ?? 0) - (b.position ?? 0) || a.title.localeCompare(b.title, 'fr')
 }
 
-export function groupFeeds(feeds: Feed[]): Map<ContainerKey, Feed[]> {
-  const byContainer = new Map<ContainerKey, Feed[]>()
+export function groupFeeds(feeds: Feed[]): Map<number | null, Feed[]> {
+  const byContainer = new Map<number | null, Feed[]>()
   for (const f of feeds) {
-    const key = containerOf(f)
+    const key = f.category_id ?? null
     if (!byContainer.has(key)) byContainer.set(key, [])
     byContainer.get(key)!.push(f)
   }
@@ -62,9 +53,15 @@ export function groupFeeds(feeds: Feed[]): Map<ContainerKey, Feed[]> {
 
 export function buildDraft(categories: Category[], feeds: Feed[], smartFeeds: SmartFeed[]): Draft {
   const grouped = groupFeeds(feeds)
-  const map = new Map<ContainerKey, number[]>()
-  for (const [key, list] of grouped) map.set(key, list.map((f) => f.id))
-  return { categories: categories.map((c) => c.id), feeds: map, smartFeeds: smartFeeds.map((s) => s.id) }
+  const rootEntries: { item: RootItem; position: number; title: string }[] = [
+    ...categories.map((c) => ({ item: { kind: 'cat', id: c.id } as RootItem, position: c.position ?? 0, title: c.title })),
+    ...(grouped.get(null) ?? []).map((f) => ({ item: { kind: 'feed', id: f.id } as RootItem, position: f.position ?? 0, title: f.title })),
+  ]
+  rootEntries.sort((a, b) => a.position - b.position || a.title.localeCompare(b.title, 'fr'))
+  const map = new Map<number, number[]>()
+  for (const [key, list] of grouped) if (key !== null) map.set(key, list.map((f) => f.id))
+  for (const c of categories) if (!map.has(c.id)) map.set(c.id, [])
+  return { root: rootEntries.map((e) => e.item), feeds: map, smartFeeds: smartFeeds.map((s) => s.id) }
 }
 
 function arrayMove<T>(list: T[], from: number, to: number): T[] {
@@ -74,62 +71,105 @@ function arrayMove<T>(list: T[], from: number, to: number): T[] {
   return next
 }
 
-function findContainer(draft: Draft, feedId: number): ContainerKey | null {
-  for (const [key, ids] of draft.feeds) if (ids.includes(feedId)) return key
-  return null
+function rootIndex(draft: Draft, ref: RootItem): number {
+  return draft.root.findIndex((r) => r.kind === ref.kind && r.id === ref.id)
 }
 
-function cloneFeeds(feeds: Map<ContainerKey, number[]>): Map<ContainerKey, number[]> {
+/** Conteneur d'un flux : id de dossier, null à la racine, undefined si inconnu. */
+export function containerOf(draft: Draft, feedId: number): number | null | undefined {
+  for (const [key, ids] of draft.feeds) if (ids.includes(feedId)) return key
+  return rootIndex(draft, { kind: 'feed', id: feedId }) === -1 ? undefined : null
+}
+
+function cloneFeeds(feeds: Map<number, number[]>): Map<number, number[]> {
   return new Map([...feeds].map(([k, v]) => [k, v.slice()]))
 }
 
-/** Place `feedId` à `index` dans `target`, en le retirant de son conteneur actuel. */
-function placeFeed(draft: Draft, feedId: number, target: ContainerKey, index: number): Draft | null {
-  const source = findContainer(draft, feedId)
-  if (source === null) return null
+/** Retire un flux de partout (dossier ou racine). */
+function detachFeed(draft: Draft, feedId: number): Draft {
   const feeds = cloneFeeds(draft.feeds)
-  const sourceList = feeds.get(source)!
-  const from = sourceList.indexOf(feedId)
-  if (source === target && from === index) return null
-  sourceList.splice(from, 1)
-  if (!feeds.has(target)) feeds.set(target, [])
-  const targetList = feeds.get(target)!
-  targetList.splice(Math.min(index, targetList.length), 0, feedId)
-  return { ...draft, feeds }
+  for (const list of feeds.values()) {
+    const i = list.indexOf(feedId)
+    if (i !== -1) list.splice(i, 1)
+  }
+  return { ...draft, feeds, root: draft.root.filter((r) => !(r.kind === 'feed' && r.id === feedId)) }
+}
+
+/** Cibles admises : dossiers et flux racine survolent des éléments racine ; un flux survole des flux ou des en-têtes. */
+export function canDropOn(draft: Draft, active: DragRef, over: DragRef): boolean {
+  if (active.kind === 'smart') return over.kind === 'smart'
+  if (over.kind === 'smart') return false
+  if (active.kind === 'cat') return over.kind === 'cat' || (over.kind === 'feed' && containerOf(draft, over.id) === null)
+  return true
 }
 
 /**
  * Applique un survol : renvoie le nouveau brouillon, ou null si rien ne change.
- * - dossier sur dossier, flux intelligent sur flux intelligent : permutation ;
- * - flux sur flux : prend la place du flux survolé, dans son conteneur ;
- * - flux sur en-tête de dossier ou sur « sans dossier » : passe en tête de ce conteneur.
+ * - flux intelligent sur flux intelligent : permutation ;
+ * - dossier sur élément racine (dossier ou flux sans dossier) : permutation à la racine ;
+ * - flux sur flux : prend la place du survolé, dans son conteneur (dossier ou racine) ;
+ * - flux sur en-tête de dossier : zone `into` → en tête du dossier ; zone `before` → à la racine, juste avant.
  */
-export function moveInDraft(draft: Draft, active: DragRef, over: DragRef): Draft | null {
-  if (!canDropOn(active, over)) return null
-  if (active.kind === 'cat' && over.kind === 'cat') {
-    const from = draft.categories.indexOf(active.id)
-    const to = draft.categories.indexOf(over.id)
-    if (from === -1 || to === -1 || from === to) return null
-    return { ...draft, categories: arrayMove(draft.categories, from, to) }
-  }
+export function moveInDraft(draft: Draft, active: DragRef, over: DragRef, zone: HeaderZone = 'into'): Draft | null {
+  if (!canDropOn(draft, active, over)) return null
   if (active.kind === 'smart' && over.kind === 'smart') {
     const from = draft.smartFeeds.indexOf(active.id)
     const to = draft.smartFeeds.indexOf(over.id)
     if (from === -1 || to === -1 || from === to) return null
     return { ...draft, smartFeeds: arrayMove(draft.smartFeeds, from, to) }
   }
-  if (active.kind !== 'feed') return null
+  if (active.kind === 'cat') {
+    if (over.kind === 'smart') return null
+    const from = rootIndex(draft, active)
+    const to = rootIndex(draft, over as RootItem)
+    if (from === -1 || to === -1 || from === to) return null
+    return { ...draft, root: arrayMove(draft.root, from, to) }
+  }
+  if (active.kind !== 'feed' || over.kind === 'smart') return null
+  const source = containerOf(draft, active.id)
+  if (source === undefined) return null
   if (over.kind === 'feed') {
     if (over.id === active.id) return null
-    const target = findContainer(draft, over.id)
-    if (target === null) return null
-    // Index du survolé avant retrait de l'actif : même sémantique qu'arrayMove (l'actif prend sa place).
-    return placeFeed(draft, active.id, target, draft.feeds.get(target)!.indexOf(over.id))
+    const target = containerOf(draft, over.id)
+    if (target === undefined) return null
+    if (target === null) {
+      // Flux racine survolé : l'actif prend sa place dans la liste racine.
+      const to = rootIndex(draft, over as RootItem)
+      if (source === null) return { ...draft, root: arrayMove(draft.root, rootIndex(draft, active as RootItem), to) }
+      const d = detachFeed(draft, active.id)
+      const root = d.root.slice()
+      root.splice(rootIndex(d, over as RootItem), 0, { kind: 'feed', id: active.id })
+      return { ...d, root }
+    }
+    // Flux d'un dossier survolé : même sémantique qu'arrayMove (l'actif prend sa place).
+    const index = draft.feeds.get(target)!.indexOf(over.id)
+    if (source === target) {
+      const from = draft.feeds.get(target)!.indexOf(active.id)
+      if (from === index) return null
+      const feeds = cloneFeeds(draft.feeds)
+      feeds.set(target, arrayMove(feeds.get(target)!, from, index))
+      return { ...draft, feeds }
+    }
+    const d = detachFeed(draft, active.id)
+    d.feeds.get(target)!.splice(index, 0, active.id)
+    return d
   }
-  const target: ContainerKey = over.kind === 'cat' ? over.id : 'none'
-  const source = findContainer(draft, active.id)
-  if (source === target && draft.feeds.get(target)![0] === active.id) return null
-  return placeFeed(draft, active.id, target, 0)
+  // En-tête de dossier
+  if (zone === 'into') {
+    if (source === over.id && draft.feeds.get(over.id)![0] === active.id) return null
+    const d = detachFeed(draft, active.id)
+    if (!d.feeds.has(over.id)) d.feeds.set(over.id, [])
+    d.feeds.get(over.id)!.unshift(active.id)
+    return d
+  }
+  // zone 'before' : à la racine, juste avant le dossier
+  const catIndex = rootIndex(draft, over as RootItem)
+  if (catIndex === -1) return null
+  if (source === null && rootIndex(draft, active as RootItem) === catIndex - 1) return null
+  const d = detachFeed(draft, active.id)
+  const root = d.root.slice()
+  root.splice(rootIndex(d, over as RootItem), 0, { kind: 'feed', id: active.id })
+  return { ...d, root }
 }
 
 export type ReorderBody = Schemas['ReorderIn']
@@ -142,14 +182,20 @@ export interface ReorderChanges {
   smartFeeds: SmartFeed[]
 }
 
-function sameList(a: number[] | undefined, b: number[] | undefined): boolean {
-  if (!a || !b) return a === b || ((a?.length ?? 0) === 0 && (b?.length ?? 0) === 0)
-  return a.length === b.length && a.every((v, i) => v === b[i])
+function sameIds(a: number[] | undefined, b: number[] | undefined): boolean {
+  const x = a ?? []
+  const y = b ?? []
+  return x.length === y.length && x.every((v, i) => v === y[i])
+}
+
+function sameRoot(a: RootItem[], b: RootItem[]): boolean {
+  return a.length === b.length && a.every((v, i) => v.kind === b[i].kind && v.id === b[i].id)
 }
 
 /**
  * Compare l'ordre initial et le brouillon final : les listes modifiées sont renumérotées 0..n-1 et
  * renvoyées sous la forme attendue par POST /api/subscriptions/reorder, avec les lignes locales.
+ * La racine renumérote ensemble dossiers et flux sans dossier (positions comparables).
  */
 export function diffDraft(before: Draft, after: Draft, categories: Category[], feeds: Feed[], smartFeeds: SmartFeed[]): ReorderChanges | null {
   const catById = new Map(categories.map((c) => [c.id, c]))
@@ -157,15 +203,22 @@ export function diffDraft(before: Draft, after: Draft, categories: Category[], f
   const smartById = new Map(smartFeeds.map((s) => [s.id, s]))
   const out: ReorderChanges = { body: { categories: [], feeds: [], smart_feeds: [] }, categories: [], feeds: [], smartFeeds: [] }
 
-  if (!sameList(before.categories, after.categories)) {
-    after.categories.forEach((id, position) => {
-      const c = catById.get(id)
-      if (!c) return
-      out.body.categories!.push({ id, position })
-      out.categories.push({ ...c, position })
+  if (!sameRoot(before.root, after.root)) {
+    after.root.forEach((item, position) => {
+      if (item.kind === 'cat') {
+        const c = catById.get(item.id)
+        if (!c) return
+        out.body.categories!.push({ id: item.id, position })
+        out.categories.push({ ...c, position })
+      } else {
+        const f = feedById.get(item.id)
+        if (!f) return
+        out.body.feeds!.push({ id: item.id, position, category_id: null })
+        out.feeds.push({ ...f, position, category_id: null })
+      }
     })
   }
-  if (!sameList(before.smartFeeds, after.smartFeeds)) {
+  if (!sameIds(before.smartFeeds, after.smartFeeds)) {
     after.smartFeeds.forEach((id, position) => {
       const s = smartById.get(id)
       if (!s) return
@@ -173,15 +226,14 @@ export function diffDraft(before: Draft, after: Draft, categories: Category[], f
       out.smartFeeds.push({ ...s, position })
     })
   }
-  const containers = new Set<ContainerKey>([...before.feeds.keys(), ...after.feeds.keys()])
+  const containers = new Set<number>([...before.feeds.keys(), ...after.feeds.keys()])
   for (const key of containers) {
-    if (sameList(before.feeds.get(key), after.feeds.get(key))) continue
-    const category_id = key === 'none' ? null : key
+    if (sameIds(before.feeds.get(key), after.feeds.get(key))) continue
     ;(after.feeds.get(key) ?? []).forEach((id, position) => {
       const f = feedById.get(id)
       if (!f) return
-      out.body.feeds!.push({ id, position, category_id })
-      out.feeds.push({ ...f, position, category_id })
+      out.body.feeds!.push({ id, position, category_id: key })
+      out.feeds.push({ ...f, position, category_id: key })
     })
   }
   if (!out.body.categories!.length && !out.body.feeds!.length && !out.body.smart_feeds!.length) return null

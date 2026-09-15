@@ -6,7 +6,7 @@ from typing import Annotated
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Auth
@@ -42,13 +42,25 @@ async def _unread_by_feed(session: AsyncSession) -> dict[int, int]:
 
 
 async def _first_position(session: AsyncSession, category_id: int | None, *, exclude_id: int | None = None) -> int:
-    """Position qui place un flux en tête de son dossier (les valeurs négatives sont acceptées)."""
+    """Position qui place un flux en tête de son dossier, ou en tête de la racine (dossiers et flux sans
+    dossier partagent la même échelle) ; les valeurs négatives sont acceptées."""
     cond = Feed.category_id.is_(None) if category_id is None else Feed.category_id == category_id
     query = select(func.min(Feed.position)).where(cond)
     if exclude_id is not None:
         query = query.where(Feed.id != exclude_id)
     lowest = (await session.execute(query)).scalar_one()
+    if category_id is None:
+        lowest_cat = (await session.execute(select(func.min(Category.position)))).scalar_one()
+        candidates = [v for v in (lowest, lowest_cat) if v is not None]
+        lowest = min(candidates) if candidates else None
     return (lowest if lowest is not None else 1) - 1
+
+
+async def _root_end_position(session: AsyncSession) -> int:
+    """Position après le dernier élément de la racine (dossiers et flux sans dossier)."""
+    max_cat = (await session.execute(select(func.max(Category.position)))).scalar_one()
+    max_feed = (await session.execute(select(func.max(Feed.position)).where(Feed.category_id.is_(None)))).scalar_one()
+    return max((v for v in (max_cat, max_feed) if v is not None), default=0) + 1
 
 
 def _feed_out(feed: Feed, unread: dict[int, int]) -> FeedOut:
@@ -80,8 +92,7 @@ async def create_category(body: CategoryIn, _: Auth, session: Session) -> Catego
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Cette catégorie existe déjà")
     if body.position is None:
-        max_pos = (await session.execute(select(func.coalesce(func.max(Category.position), 0)))).scalar_one()
-        body.position = max_pos + 1
+        body.position = await _root_end_position(session)
     cat = Category(title=body.title, position=body.position)
     session.add(cat)
     await session.commit()
@@ -106,6 +117,8 @@ async def delete_category(category_id: int, _: Auth, session: Session) -> None:
     cat = await session.get(Category, category_id)
     if cat is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
+    # Les flux du dossier prennent sa place dans la racine (même position, départagés par le titre).
+    await session.execute(update(Feed).where(Feed.category_id == cat.id).values(position=cat.position))
     await session.delete(cat)  # les flux passent en category_id NULL (ON DELETE SET NULL)
     await session.commit()
 

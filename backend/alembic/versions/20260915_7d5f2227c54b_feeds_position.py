@@ -29,6 +29,8 @@ def upgrade() -> None:
         ) r WHERE feeds.id = r.id
         """
     )
+    # Les flux sans dossier partagent l'échelle des dossiers à la racine : on les place après eux.
+    op.execute("UPDATE feeds SET position = position + (SELECT coalesce(max(position), 0) FROM categories) WHERE category_id IS NULL")
 
 
 def downgrade() -> None:

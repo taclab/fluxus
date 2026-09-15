@@ -169,3 +169,33 @@ async def test_reorder_unknown_id_changes_nothing(client: AsyncClient):
     assert r.status_code == 404
     r = await client.post("/api/subscriptions/reorder", json={"smart_feeds": [{"id": 999999, "position": 0}]})
     assert r.status_code == 404
+
+
+async def test_root_positions_shared_between_categories_and_loose_feeds(client: AsyncClient):
+    feeds = await _feeds(client)
+    cats = {c["title"]: c for c in (await client.get("/api/categories")).json()}
+    root_max = max([c["position"] for c in cats.values()] + [f["position"] for f in feeds.values() if f["category_id"] is None])
+    root_min = min([c["position"] for c in cats.values()] + [f["position"] for f in feeds.values() if f["category_id"] is None])
+    # un nouveau dossier s'ajoute à la fin de la racine, après les flux sans dossier
+    r = await client.post("/api/categories", json={"title": "Fin de liste"})
+    assert r.status_code == 201 and r.json()["position"] == root_max + 1
+    # un flux qui sort de tout dossier passe en tête de la racine, au-dessus du premier dossier
+    r = await client.put(f"/api/feeds/{feeds['Tech A']['id']}", json={"clear_category": True})
+    assert r.status_code == 200 and r.json()["position"] < root_min
+    r = await client.put(f"/api/feeds/{feeds['Tech A']['id']}", json={"category_id": cats["Tech"]["id"]})
+    assert r.status_code == 200
+
+
+async def test_delete_category_feeds_take_its_place(client: AsyncClient):
+    cats = {c["title"]: c for c in (await client.get("/api/categories")).json()}
+    fin = cats["Fin de liste"]
+    # deux flux dans ce dossier, puis suppression : ils héritent de sa position à la racine
+    feeds = await _feeds(client)
+    body = {"feeds": [{"id": feeds["Import 1"]["id"], "position": 0, "category_id": fin["id"]}, {"id": feeds["Import 2"]["id"], "position": 1, "category_id": fin["id"]}]}
+    assert (await client.post("/api/subscriptions/reorder", json=body)).status_code == 204
+    r = await client.delete(f"/api/categories/{fin['id']}")
+    assert r.status_code == 204
+    feeds = await _feeds(client)
+    for title in ("Import 1", "Import 2"):
+        assert feeds[title]["category_id"] is None
+        assert feeds[title]["position"] == fin["position"]
