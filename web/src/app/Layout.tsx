@@ -11,6 +11,8 @@ import { CategoryDialog, FeedDialog } from '../features/feeds/FeedDialog'
 import { Sidebar } from '../features/feeds/Sidebar'
 import { SmartFeedDialog } from '../features/smartfeeds/SmartFeedDialog'
 import { openExternal, Reader } from '../features/reader/Reader'
+import { ReaderModal } from '../features/reader/ReaderModal'
+import { useListLayout } from './display'
 import { useKeyboard } from './useKeyboard'
 import { useView } from './view'
 
@@ -28,6 +30,9 @@ function useMediaQuery(query: string): boolean {
 export function Layout() {
   const { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly, openEntryIn } = useView()
   const isDashboard = view.kind === 'dashboard'
+  const listLayout = useListLayout()
+  // Disposition « pleine largeur » : la liste occupe tout, l'article s'ouvre dans une fenêtre.
+  const fullList = listLayout === 'full' && !isDashboard
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isTablet = useMediaQuery('(min-width: 768px)')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -38,12 +43,16 @@ export function Layout() {
   const [summaryTick, setSummaryTick] = useState(0)
   const [fullTick, setFullTick] = useState(0)
   const visibleIds = useRef<number[]>([])
+  // Miroir d'état pour la fenêtre de lecture (position « n / total ») : la ref ne déclenche pas de rendu.
+  const [visible, setVisible] = useState<number[]>([])
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? []
   const current = useLiveQuery(() => (entryId ? db.entries.get(entryId) : undefined), [entryId])
 
   const onVisibleEntries = useCallback((ids: number[]) => {
     visibleIds.current = ids
+    setVisible(ids)
   }, [])
+  const visibleIndex = useMemo(() => (entryId ? visible.indexOf(entryId) : -1), [entryId, visible])
 
   const selectView = useCallback(
     (v: typeof view) => {
@@ -88,6 +97,9 @@ export function Layout() {
       k: () => move(-1),
       ArrowDown: () => move(1),
       ArrowUp: () => move(-1),
+      // Fenêtre de lecture (pleine largeur) : ← → passent d'un article à l'autre.
+      ArrowLeft: () => fullList && entryId && move(-1),
+      ArrowRight: () => fullList && entryId && move(1),
       m: () => current && void recordChange(current.id, { read: !current.read }),
       s: () => current && void recordChange(current.id, { starred: !current.starred }),
       v: () => openExternal(current?.url),
@@ -98,13 +110,13 @@ export function Layout() {
       '/': focusSearch,
       '?': help,
     }),
-    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly, goHome, focusSearch, help],
+    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly, goHome, focusSearch, help, fullList],
   )
   useKeyboard(isDashboard ? dashboardShortcuts : shortcuts)
 
-  // Mobile : une seule colonne à la fois.
-  const showList = isTablet || entryId === null
-  const showReader = isTablet || entryId !== null
+  // Mobile : une seule colonne à la fois. Pleine largeur : la liste reste toujours montée, l'article vit dans la fenêtre.
+  const showList = fullList || isTablet || entryId === null
+  const showReader = !fullList && (isTablet || entryId !== null)
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -129,8 +141,9 @@ export function Layout() {
       )}
 
       {!isDashboard && showList && (
-        <div className={clsx('shrink-0 border-r border-app', isTablet ? 'w-[24rem] xl:w-[26rem]' : 'w-full')}>
+        <div className={clsx(fullList ? 'flex-1 min-w-0' : clsx('shrink-0 border-r border-app', isTablet ? 'w-[24rem] xl:w-[26rem]' : 'w-full'))}>
           <EntryList
+            layout={fullList ? 'full' : 'split'}
             view={view}
             unreadOnly={unreadOnly}
             selectedId={entryId}
@@ -154,6 +167,19 @@ export function Layout() {
             onCreateSmartFeed={(feedId) => openSmartEditor(null, { scope_kind: 'feed', scope_id: feedId })}
           />
         </div>
+      )}
+
+      {fullList && entryId !== null && (
+        <ReaderModal entryId={entryId} index={visibleIndex} total={visible.length} onClose={() => setEntry(null)} onMove={move}>
+          <Reader
+            key={entryId}
+            entryId={entryId}
+            onBack={() => setEntry(null)}
+            summaryRequested={summaryTick}
+            fullContentRequested={fullTick}
+            onCreateSmartFeed={(feedId) => openSmartEditor(null, { scope_kind: 'feed', scope_id: feedId })}
+          />
+        </ReaderModal>
       )}
 
       <FeedDialog feed={editFeed} categories={categories} onClose={() => setEditFeed(null)} />

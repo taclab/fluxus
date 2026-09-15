@@ -194,6 +194,17 @@ Sur tablette la barre latérale devient un tiroir ; sur téléphone un seul vole
 L'URL encode la vue courante (`/feed/12?entry=345&unread=1`) : le bouton retour et les favoris du
 navigateur fonctionnent.
 
+### Deux dispositions de lecture
+
+Par défaut, la liste des articles est à gauche et l'article à droite. Dans **Paramètres → Affichage**,
+la disposition **Pleine largeur** donne toute la place à la liste : le menu de présentation, dans
+l'en-tête de la liste, propose alors **Grille** (cartes avec image), **Magazine** (vignette à gauche),
+**Liste** et **Titres**. Un clic sur un article l'ouvre dans une fenêtre centrée ; les flèches ← →,
+ou les boutons de part et d'autre, passent à l'article précédent ou suivant dans l'ordre de la liste,
+Échap ou le bouton retour referment. Les raccourcis habituels (m, s, v, f, r) restent actifs dans la
+fenêtre. Ces réglages sont propres à l'appareil ; en colonnes, le menu garde les présentations
+compacte et cartes.
+
 ### Organiser la barre latérale
 
 Un **clic long** (souris ou doigt, environ un tiers de seconde) saisit un dossier, un flux ou un flux

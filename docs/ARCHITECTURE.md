@@ -406,6 +406,19 @@ Dashboard ─ DashboardDataProvider (feeds, categories, unreadByFeed : 3 liveQue
   poignée seulement) et clavier (`sortableKeyboardCoordinates`). Le drag n'est actif qu'en mode
   « Personnaliser » ; le menu Monter/Descendre couvre l'accessibilité et le mobile.
 
+### Disposition de lecture (`app/display.ts`, `features/reader/ReaderModal.tsx`)
+
+Préférence par appareil `fluxus.listLayout` (`split` par défaut, `full`), exposée par
+`useListLayout()` (`useSyncExternalStore`) et modifiable uniquement dans Paramètres → Affichage. En
+`full`, `Layout` monte `EntryList` en `flex-1` avec `layout="full"` et, si un article est ouvert, la
+fenêtre `ReaderModal` (portail, plein écran sous `md`) qui contient le `Reader` habituel avec
+`onBack` = fermer ; `← →` appellent le même `move()` que `j/k`, la position « n / total » vient de
+l'ordre fourni par `onVisibleEntries`. La fenêtre **ne porte pas `data-dialog`** : les raccourcis
+globaux doivent y rester actifs (à la différence des vrais dialogues). `EntryList` mémorise une
+présentation par disposition (`fluxus.density` en colonnes : compacte, cartes ; `fluxus.fullDensity`
+en pleine largeur : grille, magazine, liste, titres) choisie par le menu de l'en-tête ; les rendus
+pleine largeur (`FullRow`) sont des `div[role=button]` pour accueillir les actions rapides favori et lu.
+
 ### Ordre de la barre latérale (`features/feeds/SubscriptionTree.tsx`, `sidebarOrder.ts`)
 
 Un seul `DndContext` couvre les flux intelligents et les abonnements. Les capteurs souris et
@@ -534,6 +547,7 @@ web/
     feeds/useUnreadCounts   non lus par flux et par flux intelligent, une passe, partagé Sidebar / dashboard
     smartfeeds/SmartFeedDialog  éditeur de flux intelligent avec aperçu
     auth/LoginPage          création du mot de passe, connexion, adresse serveur
+    reader/ReaderModal      fenêtre de lecture centrée (disposition pleine largeur), précédent/suivant
     feeds/Sidebar           navigation, compteurs, badge de sync
     feeds/SubscriptionTree  sections flux intelligents + abonnements, glisser-déposer au clic long
     feeds/sidebarOrder      règles pures du réordonnancement (brouillon, déplacement, diff → reorder)

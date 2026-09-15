@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { getServerUrl, isDeviceToken, getToken, setToken } from '../../api/auth'
 import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, type StatsOut } from '../../api/client'
+import { setListLayout, useListLayout, type ListLayout } from '../../app/display'
 import type { Theme } from '../../app/theme'
 import { useTheme } from '../../components/ThemeToggle'
 import { TypographyPicker } from '../../components/TypographyPicker'
@@ -248,6 +249,10 @@ export function SettingsPage() {
             </div>
           </Section>
 
+          <Section title="Affichage" description="Disposition de la liste et de l’article. Réglage propre à cet appareil.">
+            <LayoutPicker />
+          </Section>
+
           <Section title="Lecture" description="Combinaison de polices, taille et largeur de colonne pour les articles. Réglage propre à cet appareil, aussi accessible par le bouton Aa du lecteur.">
             <TypographyPicker />
           </Section>
@@ -375,6 +380,66 @@ export function SettingsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+const LAYOUTS: { id: ListLayout; label: string; description: string }[] = [
+  { id: 'split', label: 'Côte à côte', description: 'Liste à gauche, article à droite.' },
+  { id: 'full', label: 'Pleine largeur', description: 'Articles sur toute la largeur (grille, magazine, liste ou titres), lecture dans une fenêtre ; ← → pour changer d’article.' },
+]
+
+/** Choix de la disposition, avec un petit schéma de chaque mode. */
+function LayoutPicker() {
+  const current = useListLayout()
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Disposition">
+      {LAYOUTS.map((l) => {
+        const active = l.id === current
+        return (
+          <button
+            key={l.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            data-testid={`layout-${l.id}`}
+            onClick={() => setListLayout(l.id)}
+            className={`flex gap-3 rounded-xl border p-3 text-left transition-colors ${active ? 'border-accent-500 bg-accent-50 dark:bg-accent-900/20' : 'border-app hover:bg-muted'}`}
+          >
+            <LayoutSketch layout={l.id} />
+            <span className="min-w-0">
+              <span className="block font-medium text-app">{l.label}</span>
+              <span className="block text-xs text-muted mt-0.5">{l.description}</span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function LayoutSketch({ layout }: { layout: ListLayout }) {
+  const bar = 'rounded-[2px] bg-current opacity-40'
+  return (
+    <span aria-hidden className="grid h-14 w-20 shrink-0 grid-cols-6 gap-[3px] rounded-md border border-app bg-app p-1.5 text-muted">
+      {layout === 'split' ? (
+        <>
+          <span className="col-span-2 flex flex-col gap-[3px]">
+            <span className={`h-2 ${bar}`} />
+            <span className={`h-2 ${bar}`} />
+            <span className={`h-2 ${bar}`} />
+            <span className={`h-2 ${bar}`} />
+          </span>
+          <span className="col-span-4 rounded-[3px] border border-current opacity-50" />
+        </>
+      ) : (
+        <>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <span key={i} className={`h-[18px] ${bar} ${i === 2 || i === 3 ? 'invisible' : ''}`} />
+          ))}
+          <span className="col-span-4 col-start-2 -mt-[19px] h-[28px] rounded-[3px] border-2 border-accent-500 bg-app" />
+        </>
+      )}
+    </span>
   )
 }
 

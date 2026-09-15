@@ -41,7 +41,7 @@ with sync_playwright() as p:
     titles = [i["title"] for i in api(page, "GET", "/api/entries?limit=200").json()["items"]]
     words: dict = {}
     for t in titles:
-        for w in re.findall(r"[a-zàâçéèêëîïôûùüÿ]{6,}", t.lower()):
+        for w in re.findall(r"[a-z]{6,}", t.lower()):  # sans accent : le mode regex cherche dans le texte désaccentué
             words[w] = words.get(w, 0) + 1
     keyword = max(words, key=words.get)
     results["keyword"] = keyword
