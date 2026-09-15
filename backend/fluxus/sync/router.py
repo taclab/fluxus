@@ -19,9 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import Auth
 from ..db import get_session
 from ..entries.router import to_entry_out
-from ..models import Category, Entry, Feed, Summary
+from ..models import Category, Entry, Feed, SmartFeed, Summary
 from ..schemas import CategoryOut, EntryOut, FeedOut, SummaryOut
 from ..settings_store import get_setting
+from ..smartfeeds.router import SmartFeedOut
+from ..smartfeeds.service import smart_feed_ids_for
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -36,6 +38,7 @@ class SyncPull(BaseModel):
     categories: list[CategoryOut]
     feeds: list[FeedOut]
     feed_ids: list[int]
+    smart_feeds: list[SmartFeedOut]
     entries: list[EntryOut]
     summaries: list[SummaryOut]
     deleted_entry_ids: list[int]
@@ -100,6 +103,7 @@ async def pull(
 
     cats = (await session.execute(select(Category).order_by(Category.position))).scalars().all()
     feeds = (await session.execute(select(Feed))).scalars().all()
+    smart_feeds = (await session.execute(select(SmartFeed).order_by(SmartFeed.position, SmartFeed.name))).scalars().all()
 
     stmt = select(Entry, exists().where(Summary.entry_id == Entry.id).correlate(Entry))
     min_published: datetime | None = None
@@ -120,9 +124,10 @@ async def pull(
     has_more = len(rows) > limit
     rows = rows[:limit]
 
+    sf_ids = await smart_feed_ids_for(session, [entry.id for entry, _ in rows])
     entries_out: list[EntryOut] = []
     for entry, has_summary in rows:
-        out = to_entry_out(entry, bool(has_summary))
+        out = to_entry_out(entry, bool(has_summary), sf_ids.get(entry.id))
         if not include_content:
             out.content_html = None
         entries_out.append(out)
@@ -141,6 +146,7 @@ async def pull(
         categories=[CategoryOut(id=c.id, title=c.title, position=c.position) for c in cats],
         feeds=[FeedOut.model_validate(f, from_attributes=True) for f in feeds],
         feed_ids=[f.id for f in feeds],
+        smart_feeds=[SmartFeedOut.model_validate(s, from_attributes=True) for s in smart_feeds],
         entries=entries_out,
         summaries=summaries,
         deleted_entry_ids=[],

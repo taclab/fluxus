@@ -1,14 +1,14 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { CheckCheck, ChevronLeft, Circle, LayoutList, Menu, Rows3, Search, Sparkles, Star, X } from 'lucide-react'
+import { CheckCheck, ChevronLeft, Circle, LayoutList, Menu, Rows3, Search, Settings2, Sparkles, Star, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, isOnline, unwrap, type EntryListItem, type Feed } from '../../api/client'
+import { api, isOnline, unwrap, type EntryListItem, type Feed, type SmartFeed } from '../../api/client'
 import type { View } from '../../app/view'
-import { Button, EmptyState, IconButton, Spinner } from '../../components/ui'
+import { Button, EmptyState, IconButton, Spinner, useToast } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
 import { hostname, relativeDate } from '../../lib/format'
-import { recordBulkRead } from '../../sync/engine'
+import { recordBulkRead, syncNow } from '../../sync/engine'
 import { FeedIcon } from '../feeds/Sidebar'
 
 export type Density = 'compact' | 'cards'
@@ -23,12 +23,13 @@ interface Props {
   onSearch: (q: string) => void
   onBack?: () => void
   onVisibleEntries: (ids: number[]) => void
+  onEditSmartFeed?: (sf: SmartFeed) => void
 }
 
 const PAGE = 60
 const EMPTY_FEEDS: Feed[] = []
 
-function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string): string {
+function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string, smartTitle?: string): string {
   switch (view.kind) {
     case 'all':
       return 'Tous les articles'
@@ -40,6 +41,8 @@ function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string):
       return feeds.get(view.id!)?.title ?? 'Flux'
     case 'category':
       return categoryTitle ?? 'Catégorie'
+    case 'smart':
+      return smartTitle ?? 'Flux intelligent'
     case 'search':
       return `Recherche : ${view.query}`
     default:
@@ -47,7 +50,7 @@ function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string):
   }
 }
 
-export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnread, onOpenSidebar, onSearch, onBack, onVisibleEntries }: Props) {
+export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnread, onOpenSidebar, onSearch, onBack, onVisibleEntries, onEditSmartFeed }: Props) {
   const [limit, setLimit] = useState(PAGE)
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem('fluxus.density') as Density) || 'compact')
   const [searchOpen, setSearchOpen] = useState(view.kind === 'search')
@@ -58,6 +61,9 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
   const feedMap = useMemo(() => new Map(feeds.map((f) => [f.id, f])), [feeds])
   const category = useLiveQuery(() => (view.kind === 'category' ? db.categories.get(view.id!) : undefined), [view.kind, view.id])
+  const smartFeed = useLiveQuery(() => (view.kind === 'smart' ? db.smartFeeds.get(view.id!) : undefined), [view.kind, view.id])
+  const toast = useToast()
+  const [batchBusy, setBatchBusy] = useState(false)
 
   useEffect(() => {
     setLimit(PAGE)
@@ -108,6 +114,14 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         coll = db.entries.where('feed_id').anyOf(ids)
         if (wantUnread) coll = coll.and((e) => e.readFlag === 0)
         const arr = await coll.toArray()
+        arr.sort((a, b) => b.publishedTs - a.publishedTs)
+        return arr.slice(0, limit)
+      }
+      case 'smart': {
+        // Index multiEntry : pas de composé possible, tri mémoire borné par le nombre de correspondances.
+        let c = db.entries.where('smart_feed_ids').equals(view.id!)
+        if (wantUnread) c = c.and((e) => e.readFlag === 0)
+        const arr = await c.toArray()
         arr.sort((a, b) => b.publishedTs - a.publishedTs)
         return arr.slice(0, limit)
       }
@@ -173,8 +187,29 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     localStorage.setItem('fluxus.density', next)
   }
 
-  const heading = titleFor(view, feedMap, category?.title)
+  const heading = titleFor(view, feedMap, category?.title, smartFeed?.name)
   const unreadCount = items.filter((e) => !e.read).length
+  const unsummarized = view.kind === 'smart' ? items.filter((e) => !e.has_summary).length : 0
+
+  async function summarizeAll() {
+    if (!smartFeed) return
+    if (!isOnline()) {
+      toast('Le résumé nécessite une connexion au serveur', 'error')
+      return
+    }
+    if (!window.confirm(`Résumer les articles non lus et non encore résumés de « ${smartFeed.name} » ?\nLe budget quotidien de tokens limite le nombre de résumés lancés.`)) return
+    setBatchBusy(true)
+    try {
+      const r = unwrap(await api().POST('/api/smart-feeds/{smart_feed_id}/summarize-all', { params: { path: { smart_feed_id: smartFeed.id } }, body: { unread_only: unreadOnly || view.kind === 'unread' ? true : false } }))
+      const res = r as { queued: number; skipped_budget: number; already_summarized: number }
+      toast(res.queued ? `${res.queued} résumé${res.queued > 1 ? 's' : ''} en cours${res.skipped_budget ? `, ${res.skipped_budget} au-delà du budget` : ''}` : res.skipped_budget ? 'Budget quotidien épuisé' : 'Rien à résumer', res.queued ? 'success' : 'info')
+      window.setTimeout(() => void syncNow(), 30000)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erreur', 'error')
+    } finally {
+      setBatchBusy(false)
+    }
+  }
 
   return (
     <section className="flex h-full flex-col bg-app">
@@ -235,6 +270,18 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
             </IconButton>
           </>
         )}
+        {view.kind === 'smart' && smartFeed && (
+          <>
+            <IconButton label={unsummarized ? `Résumer les non résumés (${unsummarized} visibles)` : 'Résumer les non résumés'} size="sm" onClick={() => void summarizeAll()} disabled={batchBusy} data-testid="summarize-all">
+              <Sparkles className={clsx('size-4', batchBusy && 'animate-pulse')} />
+            </IconButton>
+            {onEditSmartFeed && (
+              <IconButton label="Modifier ce flux intelligent" size="sm" onClick={() => onEditSmartFeed(smartFeed)} data-testid="edit-smartfeed">
+                <Settings2 className="size-4" />
+              </IconButton>
+            )}
+          </>
+        )}
         <IconButton label={unreadOnly ? 'Afficher tout' : 'Non lus seulement'} active={unreadOnly} onClick={() => onToggleUnread(!unreadOnly)} size="sm">
           <Circle className={clsx('size-4', unreadOnly && 'fill-current')} />
         </IconButton>
@@ -256,7 +303,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         {!remote?.loading && items.length === 0 && (
           <EmptyState
             icon={<CheckCheck className="size-10" />}
-            title={view.kind === 'search' ? 'Aucun résultat' : unreadOnly || view.kind === 'unread' ? 'Tout est lu' : 'Aucun article'}
+            title={view.kind === 'search' ? 'Aucun résultat' : view.kind === 'smart' && !unreadOnly ? 'Aucun article ne correspond pour l’instant' : unreadOnly || view.kind === 'unread' ? 'Tout est lu' : 'Aucun article'}
             hint={view.kind === 'search' ? undefined : unreadOnly ? 'Désactivez le filtre « non lus » pour revoir les articles.' : 'Les nouveaux articles apparaîtront ici après la prochaine synchronisation.'}
             action={unreadOnly && view.kind !== 'unread' ? <Button size="sm" onClick={() => onToggleUnread(false)}>Afficher tout</Button> : undefined}
           />

@@ -6,6 +6,7 @@ ses appareils. Il apporte ce que les lecteurs open source classiques n'offrent p
 - **Article complet** récupéré depuis le site (HTTP + repli navigateur Chromium pour les sites JavaScript).
 - **Résumé LLM à la demande** des articles, en streaming, jamais automatique.
 - **Résumé de vidéos YouTube** à partir des sous-titres, avec chapitres horodatés cliquables.
+- **Flux intelligents** : des recherches enregistrées par sujet à travers tous vos flux, un dossier ou un flux, avec résumés automatiques plafonnés.
 - **Tableau de bord** en page d'accueil : widgets configurables (nouveautés par catégorie ou flux, vidéos YouTube, favoris, résumés, statistiques), glisser-déposer, trois largeurs, disposition partagée entre appareils.
 - **Interface web** trois volets, raccourcis clavier, thème clair / sombre, recherche plein texte.
 - **Application Android** (Capacitor) avec lecture **hors-ligne** et synchronisation des états lu / favori.
@@ -97,7 +98,7 @@ Stockés en base (table `settings`), modifiables dans *Paramètres* :
 
 | Section | Réglages |
 |---|---|
-| Résumés | fournisseur (`anthropic` ou `openai` et compatibles), clé API (chiffrée), modèle, effort de raisonnement, langue des résumés, URL de base OpenAI |
+| Résumés | fournisseur (`anthropic` ou `openai` et compatibles), clé API (chiffrée), modèle, effort de raisonnement, langue des résumés, URL de base OpenAI ; modèle dédié et budget quotidien des résumés automatiques |
 | Lecture | combinaison de polices (Éditorial, Littéraire, Journal, Moderne, Lisible, Système), taille du texte, largeur de colonne ; propre à l'appareil, aussi via le bouton Aa du lecteur |
 | Apparence | thème clair / sombre / automatique (aussi via le bouton en bas de la barre latérale), réinitialisation du tableau de bord |
 | Abonnements | import / export OPML, rafraîchissement global |
@@ -154,6 +155,34 @@ widget occupe toute la largeur et se réordonne par le menu ⋯.
 La disposition est enregistrée sur le serveur, donc identique sur le web et sur Android, et mise en
 cache localement pour le hors-ligne. *Paramètres → Apparence → Réinitialiser le tableau de bord*
 revient à la disposition automatique.
+
+### Flux intelligents
+
+Un flux intelligent est une **vue par sujet** : « tout ce qui parle de X dans mes flux ». Il apparaît
+dans la barre latérale avec son compteur de non-lus, dans le tableau de bord comme source de widget,
+et fonctionne hors-ligne.
+
+Créez-en un avec « + nouveau » dans la barre latérale, ou depuis le lecteur avec la baguette (portée
+préremplie sur le flux de l'article). L'éditeur propose :
+
+- une **portée** : tous les flux, une catégorie ou un flux ;
+- un filtre par **mots-clés** (au moins un de, tous ces mots, aucun de), insensible à la casse et aux
+  accents, ou une **expression régulière** en mode expert (moteur PostgreSQL, texte désaccentué,
+  pas de références arrière, quantificateurs ≤ 255) ;
+- les **champs examinés** : titre, extrait, auteur, adresse ; le contenu complet en option, qui ne
+  s'applique qu'aux articles déjà extraits ;
+- un **aperçu en direct** du nombre d'articles correspondants et de huit exemples ;
+- le **résumé automatique** des nouveaux articles, avec un quota par jour pour ce flux intelligent.
+
+Rien n'est masqué ni supprimé : un flux intelligent ne fait que regrouper. Les correspondances sont
+calculées à l'arrivée de chaque article, recalculées quand vous modifiez la définition, et
+propagées à tous vos appareils par la synchronisation.
+
+**Résumés automatiques.** Ils utilisent un modèle dédié, économique, réglé dans *Paramètres →
+Résumés*, et s'arrêtent au **budget quotidien de tokens** (200 000 par défaut, 0 pour désactiver,
+jour en UTC). La consommation du jour est affichée dans les réglages. Dans la vue d'un flux
+intelligent, ✨ « Résumer les non résumés » lance en une fois les résumés manquants, dans la limite
+du budget restant ; les jobs sont étalés pour ne pas gêner le rafraîchissement des flux.
 
 ### Interface
 
@@ -291,6 +320,7 @@ tourne sur :8000) :
 # -u 0 : l'image tourne en utilisateur non privilégié, les captures doivent pouvoir s'écrire dans /out
 docker run --rm --network host -u 0 -v $PWD/scripts/e2e-ui.py:/out/e2e-ui.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-ui.py
 docker run --rm --network host -u 0 -v $PWD/scripts/e2e-dashboard.py:/out/e2e-dashboard.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-dashboard.py
+docker run --rm --network host -u 0 -v $PWD/scripts/e2e-smartfeeds.py:/out/e2e-smartfeeds.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-smartfeeds.py
 ```
 
 Nouvelle migration après modification de `backend/fluxus/models.py` :
@@ -304,6 +334,9 @@ Nouvelle migration après modification de `backend/fluxus/models.py` :
 | « Aucune clé API configurée » | *Paramètres → Résumés*, saisir la clé puis Enregistrer. |
 | « Modèle inconnu » | Le modèle ne correspond pas au fournisseur choisi (ex. `claude-…` avec OpenAI). |
 | « Cette vidéo n'a pas de sous-titres » | Comportement attendu : pas de transcription audio. |
+| Un flux intelligent ne matche pas un mot accentué | Les mots-clés sont comparés sans accents ni casse ; en mode regex, écrivez le motif sans accents (`eleve` pour « élève »). |
+| « Expression régulière refusée : … » | Message du moteur PostgreSQL : pas de groupes nommés Python `(?P<…>)`, quantificateurs ≤ 255, pas de références arrière. |
+| Les résumés automatiques ne se déclenchent plus | Quota du flux intelligent ou budget quotidien atteint (visible dans *Paramètres → Résumés*), ou budget à 0. |
 | Article complet vide ou tronqué | Le site est payant ou anti-robot. Essayer « Réessayer via le navigateur » ; sinon passer le flux en `none`. |
 | L'interface ne montre pas les nouveaux articles | Bouton ↻ ; si le problème persiste, *Paramètres → Hors-ligne → Resynchroniser tout*. |
 | « Cette disposition a été enregistrée par une version plus récente » | Un autre appareil a une version de Fluxus plus récente : mettez celui-ci à jour, le tableau de bord reste consultable en attendant. |

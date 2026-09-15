@@ -148,6 +148,13 @@ async def _insert_new_entries(session: AsyncSession, feed: Feed, parsed: ParsedF
         new_entries.append(entry)
         new_count += 1
     await session.flush()
+    # Flux intelligents : correspondances des nouveaux articles, puis résumés automatiques sous quotas.
+    if new_entries:
+        from ..smartfeeds.service import evaluate, schedule_auto_summaries
+
+        pairs = await evaluate(session, feed, [e.id for e in new_entries])
+        if pairs:
+            await schedule_auto_summaries(session, pairs)
     # Mode d'extraction explicite (http ou browser) = « toujours récupérer l'article complet » :
     # on planifie l'extraction en arrière-plan pour que l'article soit lisible hors-ligne.
     if feed.extraction_mode in ("http", "browser"):

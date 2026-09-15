@@ -114,11 +114,13 @@ export function pushOutbox(): Promise<void> {
 }
 
 async function mergeFeeds(page: SyncPull) {
-  await db.transaction('rw', db.entries, db.feeds, db.categories, db.summaries, async () => {
+  await db.transaction('rw', db.entries, db.feeds, db.categories, db.smartFeeds, db.summaries, async () => {
     await db.categories.clear()
     await db.categories.bulkPut(page.categories)
     await db.feeds.clear()
     await db.feeds.bulkPut(page.feeds)
+    await db.smartFeeds.clear()
+    await db.smartFeeds.bulkPut(page.smart_feeds)
     // Entrées dont le flux a été supprimé côté serveur.
     const orphanIds = await db.entries.where('feed_id').noneOf(page.feed_ids).primaryKeys()
     if (orphanIds.length) {

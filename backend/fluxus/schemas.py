@@ -82,6 +82,7 @@ class EntryListItem(BaseModel):
     youtube_id: str | None
     has_content: bool
     has_summary: bool
+    smart_feed_ids: list[int] = Field(default_factory=list)
     updated_at: datetime
 
 

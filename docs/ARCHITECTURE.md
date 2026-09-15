@@ -112,9 +112,10 @@ et les images : les appels `/api/*` ne sont jamais cachés, l'offline est assur�
 Défini dans `backend/fluxus/models.py`.
 
 ```
-categories 1 ──── n feeds 1 ──── n entries 1 ──── n summaries
-                                    │
-                                    └──── 0..1 transcripts
+categories 1 ──── n feeds 1 ──── n entries 1 ──── n summaries ──0..1── smart_feeds
+                                    │  n                                   │ 1
+                                    └──── 0..1 transcripts                 │
+                                    └──── n smart_feed_matches n ──────────┘
 jobs            settings (clé/valeur)          device_tokens
 ```
 
@@ -123,7 +124,9 @@ jobs            settings (clé/valeur)          device_tokens
 | `categories` | dossiers de la barre latérale | `title` unique, `position` |
 | `feeds` | abonnements | `url` unique · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` |
 | `entries` | articles | `guid` unique par flux · `hash` (dédup par URL normalisée ou titre+date) · `summary_html` (contenu du flux, nettoyé) · `content_html`, `content_text`, `extraction_status` ∈ {`none`,`pending`,`done`,`failed`} · `read`, `starred` · `meta` JSONB (`youtube_id`, `cover`, `enclosures`, `extraction_method`) · `updated_at` (pivot de la synchronisation) · `search_vector` |
-| `summaries` | résumés produits | `kind` ∈ {`article`,`video`} · `provider`, `model`, `prompt_version` · `text_md` · `input_tokens`, `output_tokens` |
+| `summaries` | résumés produits | `kind` ∈ {`article`,`video`} · `provider`, `model`, `prompt_version` · `text_md` · `input_tokens`, `output_tokens` · `origin` ∈ {`manual`,`auto`} · `smart_feed_id` (SET NULL) |
+| `smart_feeds` | recherches enregistrées | `name` unique · `scope_kind` ∈ {`all`,`category`,`feed`}, `scope_id` · `mode` ∈ {`keywords`,`regex`} · `keywords_any/all/none` JSONB · `regex` (≤ 300) · `fields` JSONB (title, excerpt, author, url, content) · `auto_summary`, `summary_daily_cap` |
+| `smart_feed_matches` | correspondances calculées | PK (`smart_feed_id`, `entry_id`), `matched_at` ; exposées comme `smart_feed_ids` sur chaque entrée |
 | `transcripts` | sous-titres YouTube | `language`, `text`, `segments` JSONB (`start`, `duration`, `text`) |
 | `jobs` | file de travail | `type`, `payload` JSONB · `status` ∈ {`queued`,`running`,`done`,`failed`} · `run_at`, `attempts`, `max_attempts`, `locked_at` · `dedupe_key` (index unique partiel) |
 | `settings` | réglages et secrets | `key`, `value` ; les clés listées dans `SECRET_KEYS` sont chiffrées (Fernet dérivé de `FLUXUS_SECRET_KEY`) ; `_password_hash` est le mot de passe Argon2 ; `dashboard_layout` est le JSON de la disposition du tableau de bord (validé : JSON, ≤ 64 Ko, tableau `widgets`) |
@@ -239,7 +242,35 @@ applyRetention : supprime localement les articles lus, non favoris, > 30 j
 Le curseur composite `(updated_at, id)` est indispensable : un import OPML crée des centaines
 d'entrées dans la même seconde, et une pagination par simple timestamp avec marge tournait en rond.
 
-### 5.5 Authentification
+### 5.5 Flux intelligents
+
+Une seule évaluation, en SQL (`smartfeeds/rules.py` → `build_condition`) : portée (`feed_id`,
+sous-requête catégorie), mots-clés `unaccent(coalesce(col,'')) ILIKE '%mot%'` avec échappement,
+« tous » en AND, « aucun » en NOT OR ; regex `unaccent(concat_ws(champs)) ~* pattern`. Toutes les
+colonnes passent par `coalesce` (un auteur NULL ne doit pas exclure une entrée de « aucun »). La
+syntaxe regex est validée **par PostgreSQL** (`begin_nested` + sqlstate 2201B) ; références arrière
+interdites, longueur ≤ 300.
+
+```
+fetcher._insert_new_entries ─► evaluate(feed, new_ids)      savepoint + SET LOCAL statement_timeout 5 s,
+extract.run_extraction ──────► evaluate(content_only=True)  remis à DEFAULT avant RELEASE ; une erreur
+POST/PUT /smart-feeds ───────► apply(sf)                    n'annule jamais le lot d'articles
+feeds.update_feed (catégorie) ► reevaluate_feed(feed)
+        └─► nouvelles paires ─► schedule_auto_summaries ─► jobs summarize_entry (étalés de 20 s)
+```
+
+`apply` recalcule sur la fenêtre `published_at > now − sync_prefetch_days OR starred`, par
+`DELETE … RETURNING` puis `INSERT … RETURNING`, et bump `updated_at` (horloge Python, dernière
+instruction) de la différence symétrique : les clients reçoivent les entrées qui entrent **et** qui
+sortent, `bulkPut` remplaçant l'objet entier. `remove` collecte les ids avant la cascade.
+
+Résumés automatiques : quota du jour = résumés `origin='auto'` du flux intelligent + jobs
+`summarize_entry` en attente ou en cours ; budget global = tokens `origin='auto'` du jour (UTC) ;
+vérifiés à la planification et au démarrage du job. Le job classe les erreurs : permanentes
+(contenu absent, clé absente…) → terminé sans relance ; fournisseur → relance ×2. Modèle dédié
+`llm_auto_model` via `build_summarizer({**settings, "llm_model": …})`.
+
+### 5.6 Authentification
 
 ```
 GET  /api/auth/status  → setup_required        POST /api/auth/setup (une seule fois)
@@ -266,7 +297,8 @@ mention) :
 | flux | `GET/POST feeds`, `POST feeds/discover`, `GET/PUT/DELETE feeds/{id}`, `POST feeds/{id}/refresh`, `POST feeds/refresh-all`, `POST opml/import`, `GET opml/export` |
 | articles | `GET entries` (filtres `feed`, `category`, `status`, `starred`, `q`, `cursor`, `limit`, `order`), `GET/PATCH entries/{id}`, `POST entries/mark-read`, `POST entries/{id}/fetch-content`, `GET entries/{id}/summaries` |
 | résumés | `POST entries/{id}/summarize` (SSE), `GET/DELETE entries/{id}/summary` |
-| sync | `GET sync`, `POST sync` |
+| sync | `GET sync` (renvoie aussi `smart_feeds`), `POST sync` |
+| flux intelligents | `GET/POST smart-feeds`, `GET/PUT/DELETE smart-feeds/{id}` (PUT ré-applique seulement si la définition change), `POST smart-feeds/preview`, `POST smart-feeds/{id}/summarize-all` |
 | réglages | `GET/PATCH settings`, `GET settings/stats` |
 | système | `GET health`* |
 
@@ -353,6 +385,15 @@ Classe `dark` sur `<html>`, appliquée avant le premier rendu par un script inli
 `system`. Variables CSS (`--bg`, `--fg`…) exposées comme utilitaires Tailwind (`bg-app`,
 `text-muted`, `border-app`).
 
+### Flux intelligents côté client
+
+Dexie v3 : index multiEntry `*smart_feed_ids` sur le champ serveur, table `smartFeeds`. La vue
+`/smart/:id` et le widget lisent `where('smart_feed_ids').equals(id)` puis filtrent et trient en
+mémoire (pas d'index composé possible avec multiEntry ; borné par les correspondances).
+`useUnreadCountsFull` compte les non-lus par flux et par flux intelligent en une passe.
+`features/smartfeeds/SmartFeedDialog.tsx` : éditeur avec aperçu serveur (debounce 500 ms) ; à la
+sauvegarde, `syncNow()` rapatrie les `smart_feed_ids` mis à jour.
+
 ### Typographie de lecture
 
 Préférences par appareil (`app/reading.ts`, `localStorage['fluxus.reading']`) appliquées comme
@@ -416,6 +457,7 @@ backend/
     summarize/              providers (Anthropic/OpenAI), prompts, service (orchestration), router (SSE)
     youtube/                transcript (youtube-transcript-api, texte horodaté)
     sync/                   router (pull par curseur, push last-write-wins)
+    smartfeeds/             rules (définition → SQL), service (evaluate/apply/preview/quotas), jobs (summarize_entry), router
   tests/                    pytest : unitaires (parse, clean, guard, opml, summarize)
                             et intégration test_api.py (nécessite DATABASE_URL)
 browser/
@@ -424,6 +466,7 @@ scripts/
   build-apk.sh              build de l'APK dans un conteneur (Dockerfile.android)
   e2e-ui.py                 parcours Playwright de l'interface (liste, lecteur, mobile, hors-ligne)
   e2e-dashboard.py          parcours Playwright du tableau de bord (défaut, édition, drag, persistance, conflit)
+  e2e-smartfeeds.py         parcours Playwright des flux intelligents (aperçu, vue, édition rétroactive, regex, widget, orphelin, hors-ligne)
 web/
   src/main.tsx              point d'entrée
   src/app/                  App (routes, auth, thème, bouton retour), Layout (volets, raccourcis),
@@ -436,7 +479,8 @@ web/
     dashboard/              Dashboard (page), DashboardGrid (dnd-kit), WidgetFrame, WidgetConfigDialog,
                             DashboardData (contexte), layout (modèle), queries (Dexie), useDashboardLayout,
                             widgets/{News,Youtube,Starred,Summaries,Stats}Widget
-    feeds/useUnreadCounts   non lus par flux, partagé Sidebar / dashboard
+    feeds/useUnreadCounts   non lus par flux et par flux intelligent, une passe, partagé Sidebar / dashboard
+    smartfeeds/SmartFeedDialog  éditeur de flux intelligent avec aperçu
     auth/LoginPage          création du mot de passe, connexion, adresse serveur
     feeds/Sidebar           navigation, compteurs, badge de sync, FeedIcon
     feeds/AddFeedDialog     ajout avec découverte et choix multiple
@@ -524,6 +568,7 @@ colonne d'`entries` doit être synchronisée, l'ajouter à `EntryOut` (`schemas.
 - **DNS rebinding** : le contrôle anti-SSRF et la connexion httpx sont deux résolutions distinctes.
 - **Recherche hors-ligne limitée** aux titres et extraits ; le plein texte est côté serveur.
 - **Un seul utilisateur** par instance, par conception.
-- Pistes de phase 5 : règles de filtrage par flux (mots-clés), historique de lecture,
-  notifications, sauvegarde automatisée de la base, réglage de l'intervalle par flux dans l'UI.
+- Pistes : digest e-mail des flux intelligents (les correspondances et `summaries.origin/smart_feed_id`
+  sont prêts), historique de lecture, notifications, sauvegarde automatisée de la base, réglage de
+  l'intervalle par flux dans l'UI.
 - Bilan détaillé et correctifs du 14/09/2026 : [AUDIT-2026-09-14.md](AUDIT-2026-09-14.md).

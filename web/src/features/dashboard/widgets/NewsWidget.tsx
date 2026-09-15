@@ -11,7 +11,7 @@ import { recordBulkRead, recordChange } from '../../../sync/engine'
 import { FeedIcon } from '../../feeds/Sidebar'
 import { useDashboardData } from '../DashboardData'
 import { widgetTitle, type NewsWidget as NewsWidgetModel, type WidgetWidth } from '../layout'
-import { categoryFeedIds, latestAll, latestForFeeds } from '../queries'
+import { categoryFeedIds, latestAll, latestForFeeds, latestForSmartFeed } from '../queries'
 import { WidgetFrame, type WidgetActions } from '../WidgetFrame'
 
 interface Props {
@@ -27,19 +27,26 @@ interface Props {
 export function viewForSource(source: NewsWidgetModel['source']): View {
   if (source.kind === 'category') return { kind: 'category', id: source.id }
   if (source.kind === 'feed') return { kind: 'feed', id: source.id }
+  if (source.kind === 'smart') return { kind: 'smart', id: source.id }
   return { kind: 'all' }
 }
 
 export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, handleProps, dragging }: Props) {
   const data = useDashboardData()
-  const { title, orphan } = widgetTitle(widget, data.categoryMap, data.feedMap)
+  const { title, orphan } = widgetTitle(widget, data.categoryMap, data.feedMap, data.smartFeedMap)
   const view = viewForSource(widget.source)
+  const smartId = widget.source.kind === 'smart' ? widget.source.id : null
 
   const feedIds = widget.source.kind === 'category' ? categoryFeedIds(data.feeds, widget.source.id) : widget.source.kind === 'feed' ? [widget.source.id] : null
-  const feedKey = feedIds?.join(',') ?? 'all'
+  const feedKey = smartId != null ? `smart:${smartId}` : (feedIds?.join(',') ?? 'all')
 
   const entries = useLiveQuery(
-    () => (feedIds ? latestForFeeds(feedIds, { unreadOnly: widget.unreadOnly, limit: widget.limit }) : latestAll({ unreadOnly: widget.unreadOnly, limit: widget.limit })),
+    () =>
+      smartId != null
+        ? latestForSmartFeed(smartId, { unreadOnly: widget.unreadOnly, limit: widget.limit })
+        : feedIds
+          ? latestForFeeds(feedIds, { unreadOnly: widget.unreadOnly, limit: widget.limit })
+          : latestAll({ unreadOnly: widget.unreadOnly, limit: widget.limit }),
     [feedKey, widget.unreadOnly, widget.limit],
   )
   // Garde les dernières données pendant les rejeux Dexie pour éviter le clignotement.
@@ -47,7 +54,12 @@ export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, 
   if (entries) last.current = entries
   const items = entries ?? last.current
 
-  const unreadCount = feedIds ? feedIds.reduce((a, id) => a + (data.unreadByFeed.get(id) ?? 0), 0) : [...data.unreadByFeed.values()].reduce((a, b) => a + b, 0)
+  const unreadCount =
+    smartId != null
+      ? (data.unreadBySmartFeed.get(smartId) ?? 0)
+      : feedIds
+        ? feedIds.reduce((a, id) => a + (data.unreadByFeed.get(id) ?? 0), 0)
+        : [...data.unreadByFeed.values()].reduce((a, b) => a + b, 0)
   const showFeed = widget.source.kind !== 'feed'
   const open = (e: LocalEntry) => onOpenEntry(view, e.id)
 

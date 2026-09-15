@@ -62,6 +62,7 @@ export function App() {
             <Route path="/all" element={<Layout />} />
             <Route path="/feed/:id" element={<Layout />} />
             <Route path="/category/:id" element={<Layout />} />
+            <Route path="/smart/:id" element={<Layout />} />
             <Route path="/unread" element={<Layout />} />
             <Route path="/starred" element={<Layout />} />
             <Route path="/search" element={<Layout />} />

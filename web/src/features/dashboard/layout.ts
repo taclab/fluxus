@@ -1,6 +1,6 @@
 /** Modèle du tableau de bord : types, validation, disposition par défaut. Aucune dépendance React. */
 
-import type { Category, Feed } from '../../api/client'
+import type { Category, Feed, SmartFeed } from '../../api/client'
 
 export const LAYOUT_VERSION = 1
 
@@ -11,7 +11,7 @@ export const WIDTH_LABEL: Record<WidgetWidth, string> = { 2: '⅓', 3: '½', 6: 
 /** Classes écrites en clair : Tailwind ne détecte pas les classes construites dynamiquement. */
 export const WIDTH_CLASS: Record<WidgetWidth, string> = { 2: 'md:col-span-2', 3: 'md:col-span-3', 6: 'md:col-span-6' }
 
-export type EntrySource = { kind: 'all' } | { kind: 'category'; id: number } | { kind: 'feed'; id: number }
+export type EntrySource = { kind: 'all' } | { kind: 'category'; id: number } | { kind: 'feed'; id: number } | { kind: 'smart'; id: number }
 export type YoutubeSource = { kind: 'all_youtube' } | { kind: 'category'; id: number }
 
 interface WidgetBase {
@@ -82,7 +82,13 @@ function normalizeWidget(raw: unknown): AnyWidget | null {
     case 'news': {
       const src = (r.source as EntrySource | undefined) ?? { kind: 'all' }
       const source: EntrySource =
-        src.kind === 'category' && typeof src.id === 'number' ? { kind: 'category', id: src.id } : src.kind === 'feed' && typeof src.id === 'number' ? { kind: 'feed', id: src.id } : { kind: 'all' }
+        src.kind === 'category' && typeof src.id === 'number'
+          ? { kind: 'category', id: src.id }
+          : src.kind === 'feed' && typeof src.id === 'number'
+            ? { kind: 'feed', id: src.id }
+            : src.kind === 'smart' && typeof src.id === 'number'
+              ? { kind: 'smart', id: src.id }
+              : { kind: 'all' }
       const display: NewsDisplay = r.display === 'cards' || r.display === 'magazine' || r.display === 'carousel' ? r.display : 'list'
       return { ...base, type: 'news', source, limit: clampLimit(r.limit, 8), display, unreadOnly: r.unreadOnly !== false }
     }
@@ -165,7 +171,7 @@ export function buildDefaultLayout(categories: Category[], feeds: Feed[]): Dashb
 }
 
 /** Titre affiché : personnalisé, sinon dérivé de la cible. Renvoie `orphan: true` si la cible a disparu. */
-export function widgetTitle(w: AnyWidget, categories: Map<number, Category>, feeds: Map<number, Feed>): { title: string; orphan: boolean } {
+export function widgetTitle(w: AnyWidget, categories: Map<number, Category>, feeds: Map<number, Feed>, smartFeeds: Map<number, SmartFeed> = new Map()): { title: string; orphan: boolean } {
   if (!isKnownWidget(w)) return { title: w.title ?? 'Widget non pris en charge', orphan: false }
   const custom = w.title
   switch (w.type) {
@@ -177,6 +183,10 @@ export function widgetTitle(w: AnyWidget, categories: Map<number, Category>, fee
       if (w.source.kind === 'feed') {
         const f = feeds.get(w.source.id)
         return { title: custom ?? f?.title ?? 'Flux supprimé', orphan: !f }
+      }
+      if (w.source.kind === 'smart') {
+        const sf = smartFeeds.get(w.source.id)
+        return { title: custom ?? sf?.name ?? 'Flux intelligent supprimé', orphan: !sf }
       }
       return { title: custom ?? 'Tous les articles', orphan: false }
     }

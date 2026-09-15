@@ -23,6 +23,9 @@ DEFAULTS: dict[str, str] = {
     "openai_base_url": "",
     # Horizon (jours) des articles conservés sur les appareils et envoyés à la première synchronisation.
     "sync_prefetch_days": "30",
+    # Résumés automatiques des flux intelligents : modèle dédié (économique) et budget de tokens par jour UTC (0 = désactivé).
+    "llm_auto_model": "claude-sonnet-5",
+    "llm_auto_daily_token_budget": "200000",
     # Disposition du tableau de bord (JSON produit par le front ; vide = disposition par défaut).
     "dashboard_layout": "",
 }

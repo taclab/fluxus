@@ -23,6 +23,7 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<SettingsOut | null>(null)
   const [stats, setStats] = useState<StatsOut | null>(null)
   const [devices, setDevices] = useState<DeviceOut[]>([])
+  const [autoUsage, setAutoUsage] = useState<{ tokens_today: number; budget: number; count: number } | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [theme, setTheme] = useTheme()
@@ -33,12 +34,14 @@ export function SettingsPage() {
 
   async function load() {
     try {
-      const [s, st, d] = await Promise.all([api().GET('/api/settings'), api().GET('/api/settings/stats'), api().GET('/api/auth/devices')])
+      const [s, st, d, sf] = await Promise.all([api().GET('/api/settings'), api().GET('/api/settings/stats'), api().GET('/api/auth/devices'), api().GET('/api/smart-feeds')])
       const settingsData = unwrap(s)
       setSettings(settingsData)
       setValues(settingsData.values)
       setStats(unwrap(st))
       setDevices(unwrap(d))
+      const smart = unwrap(sf)
+      setAutoUsage({ tokens_today: smart.tokens_today, budget: smart.budget, count: smart.items.reduce((a, i) => a + i.auto_today, 0) })
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Impossible de charger les paramètres', 'error')
     }
@@ -225,6 +228,24 @@ export function SettingsPage() {
                 {stats.summaries} résumés produits · {formatTokens(stats.summary_input_tokens)} tokens en entrée · {formatTokens(stats.summary_output_tokens)} en sortie
               </p>
             )}
+
+            <div className="rounded-xl border border-app p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-app">Résumés automatiques des flux intelligents</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Modèle dédié" hint="Un modèle économique suffit pour des résumés en volume.">
+                  <Input value={values.llm_auto_model ?? ''} onChange={(e) => set('llm_auto_model', e.target.value)} placeholder={provider === 'anthropic' ? 'claude-sonnet-5' : 'gpt-4.1-mini'} />
+                </Field>
+                <Field label="Budget quotidien (tokens)" hint="0 désactive les résumés automatiques. Jour en UTC.">
+                  <Input type="number" min={0} step={10000} value={values.llm_auto_daily_token_budget ?? '200000'} onChange={(e) => set('llm_auto_daily_token_budget', e.target.value)} />
+                </Field>
+              </div>
+              {autoUsage && (
+                <p className="text-xs text-muted">
+                  Aujourd’hui : {autoUsage.count} résumé{autoUsage.count > 1 ? 's' : ''} automatique{autoUsage.count > 1 ? 's' : ''} · {formatTokens(autoUsage.tokens_today)} / {formatTokens(autoUsage.budget)} tokens
+                  {autoUsage.budget > 0 && autoUsage.tokens_today >= autoUsage.budget && <span className="ml-2 font-medium text-amber-600 dark:text-amber-400">budget atteint</span>}
+                </p>
+              )}
+            </div>
           </Section>
 
           <Section title="Lecture" description="Combinaison de polices, taille et largeur de colonne pour les articles. Réglage propre à cet appareil, aussi accessible par le bouton Aa du lecteur.">

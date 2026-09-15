@@ -82,8 +82,20 @@ def _chunks(text: str, size: int = CHUNK_SIZE) -> list[str]:
     return parts
 
 
-async def summarize_entry(session: AsyncSession, entry_id: int, force: bool = False) -> AsyncIterator[SummaryEvent]:
-    """Générateur d'événements : status → delta* → done, ou error."""
+async def summarize_entry(
+    session: AsyncSession,
+    entry_id: int,
+    force: bool = False,
+    *,
+    origin: str = "manual",
+    smart_feed_id: int | None = None,
+    model_override: str | None = None,
+) -> AsyncIterator[SummaryEvent]:
+    """Générateur d'événements : status → delta* → done, ou error.
+
+    `origin="auto"` et `smart_feed_id` marquent un résumé déclenché par un flux intelligent ;
+    `model_override` remplace le modèle des réglages (modèle économique des résumés automatiques).
+    """
     result = await session.execute(
         select(Entry)
         .options(selectinload(Entry.feed), selectinload(Entry.transcript))
@@ -105,6 +117,8 @@ async def summarize_entry(session: AsyncSession, entry_id: int, force: bool = Fa
             return
 
     settings = await get_all_settings(session)
+    if model_override:
+        settings = {**settings, "llm_model": model_override}
     try:
         summarizer = build_summarizer(settings)
     except SummarizerError as exc:
@@ -172,6 +186,8 @@ async def summarize_entry(session: AsyncSession, entry_id: int, force: bool = Fa
         text_md="".join(full_text).strip(),
         input_tokens=total_usage.input_tokens,
         output_tokens=total_usage.output_tokens,
+        origin=origin,
+        smart_feed_id=smart_feed_id,
     )
     try:
         session.add(summary)

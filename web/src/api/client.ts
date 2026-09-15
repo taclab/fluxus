@@ -13,6 +13,9 @@ export type SyncPull = Schemas['SyncPull']
 export type SettingsOut = Schemas['SettingsOut']
 export type StatsOut = Schemas['StatsOut']
 export type DeviceOut = Schemas['DeviceOut']
+export type SmartFeed = Schemas['SmartFeedOut']
+export type SmartFeedIn = Schemas['SmartFeedIn']
+export type SmartFeedDefinitionIn = Schemas['SmartFeedDefinitionIn']
 
 export class ApiError extends Error {
   status: number

@@ -24,10 +24,12 @@ async def client():
 
     from fluxus.db import Base, get_engine
     from fluxus.main import app
-    from fluxus.models import SEARCH_VECTOR_STATEMENTS  # noqa: F401
+    from fluxus.models import EXTENSION_STATEMENTS, SEARCH_VECTOR_STATEMENTS
 
     engine = get_engine()
     async with engine.begin() as conn:
+        for stmt in EXTENSION_STATEMENTS:
+            await conn.execute(text(stmt))
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
         for stmt in SEARCH_VECTOR_STATEMENTS:

@@ -56,6 +56,14 @@ async def run_extraction(session: AsyncSession, entry: Entry, mode: str | None =
         if cover:
             meta["cover"] = cover
     entry.meta = meta
+    # Le contenu complet vient d'arriver : les flux intelligents qui le ciblent sont ré-évalués.
+    if entry.feed is not None:
+        from ..smartfeeds.service import evaluate, schedule_auto_summaries
+
+        await session.flush()
+        pairs = await evaluate(session, entry.feed, [entry.id], content_only=True)
+        if pairs:
+            await schedule_auto_summaries(session, pairs)
     return entry
 
 

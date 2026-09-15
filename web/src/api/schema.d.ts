@@ -413,6 +413,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/smart-feeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Smart Feeds */
+        get: operations["list_smart_feeds_api_smart_feeds_get"];
+        put?: never;
+        /** Create Smart Feed */
+        post: operations["create_smart_feed_api_smart_feeds_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/smart-feeds/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview */
+        post: operations["preview_api_smart_feeds_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/smart-feeds/{smart_feed_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Smart Feed */
+        get: operations["get_smart_feed_api_smart_feeds__smart_feed_id__get"];
+        /** Update Smart Feed */
+        put: operations["update_smart_feed_api_smart_feeds__smart_feed_id__put"];
+        post?: never;
+        /** Delete Smart Feed */
+        delete: operations["delete_smart_feed_api_smart_feeds__smart_feed_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/smart-feeds/{smart_feed_id}/summarize-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Summarize All */
+        post: operations["summarize_all_api_smart_feeds__smart_feed_id__summarize_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/entries/{entry_id}/summarize": {
         parameters: {
             query?: never;
@@ -612,6 +683,8 @@ export interface components {
             has_content: boolean;
             /** Has Summary */
             has_summary: boolean;
+            /** Smart Feed Ids */
+            smart_feed_ids?: number[];
             /**
              * Updated At
              * Format: date-time
@@ -649,6 +722,8 @@ export interface components {
             has_content: boolean;
             /** Has Summary */
             has_summary: boolean;
+            /** Smart Feed Ids */
+            smart_feed_ids?: number[];
             /**
              * Updated At
              * Format: date-time
@@ -816,6 +891,27 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** PreviewOut */
+        PreviewOut: {
+            /** Count */
+            count: number;
+            /** Samples */
+            samples: components["schemas"]["PreviewSample"][];
+        };
+        /** PreviewSample */
+        PreviewSample: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /** Feed Id */
+            feed_id: number;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+        };
         /** SettingsOut */
         SettingsOut: {
             /** Values */
@@ -833,6 +929,160 @@ export interface components {
             values: {
                 [key: string]: string;
             };
+        };
+        /** SmartFeedDefinitionIn */
+        SmartFeedDefinitionIn: {
+            /**
+             * Scope Kind
+             * @default all
+             * @enum {string}
+             */
+            scope_kind: "all" | "category" | "feed";
+            /** Scope Id */
+            scope_id?: number | null;
+            /**
+             * Mode
+             * @default keywords
+             * @enum {string}
+             */
+            mode: "keywords" | "regex";
+            /** Keywords Any */
+            keywords_any?: string[];
+            /** Keywords All */
+            keywords_all?: string[];
+            /** Keywords None */
+            keywords_none?: string[];
+            /** Regex */
+            regex?: string | null;
+            fields?: components["schemas"]["SmartFeedFields"];
+        };
+        /** SmartFeedFields */
+        SmartFeedFields: {
+            /**
+             * Title
+             * @default true
+             */
+            title: boolean;
+            /**
+             * Excerpt
+             * @default true
+             */
+            excerpt: boolean;
+            /**
+             * Author
+             * @default true
+             */
+            author: boolean;
+            /**
+             * Url
+             * @default true
+             */
+            url: boolean;
+            /**
+             * Content
+             * @default false
+             */
+            content: boolean;
+        };
+        /** SmartFeedIn */
+        SmartFeedIn: {
+            /**
+             * Scope Kind
+             * @default all
+             * @enum {string}
+             */
+            scope_kind: "all" | "category" | "feed";
+            /** Scope Id */
+            scope_id?: number | null;
+            /**
+             * Mode
+             * @default keywords
+             * @enum {string}
+             */
+            mode: "keywords" | "regex";
+            /** Keywords Any */
+            keywords_any?: string[];
+            /** Keywords All */
+            keywords_all?: string[];
+            /** Keywords None */
+            keywords_none?: string[];
+            /** Regex */
+            regex?: string | null;
+            fields?: components["schemas"]["SmartFeedFields"];
+            /** Name */
+            name: string;
+            /** Position */
+            position?: number | null;
+            /**
+             * Auto Summary
+             * @default false
+             */
+            auto_summary: boolean;
+            /**
+             * Summary Daily Cap
+             * @default 10
+             */
+            summary_daily_cap: number;
+        };
+        /** SmartFeedList */
+        SmartFeedList: {
+            /** Items */
+            items: components["schemas"]["SmartFeedOut"][];
+            /** Tokens Today */
+            tokens_today: number;
+            /** Budget */
+            budget: number;
+        };
+        /** SmartFeedOut */
+        SmartFeedOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Position */
+            position: number;
+            /** Scope Kind */
+            scope_kind: string;
+            /** Scope Id */
+            scope_id: number | null;
+            /** Mode */
+            mode: string;
+            /** Keywords Any */
+            keywords_any: string[];
+            /** Keywords All */
+            keywords_all: string[];
+            /** Keywords None */
+            keywords_none: string[];
+            /** Regex */
+            regex: string | null;
+            /** Fields */
+            fields: {
+                [key: string]: boolean;
+            };
+            /** Auto Summary */
+            auto_summary: boolean;
+            /** Summary Daily Cap */
+            summary_daily_cap: number;
+            /**
+             * Match Count
+             * @default 0
+             */
+            match_count: number;
+            /**
+             * Unread Count
+             * @default 0
+             */
+            unread_count: number;
+            /**
+             * Auto Today
+             * @default 0
+             */
+            auto_today: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** StateChange */
         StateChange: {
@@ -868,6 +1118,14 @@ export interface components {
             summary_input_tokens: number;
             /** Summary Output Tokens */
             summary_output_tokens: number;
+        };
+        /** SummarizeAllIn */
+        SummarizeAllIn: {
+            /**
+             * Unread Only
+             * @default true
+             */
+            unread_only: boolean;
         };
         /** SummaryOut */
         SummaryOut: {
@@ -908,6 +1166,8 @@ export interface components {
             feeds: components["schemas"]["FeedOut"][];
             /** Feed Ids */
             feed_ids: number[];
+            /** Smart Feeds */
+            smart_feeds: components["schemas"]["SmartFeedOut"][];
             /** Entries */
             entries: components["schemas"]["EntryOut"][];
             /** Summaries */
@@ -1876,6 +2136,224 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatsOut"];
+                };
+            };
+        };
+    };
+    list_smart_feeds_api_smart_feeds_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartFeedList"];
+                };
+            };
+        };
+    };
+    create_smart_feed_api_smart_feeds_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartFeedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartFeedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_api_smart_feeds_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartFeedDefinitionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_smart_feed_api_smart_feeds__smart_feed_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                smart_feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartFeedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_smart_feed_api_smart_feeds__smart_feed_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                smart_feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SmartFeedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmartFeedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_smart_feed_api_smart_feeds__smart_feed_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                smart_feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summarize_all_api_smart_feeds__smart_feed_id__summarize_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                smart_feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SummarizeAllIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

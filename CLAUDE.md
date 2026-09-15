@@ -26,6 +26,8 @@ npm run gen:api                                # après tout changement de route
 - Toute requête Dexie d'un widget doit passer par un index de `db.ts` ; pas de scan de table dans un widget.
 - Tout accès HTTP sortant passe par `fetcher/http.safe_get` (anti-SSRF après redirection, taille et délai bornés) ; jamais `client.get` directement.
 - Tests E2E : lancer l'image `fluxus-browser` avec `-u 0` (elle tourne en `pwuser`) pour pouvoir écrire les captures.
+- Flux intelligents : toute condition passe par `smartfeeds/rules.build_condition` (SQL, `coalesce` systématique) ; jamais de filtrage en JavaScript. Toute écriture sur `smart_feed_matches` bump `entries.updated_at` (horloge Python).
+- Tests E2E Playwright : `bypass_csp=True` dans le contexte (la CSP interdit `eval`, utilisé par `wait_for_function`).
 - Point d'étape et dette connue : `docs/AUDIT-2026-09-14.md`.
 - Migration : `uv run alembic revision --autogenerate`, relire le fichier (triggers et index partiels non détectés).
 

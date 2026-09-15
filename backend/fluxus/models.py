@@ -151,9 +151,52 @@ class Summary(Base):
     text_md: Mapped[str] = mapped_column(Text)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # manual | auto (résumé déclenché par un flux intelligent)
+    origin: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
+    smart_feed_id: Mapped[int | None] = mapped_column(
+        ForeignKey("smart_feeds.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     entry: Mapped[Entry] = relationship(back_populates="summaries")
+
+
+class SmartFeed(Base):
+    """Recherche enregistrée : une vue par sujet à travers tout, une catégorie ou un flux."""
+
+    __tablename__ = "smart_feeds"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    # all | category | feed
+    scope_kind: Mapped[str] = mapped_column(String(20), default="all")
+    scope_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # keywords | regex
+    mode: Mapped[str] = mapped_column(String(20), default="keywords")
+    keywords_any: Mapped[list] = mapped_column(JsonType, default=list)
+    keywords_all: Mapped[list] = mapped_column(JsonType, default=list)
+    keywords_none: Mapped[list] = mapped_column(JsonType, default=list)
+    regex: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # {"title": bool, "excerpt": bool, "author": bool, "url": bool, "content": bool}
+    fields: Mapped[dict] = mapped_column(JsonType, default=dict)
+    auto_summary: Mapped[bool] = mapped_column(Boolean, default=False)
+    summary_daily_cap: Mapped[int] = mapped_column(Integer, default=10)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class SmartFeedMatch(Base):
+    __tablename__ = "smart_feed_matches"
+    __table_args__ = (Index("ix_smart_feed_matches_entry", "entry_id"),)
+
+    smart_feed_id: Mapped[int] = mapped_column(
+        ForeignKey("smart_feeds.id", ondelete="CASCADE"), primary_key=True
+    )
+    entry_id: Mapped[int] = mapped_column(ForeignKey("entries.id", ondelete="CASCADE"), primary_key=True)
+    matched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Transcript(Base):
@@ -212,6 +255,9 @@ class DeviceToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+
+# Extensions PostgreSQL requises (migration et fixture de tests). `unaccent` est une extension « trusted ».
+EXTENSION_STATEMENTS = ["CREATE EXTENSION IF NOT EXISTS unaccent"]
 
 # Trigger PostgreSQL pour la recherche plein texte (créé par la migration initiale).
 # Une instruction par élément : asyncpg n'accepte pas plusieurs instructions par requête.

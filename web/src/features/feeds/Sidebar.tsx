@@ -1,10 +1,10 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, ChevronRight, Folder, Inbox, LayoutDashboard, Play, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, Inbox, LayoutDashboard, Play, Plus, RefreshCw, Rss, Settings, Sparkles, Star, Unlink } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import type { Category, Feed } from '../../api/client'
+import type { Category, Feed, SmartFeed } from '../../api/client'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { IconButton } from '../../components/ui'
 import { db } from '../../db/db'
@@ -12,23 +12,26 @@ import { syncNow } from '../../sync/engine'
 import { useSyncState } from '../../sync/useSync'
 import { viewPath, type View } from '../../app/view'
 import { AddFeedDialog } from './AddFeedDialog'
-import { useUnreadCounts } from './useUnreadCounts'
+import { useUnreadCountsFull } from './useUnreadCounts'
 
 interface Props {
   view: View
   onSelect: (view: View) => void
   onEditFeed: (feed: Feed) => void
   onEditCategory: (category: Category | null) => void
+  onEditSmartFeed: (smartFeed: SmartFeed | null) => void
 }
 
 const UNCATEGORIZED = -1
 const EMPTY_FEEDS: Feed[] = []
 const EMPTY_CATEGORIES: Category[] = []
+const EMPTY_SMART: SmartFeed[] = []
 
-export function Sidebar({ view, onSelect, onEditFeed, onEditCategory }: Props) {
+export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmartFeed }: Props) {
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? EMPTY_CATEGORIES
-  const unreadByFeed = useUnreadCounts()
+  const { byFeed: unreadByFeed, bySmartFeed } = useUnreadCountsFull()
+  const smartFeeds = useLiveQuery(() => db.smartFeeds.orderBy('position').toArray(), []) ?? EMPTY_SMART
   const starredCount = useLiveQuery(() => db.entries.where('starredFlag').equals(1).count(), []) ?? 0
   const sync = useSyncState()
   const [addOpen, setAddOpen] = useState(false)
@@ -81,6 +84,40 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory }: Props) {
         <NavItem icon={<Inbox className="size-4" />} label="Tous les articles" count={totalUnread} active={isActive({ kind: 'all' })} onClick={() => onSelect({ kind: 'all' })} />
         <NavItem icon={<Rss className="size-4" />} label="Non lus" count={totalUnread} active={isActive({ kind: 'unread' })} onClick={() => onSelect({ kind: 'unread' })} />
         <NavItem icon={<Star className="size-4" />} label="Favoris" count={starredCount} muted active={isActive({ kind: 'starred' })} onClick={() => onSelect({ kind: 'starred' })} />
+
+        <div className="mt-3 px-4 pb-1 flex items-center justify-between">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Flux intelligents</span>
+          <button type="button" onClick={() => onEditSmartFeed(null)} className="text-[11px] text-muted hover:text-app" title="Nouveau flux intelligent" data-testid="new-smartfeed">
+            + nouveau
+          </button>
+        </div>
+        {smartFeeds.length === 0 && <p className="px-4 pb-2 text-xs text-muted">Une recherche enregistrée à travers vos flux, par sujet.</p>}
+        {smartFeeds.map((sf) => {
+          const orphan = (sf.scope_kind === 'category' && !categories.some((c) => c.id === sf.scope_id)) || (sf.scope_kind === 'feed' && !feeds.some((f) => f.id === sf.scope_id))
+          const count = bySmartFeed.get(sf.id) ?? 0
+          const active = isActive({ kind: 'smart', id: sf.id })
+          return (
+            <button
+              key={sf.id}
+              type="button"
+              data-smartfeed-id={sf.id}
+              onClick={() => onSelect({ kind: 'smart', id: sf.id })}
+              onDoubleClick={() => onEditSmartFeed(sf)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                onEditSmartFeed(sf)
+              }}
+              title={orphan ? 'La catégorie ou le flux ciblé a disparu' : sf.name}
+              className={clsx('flex w-full items-center gap-2.5 px-4 py-1.5 text-sm text-left min-w-0', active ? 'bg-accent-50 dark:bg-accent-900/20 text-accent-700 dark:text-accent-200 font-medium' : 'text-app hover:bg-muted')}
+            >
+              <Sparkles className={clsx('size-4 shrink-0', active ? 'text-accent-600 dark:text-accent-300' : 'text-accent-500/80')} />
+              <span className={clsx('flex-1 truncate', count === 0 && !active && 'text-muted')}>{sf.name}</span>
+              {orphan && <Unlink className="size-3.5 shrink-0 text-amber-500" />}
+              {sf.auto_summary && <span className="size-1.5 shrink-0 rounded-full bg-accent-400" title="Résumé automatique" />}
+              {count > 0 && <Count n={count} />}
+            </button>
+          )
+        })}
 
         <div className="mt-3 px-4 pb-1 flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Abonnements</span>

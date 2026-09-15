@@ -63,12 +63,28 @@ export function WidgetConfigDialog({ open, widget, onClose, onSubmit }: Props) {
                 value={draft.source.kind === 'all' ? 'all' : `${draft.source.kind}:${draft.source.id}`}
                 onChange={(e) => {
                   const v = e.target.value
-                  const source = v === 'all' ? ({ kind: 'all' } as const) : v.startsWith('category:') ? ({ kind: 'category', id: Number(v.slice(9)) } as const) : ({ kind: 'feed', id: Number(v.slice(5)) } as const)
+                  const source =
+                    v === 'all'
+                      ? ({ kind: 'all' } as const)
+                      : v.startsWith('category:')
+                        ? ({ kind: 'category', id: Number(v.slice(9)) } as const)
+                        : v.startsWith('smart:')
+                          ? ({ kind: 'smart', id: Number(v.slice(6)) } as const)
+                          : ({ kind: 'feed', id: Number(v.slice(5)) } as const)
                   setDraft({ ...draft, source })
                 }}
                 data-testid="widget-source"
               >
                 <option value="all">Tous les articles</option>
+                {data.smartFeeds.length > 0 && (
+                  <optgroup label="Flux intelligents">
+                    {data.smartFeeds.map((sf) => (
+                      <option key={sf.id} value={`smart:${sf.id}`}>
+                        {sf.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
                 {data.categories.length > 0 && (
                   <optgroup label="Catégories">
                     {data.categories.map((c) => (

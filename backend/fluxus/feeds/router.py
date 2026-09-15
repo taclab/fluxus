@@ -202,12 +202,18 @@ async def update_feed(feed_id: int, body: FeedUpdate, _: Auth, session: Session)
         feed.etag = None
         feed.last_modified = None
         feed.next_fetch_at = datetime.now(UTC)
+    previous_category = feed.category_id
     if body.clear_category:
         feed.category_id = None
     elif body.category_id is not None:
         if await session.get(Category, body.category_id) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
         feed.category_id = body.category_id
+    if feed.category_id != previous_category:
+        from ..smartfeeds.service import reevaluate_feed
+
+        await session.flush()
+        await reevaluate_feed(session, feed)
     if body.extraction_mode is not None:
         feed.extraction_mode = body.extraction_mode
     if body.disabled is not None:

@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, Sparkles, Star, Type } from 'lucide-react'
+import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, Sparkles, Star, Type, WandSparkles } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type Feed } from '../../api/client'
@@ -19,6 +19,7 @@ interface Props {
   onBack?: () => void
   summaryRequested: number // compteur incrémenté par le raccourci "r"
   fullContentRequested: number // compteur incrémenté par le raccourci "f"
+  onCreateSmartFeed?: (feedId: number) => void
 }
 
 /** N'ouvre que des liens http(s) : un flux ne doit pas pouvoir déclencher un autre schéma. */
@@ -26,7 +27,7 @@ export function openExternal(url: string | null | undefined) {
   if (url && /^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener')
 }
 
-export function Reader({ entryId, onBack, summaryRequested, fullContentRequested }: Props) {
+export function Reader({ entryId, onBack, summaryRequested, fullContentRequested, onCreateSmartFeed }: Props) {
   const entry = useLiveQuery(async () => (entryId ? ((await db.entries.get(entryId)) ?? null) : null), [entryId])
   const feed = useLiveQuery(() => (entry ? db.feeds.get(entry.feed_id) : undefined), [entry?.feed_id]) as Feed | undefined
   const [showFull, setShowFull] = useState(true)
@@ -204,6 +205,11 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
         >
           <Sparkles className="size-5" />
         </IconButton>
+        {onCreateSmartFeed && (
+          <IconButton label="Créer un flux intelligent à partir de ce flux" onClick={() => onCreateSmartFeed(entry.feed_id)} className="hidden sm:inline-flex">
+            <WandSparkles className="size-5" />
+          </IconButton>
+        )}
         {entry.url && (
           <IconButton label="Ouvrir l’original (v)" onClick={() => openExternal(entry.url)}>
             <ExternalLink className="size-5" />

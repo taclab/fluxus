@@ -15,6 +15,7 @@ from .db import get_engine
 from .entries.router import router as entries_router
 from .feeds.router import router as feeds_router
 from .settings_router import router as settings_router
+from .smartfeeds.router import router as smartfeeds_router
 from .summarize.router import router as summarize_router
 from .sync.router import router as sync_router
 
@@ -96,6 +97,7 @@ app.include_router(auth_router)
 app.include_router(feeds_router)
 app.include_router(entries_router)
 app.include_router(settings_router)
+app.include_router(smartfeeds_router)
 app.include_router(summarize_router)
 app.include_router(sync_router)
 

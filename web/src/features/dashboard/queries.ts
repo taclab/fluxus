@@ -32,6 +32,15 @@ export function latestAll({ unreadOnly, limit }: LatestOptions): Promise<LocalEn
   return coll.reverse().limit(limit).toArray()
 }
 
+/** Derniers articles d'un flux intelligent (index multiEntry, tri mémoire borné par les correspondances). */
+export async function latestForSmartFeed(smartFeedId: number, { unreadOnly, limit }: LatestOptions): Promise<LocalEntry[]> {
+  let coll = db.entries.where('smart_feed_ids').equals(smartFeedId)
+  if (unreadOnly) coll = coll.and((e) => e.readFlag === 0)
+  const arr = await coll.toArray()
+  arr.sort((a, b) => b.publishedTs - a.publishedTs)
+  return arr.slice(0, limit)
+}
+
 export function latestStarred(limit: number): Promise<LocalEntry[]> {
   return db.entries.where('[starredFlag+publishedTs]').between([1, -Infinity], [1, Infinity]).reverse().limit(limit).toArray()
 }

@@ -16,6 +16,7 @@ from ..extract.clean import html_to_text
 from ..extract.jobs import run_extraction
 from ..models import Entry, Feed, Summary
 from ..schemas import EntryListItem, EntryOut, EntryPage, EntryPatch, FetchContentIn, MarkReadIn
+from ..smartfeeds.service import smart_feed_ids_for
 
 router = APIRouter(prefix="/api/entries", tags=["entries"])
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -44,7 +45,7 @@ def _excerpt(entry: Entry, length: int = 220) -> str:
     return text[:length] + ("…" if len(text) > length else "")
 
 
-def to_list_item(entry: Entry, has_summary: bool) -> EntryListItem:
+def to_list_item(entry: Entry, has_summary: bool, smart_feed_ids: list[int] | None = None) -> EntryListItem:
     meta = entry.meta or {}
     return EntryListItem(
         id=entry.id,
@@ -60,12 +61,13 @@ def to_list_item(entry: Entry, has_summary: bool) -> EntryListItem:
         youtube_id=meta.get("youtube_id"),
         has_content=entry.extraction_status == "done",
         has_summary=has_summary,
+        smart_feed_ids=smart_feed_ids or [],
         updated_at=entry.updated_at,
     )
 
 
-def to_entry_out(entry: Entry, has_summary: bool) -> EntryOut:
-    base = to_list_item(entry, has_summary)
+def to_entry_out(entry: Entry, has_summary: bool, smart_feed_ids: list[int] | None = None) -> EntryOut:
+    base = to_list_item(entry, has_summary, smart_feed_ids)
     return EntryOut(
         **base.model_dump(),
         summary_html=entry.summary_html,
@@ -126,7 +128,8 @@ async def list_entries(
     rows = (await session.execute(stmt)).all()
     has_more = len(rows) > limit
     rows = rows[:limit]
-    items = [to_list_item(entry, bool(has_summary)) for entry, has_summary in rows]
+    sf_ids = await smart_feed_ids_for(session, [entry.id for entry, _ in rows])
+    items = [to_list_item(entry, bool(has_summary), sf_ids.get(entry.id)) for entry, has_summary in rows]
     next_cursor = _encode_cursor(rows[-1][0].published_at, rows[-1][0].id) if has_more and rows else None
     return EntryPage(items=items, next_cursor=next_cursor)
 
@@ -140,7 +143,8 @@ async def get_entry(entry_id: int, _: Auth, session: Session) -> EntryOut:
     ).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Article introuvable")
-    return to_entry_out(row[0], bool(row[1]))
+    sf_ids = await smart_feed_ids_for(session, [entry_id])
+    return to_entry_out(row[0], bool(row[1]), sf_ids.get(entry_id))
 
 
 @router.patch("/{entry_id}", response_model=EntryOut)
@@ -156,7 +160,8 @@ async def patch_entry(entry_id: int, body: EntryPatch, _: Auth, session: Session
     await session.commit()
     await session.refresh(entry)
     has_summary = (await session.execute(select(_has_summary_expr()).where(Entry.id == entry_id))).scalar()
-    return to_entry_out(entry, bool(has_summary))
+    sf_ids = await smart_feed_ids_for(session, [entry_id])
+    return to_entry_out(entry, bool(has_summary), sf_ids.get(entry_id))
 
 
 @router.post("/mark-read")
@@ -195,7 +200,8 @@ async def fetch_content(entry_id: int, body: FetchContentIn, _: Auth, session: S
     await session.commit()
     await session.refresh(entry)
     has_summary = (await session.execute(select(_has_summary_expr()).where(Entry.id == entry_id))).scalar()
-    return to_entry_out(entry, bool(has_summary))
+    sf_ids = await smart_feed_ids_for(session, [entry_id])
+    return to_entry_out(entry, bool(has_summary), sf_ids.get(entry_id))
 
 
 @router.get("/{entry_id}/summaries")

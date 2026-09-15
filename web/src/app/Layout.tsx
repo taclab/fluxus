@@ -2,13 +2,14 @@ import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { Category, Feed } from '../api/client'
+import type { Category, Feed, SmartFeed } from '../api/client'
 import { db } from '../db/db'
 import { recordChange } from '../sync/engine'
 import { Dashboard } from '../features/dashboard/Dashboard'
 import { EntryList } from '../features/entries/EntryList'
 import { CategoryDialog, FeedDialog } from '../features/feeds/FeedDialog'
 import { Sidebar } from '../features/feeds/Sidebar'
+import { SmartFeedDialog } from '../features/smartfeeds/SmartFeedDialog'
 import { openExternal, Reader } from '../features/reader/Reader'
 import { useKeyboard } from './useKeyboard'
 import { useView } from './view'
@@ -32,6 +33,8 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editFeed, setEditFeed] = useState<Feed | null>(null)
   const [editCategory, setEditCategory] = useState<{ open: boolean; category: Category | null }>({ open: false, category: null })
+  const [editSmart, setEditSmart] = useState<{ open: boolean; smartFeed: SmartFeed | null; preset: { scope_kind: 'feed' | 'category'; scope_id: number } | null }>({ open: false, smartFeed: null, preset: null })
+  const openSmartEditor = useCallback((sf: SmartFeed | null, preset: { scope_kind: 'feed' | 'category'; scope_id: number } | null = null) => setEditSmart({ open: true, smartFeed: sf, preset }), [])
   const [summaryTick, setSummaryTick] = useState(0)
   const [fullTick, setFullTick] = useState(0)
   const visibleIds = useRef<number[]>([])
@@ -108,13 +111,13 @@ export function Layout() {
       {/* Barre latérale : fixe sur grand écran, tiroir ailleurs */}
       {isDesktop ? (
         <div className="w-64 xl:w-72 shrink-0 border-r border-app">
-          <Sidebar view={view} onSelect={selectView} onEditFeed={setEditFeed} onEditCategory={(c) => setEditCategory({ open: true, category: c })} />
+          <Sidebar view={view} onSelect={selectView} onEditFeed={setEditFeed} onEditCategory={(c) => setEditCategory({ open: true, category: c })} onEditSmartFeed={(sf) => openSmartEditor(sf)} />
         </div>
       ) : (
         <>
           <div className={clsx('fixed inset-0 z-40 bg-black/40 transition-opacity', sidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0')} onClick={() => setSidebarOpen(false)} />
           <div className={clsx('fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] border-r border-app shadow-xl transition-transform', sidebarOpen ? 'translate-x-0' : '-translate-x-full')}>
-            <Sidebar view={view} onSelect={selectView} onEditFeed={setEditFeed} onEditCategory={(c) => setEditCategory({ open: true, category: c })} />
+            <Sidebar view={view} onSelect={selectView} onEditFeed={setEditFeed} onEditCategory={(c) => setEditCategory({ open: true, category: c })} onEditSmartFeed={(sf) => openSmartEditor(sf)} />
           </div>
         </>
       )}
@@ -136,18 +139,32 @@ export function Layout() {
             onOpenSidebar={() => setSidebarOpen(true)}
             onSearch={(q) => (q ? setView({ kind: 'search', query: q }) : setView({ kind: 'all' }))}
             onVisibleEntries={onVisibleEntries}
+            onEditSmartFeed={(sf) => openSmartEditor(sf)}
           />
         </div>
       )}
 
       {!isDashboard && showReader && (
         <div className="flex-1 min-w-0">
-          <Reader entryId={entryId} onBack={isTablet ? undefined : () => setEntry(null)} summaryRequested={summaryTick} fullContentRequested={fullTick} />
+          <Reader
+            entryId={entryId}
+            onBack={isTablet ? undefined : () => setEntry(null)}
+            summaryRequested={summaryTick}
+            fullContentRequested={fullTick}
+            onCreateSmartFeed={(feedId) => openSmartEditor(null, { scope_kind: 'feed', scope_id: feedId })}
+          />
         </div>
       )}
 
       <FeedDialog feed={editFeed} categories={categories} onClose={() => setEditFeed(null)} />
       <CategoryDialog open={editCategory.open} category={editCategory.category} onClose={() => setEditCategory({ open: false, category: null })} />
+      <SmartFeedDialog
+        open={editSmart.open}
+        smartFeed={editSmart.smartFeed}
+        preset={editSmart.preset}
+        onClose={() => setEditSmart((s) => ({ ...s, open: false }))}
+        onSaved={(sf) => setView({ kind: 'smart', id: sf.id })}
+      />
     </div>
   )
 }

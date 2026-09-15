@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 
-import type { Category, EntryOut, Feed, SummaryOut } from '../api/client'
+import type { Category, EntryOut, Feed, SmartFeed, SummaryOut } from '../api/client'
 
 /** Entrée locale : identique à EntryOut avec un index dérivé pour les filtres. */
 export interface LocalEntry extends EntryOut {
@@ -30,6 +30,7 @@ export class FluxusDB extends Dexie {
   entries!: EntityTable<LocalEntry, 'id'>
   feeds!: EntityTable<Feed, 'id'>
   categories!: EntityTable<Category, 'id'>
+  smartFeeds!: EntityTable<SmartFeed, 'id'>
   summaries!: EntityTable<SummaryOut, 'id'>
   outbox!: EntityTable<OutboxItem, 'id'>
   meta!: EntityTable<MetaRow, 'key'>
@@ -56,6 +57,21 @@ export class FluxusDB extends Dexie {
           .toCollection()
           .modify((e: LocalEntry) => {
             e.updatedTs = new Date(e.updated_at).getTime()
+          }),
+      )
+    // v3 : flux intelligents — index multiEntry sur le champ serveur smart_feed_ids, table des définitions.
+    this.version(3)
+      .stores({
+        entries:
+          'id, feed_id, publishedTs, readFlag, starredFlag, updatedTs, *smart_feed_ids, [feed_id+publishedTs], [readFlag+publishedTs], [starredFlag+publishedTs], [feed_id+readFlag+publishedTs], [readFlag+updatedTs]',
+        smartFeeds: 'id, position',
+      })
+      .upgrade((tx) =>
+        tx
+          .table('entries')
+          .toCollection()
+          .modify((e: LocalEntry) => {
+            if (!Array.isArray(e.smart_feed_ids)) e.smart_feed_ids = []
           }),
       )
   }
@@ -92,6 +108,7 @@ export async function clearDatabase(): Promise<void> {
     db.entries.clear(),
     db.feeds.clear(),
     db.categories.clear(),
+    db.smartFeeds.clear(),
     db.summaries.clear(),
     db.outbox.clear(),
     db.meta.clear(),

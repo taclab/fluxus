@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-export type ViewKind = 'dashboard' | 'all' | 'unread' | 'starred' | 'feed' | 'category' | 'search'
+export type ViewKind = 'dashboard' | 'all' | 'unread' | 'starred' | 'feed' | 'category' | 'smart' | 'search'
 
 export interface View {
   kind: ViewKind
@@ -32,6 +32,8 @@ export function viewPath(view: View): string {
       return `/feed/${view.id}`
     case 'category':
       return `/category/${view.id}`
+    case 'smart':
+      return `/smart/${view.id}`
     case 'search':
       return `/search?q=${encodeURIComponent(view.query ?? '')}`
   }
@@ -52,6 +54,10 @@ export function useView() {
     if (p.startsWith('/category/')) {
       const id = parseId(params.id)
       return id ? { kind: 'category', id } : { kind: 'all' }
+    }
+    if (p.startsWith('/smart/')) {
+      const id = parseId(params.id)
+      return id ? { kind: 'smart', id } : { kind: 'all' }
     }
     if (p === '/unread') return { kind: 'unread' }
     if (p === '/starred') return { kind: 'starred' }
