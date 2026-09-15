@@ -79,7 +79,14 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
       setExtracting(true)
       try {
         const updated = unwrap(await api().POST('/api/entries/{entry_id}/fetch-content', { params: { path: { entry_id: entry.id } }, body: { mode } }))
-        await db.entries.put({ ...toLocalEntry(updated), read: entry.read, readFlag: entry.readFlag, starred: entry.starred, starredFlag: entry.starredFlag })
+        // Fusion au moment de la réponse : l'état lu/favori local (éventuellement modifié pendant
+        // l'attente, ou en attente dans l'outbox) prime sur l'instantané renvoyé par le serveur ;
+        // seul le contenu extrait est pris de la réponse.
+        await db.transaction('rw', db.entries, async () => {
+          const current = await db.entries.get(entry.id)
+          const server = toLocalEntry(updated)
+          await db.entries.put(current ? { ...server, read: current.read, readFlag: current.readFlag, starred: current.starred, starredFlag: current.starredFlag } : server)
+        })
         if (updated.extraction_status === 'failed') toast(updated.extraction_error ?? 'Extraction impossible', 'error')
         else setShowFull(true)
       } catch (err) {

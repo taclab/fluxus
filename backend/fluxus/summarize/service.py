@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from ..extract.clean import html_to_text
 from ..extract.jobs import run_extraction
-from ..models import Entry, Summary, Transcript
+from ..models import Entry, LlmUsage, Summary, Transcript
 from ..settings_store import get_all_settings
 from ..youtube.transcript import Segment, TranscriptUnavailable, VideoTranscript, fetch_transcript
 from . import prompts
@@ -82,6 +82,23 @@ def _chunks(text: str, size: int = CHUNK_SIZE) -> list[str]:
     return parts
 
 
+async def _settle(session: AsyncSession, usage: LlmUsage | None, *, status: str, tokens: int, entry_id: int, origin: str, smart_feed_id: int | None) -> None:
+    """Solde la ligne du journal de consommation (réservée avant l'appel pour les résumés automatiques,
+    créée ici pour les résumés manuels). Un appel échoué après consommation est compté quand même."""
+    if usage is None:
+        if tokens == 0 and status != "done":
+            return  # rien n'a été appelé : pas de ligne
+        usage = LlmUsage(entry_id=entry_id, smart_feed_id=smart_feed_id, origin=origin)
+        session.add(usage)
+    usage.status = status
+    usage.tokens = tokens
+    try:
+        await session.commit()
+    except Exception:  # noqa: BLE001
+        log.exception("journal de consommation LLM non enregistré pour l'entrée %s", entry_id)
+        await session.rollback()
+
+
 async def summarize_entry(
     session: AsyncSession,
     entry_id: int,
@@ -90,12 +107,21 @@ async def summarize_entry(
     origin: str = "manual",
     smart_feed_id: int | None = None,
     model_override: str | None = None,
+    usage: LlmUsage | None = None,
+    max_output_tokens: int | None = None,
 ) -> AsyncIterator[SummaryEvent]:
     """Générateur d'événements : status → delta* → done, ou error.
 
     `origin="auto"` et `smart_feed_id` marquent un résumé déclenché par un flux intelligent ;
-    `model_override` remplace le modèle des réglages (modèle économique des résumés automatiques).
+    `model_override` remplace le modèle des réglages (modèle économique des résumés automatiques) ;
+    `usage` est la réservation de budget déjà committée à solder (sinon une ligne `manual` est journalisée) ;
+    `max_output_tokens` borne la sortie du fournisseur au solde réservé.
     """
+    out_cap = max(1, min(4000, max_output_tokens)) if max_output_tokens is not None else 4000
+
+    def settle(status: str, tokens: int):
+        return _settle(session, usage, status=status, tokens=tokens, entry_id=entry_id, origin=origin, smart_feed_id=smart_feed_id)
+
     result = await session.execute(
         select(Entry)
         .options(selectinload(Entry.feed), selectinload(Entry.transcript))
@@ -103,6 +129,7 @@ async def summarize_entry(
     )
     entry = result.scalar_one_or_none()
     if entry is None:
+        await settle("failed", 0)
         yield SummaryEvent("error", {"message": "Article introuvable"})
         return
 
@@ -113,6 +140,8 @@ async def summarize_entry(
             )
         ).scalar_one_or_none()
         if existing is not None:
+            if usage is not None:
+                await settle("done", 0)  # réservation libérée : rien n'a été appelé
             yield SummaryEvent("done", {"summary": _summary_dict(existing), "cached": True})
             return
 
@@ -122,6 +151,7 @@ async def summarize_entry(
     try:
         summarizer = build_summarizer(settings)
     except SummarizerError as exc:
+        await settle("failed", 0)
         yield SummaryEvent("error", {"message": str(exc)})
         return
 
@@ -130,10 +160,12 @@ async def summarize_entry(
         kind, text, _ = await _prepare_source(session, entry)
         await session.commit()
     except (TranscriptUnavailable, SummarizerError) as exc:
+        await settle("failed", 0)
         yield SummaryEvent("error", {"message": str(exc)})
         return
     except Exception as exc:
         log.exception("préparation du résumé en échec pour l'entrée %s", entry_id)
+        await settle("failed", 0)
         yield SummaryEvent("error", {"message": f"Préparation impossible: {exc}"})
         return
 
@@ -141,6 +173,12 @@ async def summarize_entry(
     system = prompts.system_prompt(language)
     total_usage = Usage()
     full_text: list[str] = []
+    stream = None
+
+    def known_tokens() -> int:
+        """Tokens réellement consommés, y compris ceux du flux interrompu ; sinon l'estimation réservée."""
+        partial = (stream.usage.input_tokens + stream.usage.output_tokens) if stream is not None else 0
+        return total_usage.input_tokens + total_usage.output_tokens + partial or (usage.estimated_tokens if usage else 0)
 
     try:
         if len(text) > CHUNK_THRESHOLD:
@@ -148,13 +186,14 @@ async def summarize_entry(
             partials: list[str] = []
             for i, part in enumerate(parts, start=1):
                 yield SummaryEvent("status", {"message": f"Résumé de la partie {i}/{len(parts)}…"})
-                stream = summarizer.stream(system, prompts.chunk_prompt(entry.title, i, len(parts), part), max_tokens=2000)
+                stream = summarizer.stream(system, prompts.chunk_prompt(entry.title, i, len(parts), part), max_tokens=min(2000, out_cap))
                 buf: list[str] = []
                 async for piece in stream:
                     buf.append(piece)
                 partials.append("".join(buf))
                 total_usage.input_tokens += stream.usage.input_tokens
                 total_usage.output_tokens += stream.usage.output_tokens
+                stream = None
             yield SummaryEvent("status", {"message": "Fusion des résumés…"})
             user_prompt = prompts.merge_prompt(entry.title, entry.url, kind, partials)
         elif kind == "video":
@@ -163,17 +202,21 @@ async def summarize_entry(
             user_prompt = prompts.article_prompt(entry.title, entry.url, text)
 
         yield SummaryEvent("status", {"message": "Rédaction du résumé…"})
-        stream = summarizer.stream(system, user_prompt, max_tokens=4000)
+        stream = summarizer.stream(system, user_prompt, max_tokens=out_cap)
         async for piece in stream:
             full_text.append(piece)
             yield SummaryEvent("delta", {"text": piece})
         total_usage.input_tokens += stream.usage.input_tokens
         total_usage.output_tokens += stream.usage.output_tokens
+        stream = None
     except SummarizerError as exc:
+        # Échec après consommation éventuelle : compté avec les tokens connus, sinon l'estimation réservée.
+        await settle("failed", known_tokens())
         yield SummaryEvent("error", {"message": str(exc)})
         return
     except Exception as exc:  # noqa: BLE001
         log.exception("échec du résumé pour l'entrée %s", entry_id)
+        await settle("failed", known_tokens())
         yield SummaryEvent("error", {"message": f"Erreur inattendue: {exc}"})
         return
 
@@ -189,6 +232,7 @@ async def summarize_entry(
         origin=origin,
         smart_feed_id=smart_feed_id,
     )
+    spent = total_usage.input_tokens + total_usage.output_tokens
     try:
         session.add(summary)
         entry.updated_at = datetime.now(UTC)  # déclenche la sync delta côté clients
@@ -196,9 +240,12 @@ async def summarize_entry(
         await session.refresh(summary)
     except Exception as exc:
         log.exception("enregistrement du résumé en échec pour l'entrée %s", entry_id)
+        await session.rollback()
+        await settle("failed", spent)
         # Le texte a été produit et streamé : on le renvoie quand même, sans identifiant.
         yield SummaryEvent("error", {"message": f"Résumé produit mais non enregistré: {exc}"})
         return
+    await settle("done", spent)
     yield SummaryEvent("done", {"summary": _summary_dict(summary), "cached": False})
 
 

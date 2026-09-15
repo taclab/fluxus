@@ -78,3 +78,31 @@ def test_rate_limiter_global_cap_defeats_ip_spoofing():
         assert limiter.check(key)
         limiter.record_failure(key)
     assert not limiter.check("10.0.0.99")
+
+
+async def test_safe_get_gzip_body_is_decoded_once():
+    """Constat 2 de l'audit du 15/09 : le corps décodé en flux ne doit pas garder Content-Encoding."""
+    import gzip
+
+    import httpx
+
+    import fluxus.fetcher.http as http_mod
+    from fluxus.fetcher.http import safe_get
+
+    payload = b"<rss>audit</rss>"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=gzip.compress(payload), headers={"content-encoding": "gzip", "content-type": "application/rss+xml"})
+
+    original = http_mod.socket.getaddrinfo
+    http_mod.socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))]
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            r = await safe_get(client, "http://public.example/feed.xml")
+            assert r.status_code == 200
+            assert r.content == payload
+            assert "content-encoding" not in r.headers
+            assert r.headers["content-length"] == str(len(payload))
+            assert r.headers["content-type"] == "application/rss+xml"
+    finally:
+        http_mod.socket.getaddrinfo = original

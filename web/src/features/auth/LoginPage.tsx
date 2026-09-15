@@ -45,7 +45,14 @@ export function LoginPage() {
     setBusy(true)
     try {
       if (showServer) {
+        const previous = getServerUrl()
         setServerUrl(serverUrl)
+        if (getServerUrl() !== previous) {
+          // La base locale est nommée d'après le serveur : on recharge pour l'ouvrir sous le bon nom,
+          // sans réutiliser le cache, l'outbox ni le curseur de sync de l'ancienne instance.
+          window.location.reload()
+          return
+        }
         reconfigureClient()
       }
       if (setupRequired) {

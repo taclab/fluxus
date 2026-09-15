@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Auth
@@ -105,10 +106,18 @@ async def update_category(category_id: int, body: CategoryIn, _: Auth, session: 
     cat = await session.get(Category, category_id)
     if cat is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
+    duplicate = await session.execute(select(Category.id).where(func.lower(Category.title) == body.title.lower(), Category.id != cat.id))
+    if duplicate.scalar_one_or_none() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Cette catégorie existe déjà")
     cat.title = body.title
     if body.position is not None:
         cat.position = body.position
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # Course entre le contrôle et l'écriture : la contrainte d'unicité tranche.
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Cette catégorie existe déjà") from exc
     return CategoryOut(id=cat.id, title=cat.title, position=cat.position)
 
 
@@ -117,6 +126,10 @@ async def delete_category(category_id: int, _: Auth, session: Session) -> None:
     cat = await session.get(Category, category_id)
     if cat is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
+    from ..smartfeeds.service import detach_category
+
+    # Les flux intelligents qui ciblaient ce dossier perdent leurs correspondances (portée disparue).
+    await detach_category(session, cat.id)
     # Les flux du dossier prennent sa place dans la racine (même position, départagés par le titre).
     await session.execute(update(Feed).where(Feed.category_id == cat.id).values(position=cat.position))
     await session.delete(cat)  # les flux passent en category_id NULL (ON DELETE SET NULL)

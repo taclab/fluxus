@@ -17,9 +17,11 @@ npm run gen:api                                # après tout changement de route
 ## Règles du projet
 
 - Langue de l'interface, des messages d'erreur `detail` et des commentaires : français.
-- Toute modification d'une entrée visible par un client met `entry.updated_at = now` (pivot de la sync).
+- Toute modification d'une entrée visible par un client met `entry.updated_at = now` (pivot de la sync). Toute écriture de `read`/`starred` pose aussi `read_changed_at`/`starred_changed_at` (horloges par champ, seule base de la résolution des conflits de sync ; jamais `updated_at`).
+- Renderer (`browser/server.py`) : jamais `route.continue_()` ; les redirections sont suivies à la main dans `route_handler` avec revalidation de chaque saut (`scripts/check-browser-redirect.py` doit passer). `safe_get` : le corps est déjà décodé, les en-têtes de transport sont réécrits.
+- Consommation LLM : toute génération journalise une ligne `LlmUsage` (réservée avant l'appel, soldée après) ; le budget des résumés automatiques se calcule sur ce journal, pas sur `summaries`.
 - Ordre pour un changement d'API : Python → `npm run gen:api` → front. Ne jamais redéclarer les types d'API côté front.
-- Les résumés LLM ne sont jamais déclenchés automatiquement.
+- Aucun résumé LLM n'est déclenché sans action de l'utilisateur, à l'exception des résumés automatiques des flux intelligents (opt-in, quota par flux et budget quotidien).
 - Nouveau réglage : `settings_store.DEFAULTS` (+ `SECRET_KEYS` si secret) puis `SettingsPage`.
 - Nouveau job : handler `@job_handler`, importé dans `handlers.py`, idempotent.
 - Nouveau widget de tableau de bord : `features/dashboard/layout.ts` (type, normalisation, titre) → `queries.ts` → `widgets/` → `DashboardGrid.WidgetSwitch` + `WidgetConfigDialog`.
@@ -29,7 +31,7 @@ npm run gen:api                                # après tout changement de route
 - Flux intelligents : toute condition passe par `smartfeeds/rules.build_condition` (SQL, `coalesce` systématique) ; jamais de filtrage en JavaScript. Toute écriture sur `smart_feed_matches` bump `entries.updated_at` (horloge Python).
 - Tests E2E Playwright : `bypass_csp=True` dans le contexte (la CSP interdit `eval`, utilisé par `wait_for_function`).
 - Ordre de la barre latérale : `position` est la clé de tri partout (barre, `GET /feeds`, OPML) ; la racine mélange dossiers et flux sans dossier sur la même échelle ; un nouveau flux prend `min(position) − 1` de son conteneur (`feeds/router._first_position`), un nouveau dossier va en fin de racine, les flux d'un dossier supprimé héritent de sa position. Les règles de déplacement vivent dans `features/feeds/sidebarOrder.ts`, sans React ; pas de capteur clavier dnd-kit dans la barre (Entrée doit ouvrir la vue).
-- Point d'étape et dette connue : `docs/AUDIT-2026-09-14.md`.
+- Points d'étape et dette connue : `docs/AUDIT-2026-09-14.md`, `docs/AUDIT-2026-09-15.md` (17 constats, tous corrigés ; tableau « Suivi des correctifs »).
 - Migration : `uv run alembic revision --autogenerate`, relire le fichier (triggers et index partiels non détectés).
 
 ## Pièges connus sur la machine de développement

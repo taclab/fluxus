@@ -13,7 +13,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Auth
@@ -79,10 +79,40 @@ class SyncPush(BaseModel):
     changes: list[StateChange]
 
 
+class SyncConflict(BaseModel):
+    """Changement refusé : l'état serveur courant, pour que le client réaligne son cache."""
+
+    entry_id: int
+    read: bool
+    starred: bool
+
+
 class SyncPushResult(BaseModel):
     applied: int
     ignored: int
+    conflicts: list[SyncConflict] = []
     server_time: datetime
+
+
+async def _visibility_horizon(session: AsyncSession, now: datetime) -> datetime:
+    """Instant à partir duquel le client peut reprendre sans rien perdre.
+
+    Une transaction encore ouverte (job d'extraction, évaluation de flux intelligent…) a pu fixer
+    `updated_at` bien avant son commit : un `since = now` la rendrait invisible pour toujours. On
+    renvoie donc le début de la plus ancienne transaction en cours sur cette base ; le client relira
+    au pire quelques minutes de changements déjà vus (idempotent), jamais moins.
+    """
+    horizon = (
+        await session.execute(
+            text(
+                "SELECT min(xact_start) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid() AND xact_start IS NOT NULL"
+            )
+        )
+    ).scalar_one()
+    if horizon is None:
+        return now
+    return min(now, _aware(horizon))
 
 
 @router.get("", response_model=SyncPull)
@@ -140,8 +170,9 @@ async def pull(
 
     last = rows[-1][0] if rows else None
     next_cursor = _encode_cursor(last.updated_at, last.id, min_published) if has_more and last else None
+    horizon = await _visibility_horizon(session, now)
     return SyncPull(
-        server_time=now,
+        server_time=horizon,
         retention_days=retention_days,
         categories=[CategoryOut(id=c.id, title=c.title, position=c.position) for c in cats],
         feeds=[FeedOut.model_validate(f, from_attributes=True) for f in feeds],
@@ -152,39 +183,57 @@ async def pull(
         deleted_entry_ids=[],
         has_more=has_more,
         next_cursor=next_cursor,
-        next_since=now,
+        next_since=horizon,
     )
 
 
 @router.post("", response_model=SyncPushResult)
 async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
-    """Dernière écriture gagne : un changement local plus ancien que la version serveur est ignoré."""
+    """Dernière écriture gagne, **champ par champ** et à l'horloge des actions.
+
+    Chaque champ (`read`, `starred`) a sa propre horloge (`read_changed_at`, `starred_changed_at`),
+    fixée à la date de l'action côté client (bornée à now + 30 s). Un changement n'est refusé que si
+    ce champ a été modifié plus récemment : un résumé, une extraction ou un recalcul de
+    correspondances (qui avancent `updated_at`) n'invalident plus un favori posé hors ligne, et les
+    actions successives d'un même lot s'appliquent dans l'ordre. Les refus sont renvoyés avec l'état
+    serveur courant pour que le client réaligne son cache.
+    """
     applied = ignored = 0
+    conflicts: list[SyncConflict] = []
     ids = [c.entry_id for c in body.changes]
     if not ids:
         return SyncPushResult(applied=0, ignored=0, server_time=datetime.now(UTC))
     entries = {e.id: e for e in (await session.execute(select(Entry).where(Entry.id.in_(ids)))).scalars()}
     now = datetime.now(UTC)
-    # Une horloge client en avance ne doit pas projeter updated_at dans le futur (l'entrée serait
-    # renvoyée à chaque pull et tout changement ultérieur ignoré comme « périmé »).
-    normalized = [(min(_aware(c.at), now + timedelta(seconds=30)), c) for c in body.changes]
+    # Une horloge client en avance ne doit pas projeter les dates dans le futur : l'horloge du champ
+    # serait alors postérieure à toute action normale et refuserait les changements suivants.
+    normalized = [(min(_aware(c.at), now), c) for c in body.changes]
     for change_at, change in sorted(normalized, key=lambda x: x[0]):
         entry = entries.get(change.entry_id)
         if entry is None:
             ignored += 1
             continue
-        if entry.updated_at and entry.updated_at > change_at and (
-            (change.read is not None and entry.read != change.read)
-            or (change.starred is not None and entry.starred != change.starred)
-        ):
-            # Le serveur a une version plus récente qui contredit le changement local.
-            ignored += 1
-            continue
+        touched = refused = False
+        # Horloge NULL = champ jamais modifié par l'utilisateur (la migration a rempli l'existant) : tout passe.
         if change.read is not None:
-            entry.read = change.read
+            if entry.read != change.read and entry.read_changed_at and entry.read_changed_at > change_at:
+                refused = True
+            else:
+                entry.read = change.read
+                entry.read_changed_at = max(change_at, entry.read_changed_at or change_at)
+                touched = True
         if change.starred is not None:
-            entry.starred = change.starred
-        entry.updated_at = now
-        applied += 1
+            if entry.starred != change.starred and entry.starred_changed_at and entry.starred_changed_at > change_at:
+                refused = True
+            else:
+                entry.starred = change.starred
+                entry.starred_changed_at = max(change_at, entry.starred_changed_at or change_at)
+                touched = True
+        if touched:
+            entry.updated_at = now
+            applied += 1
+        if refused:
+            ignored += 1
+            conflicts.append(SyncConflict(entry_id=entry.id, read=entry.read, starred=entry.starred))
     await session.commit()
-    return SyncPushResult(applied=applied, ignored=ignored, server_time=datetime.now(UTC))
+    return SyncPushResult(applied=applied, ignored=ignored, conflicts=conflicts, server_time=datetime.now(UTC))

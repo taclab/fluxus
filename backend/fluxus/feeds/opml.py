@@ -69,15 +69,21 @@ def build_opml(categories: list[Category], feeds: list[Feed]) -> str:
         "  </head>",
         "  <body>",
     ]
-    for cat in sorted(categories, key=lambda c: (c.position, c.title)):
-        cat_feeds = by_cat.get(cat.id, [])
+    # La racine mélange dossiers et flux sans dossier, dans l'ordre de la barre latérale (position, titre).
+    # `position` peut être None sur des objets non persistés (défaut SQL non appliqué) : traité comme 0.
+    root: list[tuple[int, str, Category | Feed]] = [(c.position or 0, c.title.lower(), c) for c in categories]
+    root += [(f.position or 0, (f.title or f.url).lower(), f) for f in by_cat.get(None, [])]
+    root.sort(key=lambda item: (item[0], item[1]))
+    for _, _, item in root:
+        if isinstance(item, Feed):
+            lines.append(outline(item).replace("      <outline", "    <outline", 1))
+            continue
+        cat_feeds = by_cat.get(item.id, [])
         if not cat_feeds:
             continue
-        lines.append(f"    <outline text={quoteattr(cat.title)} title={quoteattr(cat.title)}>")
-        lines.extend(outline(f) for f in sorted(cat_feeds, key=lambda f: (f.position, f.title.lower())))
+        lines.append(f"    <outline text={quoteattr(item.title)} title={quoteattr(item.title)}>")
+        lines.extend(outline(f) for f in sorted(cat_feeds, key=lambda f: (f.position or 0, f.title.lower())))
         lines.append("    </outline>")
-    for f in sorted(by_cat.get(None, []), key=lambda f: (f.position, f.title.lower())):
-        lines.append(outline(f).replace("      <outline", "    <outline", 1))
     lines += ["  </body>", "</opml>", ""]
     return "\n".join(lines)
 

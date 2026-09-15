@@ -130,10 +130,17 @@ async def safe_get(
                     chunks.append(chunk)
             finally:
                 await response.aclose()
+            # `aiter_bytes` a déjà décodé gzip/deflate/br : les en-têtes de transport doivent décrire le
+            # corps tel qu'il est maintenant, sinon httpx tenterait de le décompresser une seconde fois.
+            body = b"".join(chunks)
+            headers = httpx.Headers(response.headers)
+            for name in ("content-encoding", "content-length", "transfer-encoding"):
+                headers.pop(name, None)
+            headers["content-length"] = str(len(body))
             return httpx.Response(
                 status_code=response.status_code,
-                headers=response.headers,
-                content=b"".join(chunks),
+                headers=headers,
+                content=body,
                 request=request,
                 default_encoding=response.default_encoding,
             )

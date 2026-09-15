@@ -133,6 +133,7 @@ class MarkReadIn(BaseModel):
     entry_ids: list[int] | None = None
     feed_id: int | None = None
     category_id: int | None = None
+    smart_feed_id: int | None = None
     all: bool = False
     starred_only: bool = False
     before: datetime | None = None

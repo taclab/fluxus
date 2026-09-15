@@ -104,6 +104,15 @@ class _DefView:
         self.fields = d.fields.model_dump()
 
 
+async def _apply_or_503(session: AsyncSession, sf: SmartFeed) -> None:
+    """Recalcul atomique : en cas d'échec, rien n'est modifié et le client reçoit la cause."""
+    try:
+        await service.apply(session, sf)
+    except service.EvaluationFailed as exc:
+        await session.rollback()
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+
 def _apply_definition(sf: SmartFeed, normalized: dict) -> None:
     for key, value in normalized.items():
         setattr(sf, key, value)
@@ -181,7 +190,7 @@ async def create_smart_feed(body: SmartFeedIn, _: Auth, session: Session) -> Sma
     _apply_definition(sf, normalized)
     session.add(sf)
     await session.flush()
-    await service.apply(session, sf)
+    await _apply_or_503(session, sf)
     await session.commit()
     await session.refresh(sf)
     matches, unread, auto = await _stats(session, [sf.id])
@@ -217,7 +226,7 @@ async def update_smart_feed(smart_feed_id: int, body: SmartFeedIn, _: Auth, sess
     _apply_definition(sf, normalized)
     await session.flush()
     if definition_changed:
-        await service.apply(session, sf)
+        await _apply_or_503(session, sf)
     await session.commit()
     await session.refresh(sf)
     matches, unread, auto = await _stats(session, [sf.id])

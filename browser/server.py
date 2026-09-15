@@ -9,7 +9,7 @@ import os
 import socket
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from fastapi import FastAPI, HTTPException
 from playwright.async_api import Browser, async_playwright
@@ -26,6 +26,10 @@ BLOCKED_HOST_FRAGMENTS = (
 
 _browser: Browser | None = None
 _semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+
+# Sauts de redirection suivis à la main pour une même requête (chaque destination est revalidée).
+MAX_REDIRECT_HOPS = 5
+REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 # Noms des services Compose : jamais joignables depuis une page rendue.
 INTERNAL_HOSTS = {"localhost", "postgres", "api", "worker", "browser"}
@@ -107,18 +111,43 @@ async def render(req: RenderRequest) -> RenderResponse:
         try:
             page = await context.new_page()
 
+            final_url = {"value": str(req.url)}
+
             async def route_handler(route):
+                """Toute requête de la page passe ici. Chromium suit les redirections en interne sans
+                repasser par cette fonction : on les suit donc à la main avec `route.fetch`
+                (sans redirection automatique) et on revalide chaque destination avant de la joindre.
+                La page reçoit la réponse finale sous l'URL d'origine."""
                 request = route.request
                 if request.resource_type in BLOCKED_RESOURCE_TYPES or any(
                     frag in request.url for frag in BLOCKED_HOST_FRAGMENTS
                 ):
                     await route.abort()
                     return
-                # Redirections et sous-ressources : chaque requête sortante est revalidée (anti-SSRF).
-                if not await asyncio.to_thread(url_is_public, request.url):
-                    await route.abort("blockedbyclient")
+                url = request.url
+                method = request.method
+                post_data = request.post_data_buffer
+                for _ in range(MAX_REDIRECT_HOPS + 1):
+                    if not await asyncio.to_thread(url_is_public, url):
+                        await route.abort("blockedbyclient")
+                        return
+                    try:
+                        response = await route.fetch(url=url, method=method, post_data=post_data, max_redirects=0)
+                    except Exception:  # noqa: BLE001  réseau : la ressource échoue comme si elle était injoignable
+                        await route.abort("failed")
+                        return
+                    location = response.headers.get("location")
+                    if response.status in REDIRECT_STATUSES and location:
+                        url = urljoin(url, location)
+                        if response.status in (301, 302, 303) and method != "GET":
+                            method, post_data = "GET", None
+                        await response.dispose()
+                        continue
+                    if request.is_navigation_request() and request.frame == page.main_frame:
+                        final_url["value"] = url
+                    await route.fulfill(response=response)
                     return
-                await route.continue_()
+                await route.abort("failed")
 
             await page.route("**/*", route_handler)
             try:
@@ -131,7 +160,7 @@ async def render(req: RenderRequest) -> RenderResponse:
                 await page.wait_for_timeout(500)
                 html = await page.content()
                 title = await page.title()
-                return RenderResponse(html=html, final_url=page.url, title=title)
+                return RenderResponse(html=html, final_url=final_url["value"], title=title)
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(status_code=502, detail=f"Rendu impossible: {exc}") from exc
         finally:

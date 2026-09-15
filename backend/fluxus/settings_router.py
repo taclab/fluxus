@@ -5,13 +5,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import Auth
 from .db import get_session
 from .models import Entry, Feed, Job, Summary
-from .settings_store import DEFAULTS, SECRET_KEYS, get_all_settings, mask_secret, set_setting
+from .settings_store import (
+    DEFAULTS,
+    LAYOUT_VERSION_KEY,
+    SECRET_KEYS,
+    get_all_settings,
+    get_layout_version,
+    get_setting,
+    mask_secret,
+    set_setting,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 Session = Annotated[AsyncSession, Depends(get_session)]
@@ -37,10 +46,14 @@ def _validate_layout(value: str) -> None:
 class SettingsOut(BaseModel):
     values: dict[str, str]
     secrets_set: dict[str, bool]
+    # Version courante de `dashboard_layout` (0 = jamais écrite) ; à renvoyer dans `dashboard_layout_base_version`.
+    dashboard_layout_version: int = 0
 
 
 class SettingsPatch(BaseModel):
     values: dict[str, str]
+    # Version de la disposition sur laquelle le client s'appuie quand il envoie `dashboard_layout`.
+    dashboard_layout_base_version: int | None = None
 
 
 class StatsOut(BaseModel):
@@ -61,11 +74,34 @@ async def get_settings_view(_: Auth, session: Session) -> SettingsOut:
     secrets_set = {k: bool(values.get(k)) for k in SECRET_KEYS}
     for k in SECRET_KEYS:
         values[k] = mask_secret(values.get(k, ""))
-    return SettingsOut(values=values, secrets_set=secrets_set)
+    return SettingsOut(values=values, secrets_set=secrets_set, dashboard_layout_version=await get_layout_version(session))
+
+
+async def _check_layout_version(session: AsyncSession, base_version: int | None) -> int:
+    """Sérialise les écritures de la disposition et refuse celles fondées sur une version dépassée.
+
+    Renvoie la nouvelle version à enregistrer. Le verrou consultatif couvre le cas de deux appareils
+    qui envoient en même temps : le second lit la version déjà incrémentée et reçoit 409.
+    """
+    await session.execute(text("SELECT pg_advisory_xact_lock(727003)"))
+    current = await get_layout_version(session)
+    if (base_version or 0) != current:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {
+                "message": "La disposition a été modifiée depuis un autre appareil",
+                "dashboard_layout": await get_setting(session, "dashboard_layout") or "",
+                "dashboard_layout_version": current,
+            },
+        )
+    return current + 1
 
 
 @router.patch("", response_model=SettingsOut)
 async def patch_settings(body: SettingsPatch, _: Auth, session: Session) -> SettingsOut:
+    if "dashboard_layout" in body.values:
+        next_version = await _check_layout_version(session, body.dashboard_layout_base_version)
+        await set_setting(session, LAYOUT_VERSION_KEY, str(next_version))
     for key, value in body.values.items():
         if key not in EDITABLE_KEYS:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Paramètre inconnu: {key}")

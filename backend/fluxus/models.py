@@ -116,6 +116,11 @@ class Entry(Base):
 
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     starred: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Horloges par champ des états utilisateur (dernier changement, horodatage client borné) :
+    # la résolution des conflits de sync compare à ces dates, jamais à updated_at (qui avance
+    # aussi pour le contenu extrait, les résumés ou les correspondances).
+    read_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    starred_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Empreinte de déduplication (URL normalisée ou titre+date).
     hash: Mapped[str] = mapped_column(String(64))
     # Métadonnées libres : enclosures, image de couverture, id vidéo YouTube...
@@ -136,6 +141,27 @@ class Entry(Base):
     transcript: Mapped[Transcript | None] = relationship(
         back_populates="entry", cascade="all, delete-orphan", uselist=False, passive_deletes=True
     )
+
+
+class LlmUsage(Base):
+    """Journal de consommation LLM : une ligne réservée avant l'appel (estimation), soldée après
+    (tokens réels), y compris en échec. Le budget des résumés automatiques s'appuie dessus, pas sur
+    les résumés conservés (un résumé supprimé ou un appel échoué a quand même coûté)."""
+
+    __tablename__ = "llm_usage"
+    __table_args__ = (Index("ix_llm_usage_origin_created", "origin", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entry_id: Mapped[int | None] = mapped_column(ForeignKey("entries.id", ondelete="SET NULL"), nullable=True)
+    smart_feed_id: Mapped[int | None] = mapped_column(ForeignKey("smart_feeds.id", ondelete="SET NULL"), nullable=True)
+    # manual | auto
+    origin: Mapped[str] = mapped_column(String(20), default="manual")
+    # reserved | done | failed
+    status: Mapped[str] = mapped_column(String(20), default="reserved")
+    estimated_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class Summary(Base):

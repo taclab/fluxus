@@ -14,7 +14,7 @@ from ..auth import Auth
 from ..db import get_session
 from ..extract.clean import html_to_text
 from ..extract.jobs import run_extraction
-from ..models import Entry, Feed, Summary
+from ..models import Entry, Feed, SmartFeedMatch, Summary
 from ..schemas import EntryListItem, EntryOut, EntryPage, EntryPatch, FetchContentIn, MarkReadIn
 from ..smartfeeds.service import smart_feed_ids_for
 
@@ -152,11 +152,14 @@ async def patch_entry(entry_id: int, body: EntryPatch, _: Auth, session: Session
     entry = await session.get(Entry, entry_id)
     if entry is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Article introuvable")
+    now = datetime.now(UTC)
     if body.read is not None:
         entry.read = body.read
+        entry.read_changed_at = now  # horloge du champ : la sync compare les actions utilisateur à elle
     if body.starred is not None:
         entry.starred = body.starred
-    entry.updated_at = datetime.now(UTC)
+        entry.starred_changed_at = now
+    entry.updated_at = now
     await session.commit()
     await session.refresh(entry)
     has_summary = (await session.execute(select(_has_summary_expr()).where(Entry.id == entry_id))).scalar()
@@ -166,7 +169,8 @@ async def patch_entry(entry_id: int, body: EntryPatch, _: Auth, session: Session
 
 @router.post("/mark-read")
 async def mark_read(body: MarkReadIn, _: Auth, session: Session) -> dict:
-    stmt = update(Entry).values(read=body.read, updated_at=datetime.now(UTC))
+    now = datetime.now(UTC)
+    stmt = update(Entry).values(read=body.read, read_changed_at=now, updated_at=now)
     if body.entry_ids:
         stmt = stmt.where(Entry.id.in_(body.entry_ids))
     elif body.feed_id is not None:
@@ -174,10 +178,13 @@ async def mark_read(body: MarkReadIn, _: Auth, session: Session) -> dict:
     elif body.category_id is not None:
         feed_ids = select(Feed.id).where(Feed.category_id == body.category_id)
         stmt = stmt.where(Entry.feed_id.in_(feed_ids))
+    elif body.smart_feed_id is not None:
+        matched = select(SmartFeedMatch.entry_id).where(SmartFeedMatch.smart_feed_id == body.smart_feed_id)
+        stmt = stmt.where(Entry.id.in_(matched))
     elif body.starred_only:
         stmt = stmt.where(Entry.starred.is_(True))
     elif not body.all:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Préciser une cible (entry_ids, feed_id, category_id ou all)")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Préciser une cible (entry_ids, feed_id, category_id, smart_feed_id ou all)")
     if body.before is not None:
         stmt = stmt.where(Entry.published_at <= body.before)
     stmt = stmt.where(Entry.read.is_(not body.read))

@@ -14,6 +14,12 @@ PASSWORD = "motdepasse-test"
 results: dict = {}
 
 
+def patch_layout(page, layout_json):
+    """Écrit la disposition comme le ferait un autre appareil : avec la version serveur courante."""
+    version = api(page, "GET", "/api/settings").json()["dashboard_layout_version"]
+    return api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": layout_json}, "dashboard_layout_base_version": version}))
+
+
 def api(page, method, path, **kw):
     token = page.evaluate("localStorage.getItem('fluxus.token')")
     return page.request.fetch(BASE + path, method=method, headers={"Authorization": f"Bearer {token}", "content-type": "application/json"}, **kw)
@@ -37,7 +43,7 @@ with sync_playwright() as p:
     page.fill("input[type=password]", PASSWORD)
     page.click("button[type=submit]")
     page.wait_for_selector("[data-widget]", timeout=60000)
-    api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": ""}}))
+    patch_layout(page, "")
     page.evaluate("indexedDB.open('fluxus')")  # no-op ; le cache meta est vidé par reload + reconcile
     page.reload(wait_until="networkidle")
     page.wait_for_selector("[data-widget]", timeout=60000)
@@ -170,21 +176,22 @@ with sync_playwright() as p:
     remote = dict(server_layout)
     remote["widgets"] = list(reversed(server_layout["widgets"]))
     remote["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600))
-    api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": json.dumps(remote)}}))
+    # Un autre appareil connaît la version serveur courante et l'envoie (sinon 409, constat 16 de l'audit du 15/09).
+    results["remote_patch_status"] = patch_layout(page, json.dumps(remote)).status
     page.reload(wait_until="networkidle")
     page.wait_for_selector("[data-widget]", timeout=30000)
     page.wait_for_timeout(1200)
     results["conflict_server_wins"] = widget_ids(page) == [w["id"] for w in remote["widgets"]]
 
     # Lecture seule : version future
-    api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": json.dumps({**remote, "version": 99})}}))
+    patch_layout(page, json.dumps({**remote, "version": 99}))
     page.reload(wait_until="networkidle")
     page.wait_for_selector("[data-widget]", timeout=30000)
     page.wait_for_timeout(1000)
     results["readonly_banner"] = page.locator("text=version plus récente").count() > 0
     results["readonly_edit_disabled"] = page.locator("[data-testid=toggle-edit]").is_disabled()
     # retour à une version normale
-    api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": json.dumps(remote)}}))
+    patch_layout(page, json.dumps(remote))
 
     # Mobile + thème sombre + hors-ligne
     page.evaluate("localStorage.setItem('fluxus.theme','dark')")

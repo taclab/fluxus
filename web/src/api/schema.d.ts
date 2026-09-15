@@ -557,7 +557,14 @@ export interface paths {
         put?: never;
         /**
          * Push
-         * @description Dernière écriture gagne : un changement local plus ancien que la version serveur est ignoré.
+         * @description Dernière écriture gagne, **champ par champ** et à l'horloge des actions.
+         *
+         *     Chaque champ (`read`, `starred`) a sa propre horloge (`read_changed_at`, `starred_changed_at`),
+         *     fixée à la date de l'action côté client (bornée à now + 30 s). Un changement n'est refusé que si
+         *     ce champ a été modifié plus récemment : un résumé, une extraction ou un recalcul de
+         *     correspondances (qui avancent `updated_at`) n'invalident plus un favori posé hors ligne, et les
+         *     actions successives d'un même lot s'appliquent dans l'ordre. Les refus sont renvoyés avec l'état
+         *     serveur courant pour que le client réaligne son cache.
          */
         post: operations["push_api_sync_post"];
         delete?: never;
@@ -881,6 +888,8 @@ export interface components {
             feed_id?: number | null;
             /** Category Id */
             category_id?: number | null;
+            /** Smart Feed Id */
+            smart_feed_id?: number | null;
             /**
              * All
              * @default false
@@ -979,6 +988,11 @@ export interface components {
             secrets_set: {
                 [key: string]: boolean;
             };
+            /**
+             * Dashboard Layout Version
+             * @default 0
+             */
+            dashboard_layout_version: number;
         };
         /** SettingsPatch */
         SettingsPatch: {
@@ -986,6 +1000,8 @@ export interface components {
             values: {
                 [key: string]: string;
             };
+            /** Dashboard Layout Base Version */
+            dashboard_layout_base_version?: number | null;
         };
         /** SmartFeedDefinitionIn */
         SmartFeedDefinitionIn: {
@@ -1208,6 +1224,18 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * SyncConflict
+         * @description Changement refusé : l'état serveur courant, pour que le client réaligne son cache.
+         */
+        SyncConflict: {
+            /** Entry Id */
+            entry_id: number;
+            /** Read */
+            read: boolean;
+            /** Starred */
+            starred: boolean;
+        };
         /** SyncPull */
         SyncPull: {
             /**
@@ -1252,6 +1280,11 @@ export interface components {
             applied: number;
             /** Ignored */
             ignored: number;
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: components["schemas"]["SyncConflict"][];
             /**
              * Server Time
              * Format: date-time

@@ -30,6 +30,18 @@ DEFAULTS: dict[str, str] = {
     "dashboard_layout": "",
 }
 
+# Compteur d'écritures de la disposition (clé interne, non éditable directement) : un client doit
+# annoncer la version sur laquelle il se base, sinon il écraserait la disposition d'un autre appareil.
+LAYOUT_VERSION_KEY = "_dashboard_layout_version"
+
+
+async def get_layout_version(session: AsyncSession) -> int:
+    raw = await get_setting(session, LAYOUT_VERSION_KEY, default="0")
+    try:
+        return int(raw or 0)
+    except ValueError:
+        return 0
+
 
 def _fernet() -> Fernet:
     digest = hashlib.sha256(get_settings().secret_key.encode()).digest()

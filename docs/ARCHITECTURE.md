@@ -225,9 +225,12 @@ Côté OpenAI : `chat.completions.create(stream=True, stream_options.include_usa
 Client                                   Serveur
 ──────                                   ───────
 pushOutbox : POST /api/sync {changes:[{entry_id, read?, starred?, at}]}
-                                         dernière écriture gagne : un changement plus ancien que
-                                         entries.updated_at et contradictoire est ignoré ;
-                                         horodatage client borné à now + 30 s, updated_at = now
+                                         dernière écriture gagne **par champ** : `read` et `starred`
+                                         ont chacun leur horloge (read_changed_at, starred_changed_at
+                                         = date de l'action, bornée à now) ; un changement n'est
+                                         refusé que si ce champ a changé plus récemment ; les refus
+                                         reviennent dans `conflicts` avec l'état serveur, le client
+                                         réaligne son cache (sauf action locale encore en attente)
 GET /api/sync?since=<dernière passe>     page 1 : entries.updated_at > since − 2 s
 GET /api/sync?cursor=<opaque>            pages suivantes : (updated_at, id) > curseur
    …jusqu'à has_more = false             première sync (sans since) : published_at > now − N j
@@ -235,12 +238,26 @@ GET /api/sync?cursor=<opaque>            pages suivantes : (updated_at, id) > cu
                                          OU starred = true (les favoris sont toujours envoyés)
 mergeFeeds (page 1) : remplace catégories et flux, supprime les entrées orphelines
 mergeEntries : bulkPut ; un état local encore dans l'outbox n'est pas écrasé
-sync.since := server_time de la page 1   (seulement si la passe est complète)
+sync.since := server_time de la page 1   (seulement si la passe est complète) ; server_time =
+                                         min(now, début de la plus ancienne transaction ouverte)
 applyRetention : supprime localement les articles lus, non favoris, > 30 j
 ```
 
 Le curseur composite `(updated_at, id)` est indispensable : un import OPML crée des centaines
 d'entrées dans la même seconde, et une pagination par simple timestamp avec marge tournait en rond.
+
+**Visibilité des commits.** Une transaction longue (extraction, évaluation de flux intelligent) fixe
+`updated_at` à l'horloge Python puis valide plus tard ; un client qui aurait pris `since = now` entre
+les deux ne la verrait jamais. Le serveur renvoie donc comme `server_time` le début de la plus
+ancienne transaction encore ouverte sur la base (`pg_stat_activity.xact_start`), s'il est antérieur
+à `now`. Le client relit au pire quelques minutes de changements déjà vus (les écritures sont
+idempotentes), jamais moins. La marge de 2 s absorbe l'écart entre l'horloge Python et `xact_start`.
+
+**Horloges par champ.** `updated_at` reste le pivot de réplication (contenu, résumés,
+correspondances), mais la résolution des conflits d'états utilisateur ne s'y compare plus : toute
+écriture serveur de `read` ou `starred` (PATCH, mark-read, push) pose `read_changed_at` /
+`starred_changed_at`. Un favori posé hors ligne avant une extraction n'est donc plus refusé, et les
+actions successives d'un même lot s'appliquent dans l'ordre de leurs dates.
 
 `syncNow()` appelé pendant une passe en cours ne se contente pas de l'attendre : il **met une seconde
 passe en file** (une seule, quel que soit le nombre d'appels). La passe en cours a pu lire le serveur
@@ -301,11 +318,11 @@ mention) :
 | catégories | `GET/POST categories`, `PUT/DELETE categories/{id}` |
 | ordre | `POST subscriptions/reorder` : positions des dossiers, des flux (avec `category_id`) et des flux intelligents en une transaction ; un flux qui change de dossier est ré-évalué par les flux intelligents à portée catégorie |
 | flux | `GET/POST feeds` (triés par dossier puis `position`), `POST feeds/discover`, `GET/PUT/DELETE feeds/{id}`, `POST feeds/{id}/refresh`, `POST feeds/refresh-all`, `POST opml/import`, `GET opml/export` |
-| articles | `GET entries` (filtres `feed`, `category`, `status`, `starred`, `q`, `cursor`, `limit`, `order`), `GET/PATCH entries/{id}`, `POST entries/mark-read`, `POST entries/{id}/fetch-content`, `GET entries/{id}/summaries` |
+| articles | `GET entries` (filtres `feed`, `category`, `status`, `starred`, `q`, `cursor`, `limit`, `order`), `GET/PATCH entries/{id}`, `POST entries/mark-read` (par ids, flux, catégorie, flux intelligent, favoris ou tout, borne `before`), `POST entries/{id}/fetch-content`, `GET entries/{id}/summaries` |
 | résumés | `POST entries/{id}/summarize` (SSE), `GET/DELETE entries/{id}/summary` |
-| sync | `GET sync` (renvoie aussi `smart_feeds`), `POST sync` |
+| sync | `GET sync` (renvoie aussi `smart_feeds` ; `server_time` = horizon de visibilité des commits), `POST sync` (par champ, renvoie `conflicts`) |
 | flux intelligents | `GET/POST smart-feeds`, `GET/PUT/DELETE smart-feeds/{id}` (PUT ré-applique seulement si la définition change), `POST smart-feeds/preview`, `POST smart-feeds/{id}/summarize-all` |
-| réglages | `GET/PATCH settings`, `GET settings/stats` |
+| réglages | `GET/PATCH settings` (disposition du tableau de bord versionnée : `dashboard_layout_version`, `PATCH` exige `dashboard_layout_base_version`, 409 avec la disposition courante si périmée), `GET settings/stats` |
 | système | `GET health`* |
 
 \* sans authentification (`POST devices` exige le mot de passe dans le corps).
@@ -317,6 +334,11 @@ suivent le format FastAPI `{"detail": …}` ; `300 Multiple Choices` sur `POST f
 ## 7. Front : offline-first
 
 ### Principe
+
+La base Dexie est nommée d'après le serveur (`db.databaseName()` : `fluxus` pour la même origine
+web, `fluxus@<hôte>` sinon) : cache, outbox et curseur de sync d'une instance ne sont jamais rejoués
+sur une autre. Changer d'adresse sur l'écran de connexion recharge l'application pour ouvrir la base
+correspondante ; la déconnexion explicite efface la base courante.
 
 ```
                  ┌──────────────┐  useLiveQuery  ┌──────────────┐
@@ -448,7 +470,7 @@ plateforme par `window.Capacitor.isNativePlatform()`. Le bouton retour matériel
 
 | Risque | Mesure | Où |
 |---|---|---|
-| SSRF via une URL de flux ou d'article | Résolution DNS puis refus des IP privées, loopback, link-local ; seuls http/https ; **revalidé à chaque redirection** ; le service navigateur refuse la page et chaque sous-ressource vers un hôte privé ou interne, et vit sur un réseau Compose sans Postgres | `fetcher/http.safe_get`, `browser/server.py`, `docker-compose.yml` |
+| SSRF via une URL de flux ou d'article | Résolution DNS puis refus des IP privées, loopback, link-local ; seuls http/https ; **revalidé à chaque redirection** ; le service navigateur intercepte chaque requête de la page (`page.route`), **suit lui-même les redirections** avec `route.fetch(max_redirects=0)` en revalidant chaque destination (Chromium suivrait sinon un 302 sans repasser par le filtre), refuse chaque sous-ressource vers un hôte privé ou interne, et vit sur un réseau Compose sans Postgres ; vérifié par `scripts/check-browser-redirect.py` | `fetcher/http.safe_get`, `browser/server.py`, `docker-compose.yml` |
 | Traversée de chemin sur le repli SPA | Chemin résolu et vérifié sous le dossier statique | `main.py` |
 | Serveur au goutte-à-goutte, corps géant | Délai global 60 s, lecture en flux bornée (10 Mo / 5 Mo), upload OPML ≤ 5 Mo | `fetcher/http.safe_get`, `feeds/router.py` |
 | Secret d'exemple en production | Refus de démarrer (`validate_runtime_config`) | `config.py`, `main.py`, `worker.py` |

@@ -1,6 +1,18 @@
 import Dexie, { type EntityTable } from 'dexie'
 
+import { getServerUrl } from '../api/auth'
 import type { Category, EntryOut, Feed, SmartFeed, SummaryOut } from '../api/client'
+
+/**
+ * Nom de la base locale, propre à l'instance serveur : cache, outbox et curseur de sync d'un
+ * serveur ne doivent jamais être rejoués sur un autre (changement d'adresse dans l'appli mobile,
+ * reconnexion après expiration). Sur le web, même origine → nom historique `fluxus`.
+ */
+export function databaseName(serverUrl: string = getServerUrl()): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  if (!serverUrl || serverUrl === origin) return 'fluxus'
+  return `fluxus@${serverUrl.replace(/^https?:\/\//, '').replace(/[^a-z0-9.:-]+/gi, '_')}`
+}
 
 /** Entrée locale : identique à EntryOut avec un index dérivé pour les filtres. */
 export interface LocalEntry extends EntryOut {
@@ -36,7 +48,7 @@ export class FluxusDB extends Dexie {
   meta!: EntityTable<MetaRow, 'key'>
 
   constructor() {
-    super('fluxus')
+    super(databaseName())
     this.version(1).stores({
       entries: 'id, feed_id, publishedTs, readFlag, starredFlag, [feed_id+publishedTs], [readFlag+publishedTs], [starredFlag+publishedTs], [feed_id+readFlag+publishedTs]',
       feeds: 'id, category_id',

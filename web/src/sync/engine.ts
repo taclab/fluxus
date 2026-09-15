@@ -99,8 +99,18 @@ export function pushOutbox(): Promise<void> {
           const batch = await db.outbox.orderBy('id').limit(200).toArray()
           if (batch.length === 0) break
           const changes = batch.map((b) => ({ entry_id: b.entry_id, read: b.read ?? null, starred: b.starred ?? null, at: b.at }))
-          unwrap(await api().POST('/api/sync', { body: { changes } }))
-          await db.outbox.bulkDelete(batch.map((b) => b.id!))
+          const result = unwrap(await api().POST('/api/sync', { body: { changes } }))
+          await db.transaction('rw', db.entries, db.outbox, async () => {
+            await db.outbox.bulkDelete(batch.map((b) => b.id!))
+            // Changements refusés (un autre appareil a modifié le même champ plus récemment) : le
+            // serveur renvoie son état, on réaligne le cache sauf si une action locale plus récente
+            // attend encore dans l'outbox pour cette entrée.
+            for (const c of result.conflicts ?? []) {
+              const pending = await db.outbox.where('entry_id').equals(c.entry_id).count()
+              if (pending > 0) continue
+              await db.entries.update(c.entry_id, { read: c.read, readFlag: c.read ? 1 : 0, starred: c.starred, starredFlag: c.starred ? 1 : 0 })
+            }
+          })
         }
       } while (pushRequested)
     } catch (err) {

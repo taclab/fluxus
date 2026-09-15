@@ -172,14 +172,16 @@ async def test_settings_secrets_masked(client: AsyncClient):
 
 async def test_dashboard_layout_setting(client: AsyncClient):
     layout = '{"version": 1, "updatedAt": "2026-09-14T15:00:00Z", "widgets": [{"id": "a", "type": "stats", "width": 6}]}'
-    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": layout}})
+    base = (await client.get("/api/settings")).json()["dashboard_layout_version"]
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": layout}, "dashboard_layout_base_version": base})
     assert r.status_code == 200
     assert r.json()["values"]["dashboard_layout"] == layout
-    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": "pas du json"}})
+    base = r.json()["dashboard_layout_version"]
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": "pas du json"}, "dashboard_layout_base_version": base})
     assert r.status_code == 400
-    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": '{"widgets": 3}'}})
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": '{"widgets": 3}'}, "dashboard_layout_base_version": base})
     assert r.status_code == 400
-    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": ""}})
+    r = await client.patch("/api/settings", json={"values": {"dashboard_layout": ""}, "dashboard_layout_base_version": base})
     assert r.status_code == 200 and r.json()["values"]["dashboard_layout"] == ""
 
 

@@ -8,8 +8,9 @@ import type { View } from '../../app/view'
 import { Button, EmptyState, IconButton, Spinner, useToast } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
 import { hostname, relativeDate } from '../../lib/format'
-import { recordBulkRead, syncNow } from '../../sync/engine'
+import { syncNow } from '../../sync/engine'
 import { FeedIcon } from '../feeds/Sidebar'
+import { CONFIRM_THRESHOLD, markViewRead } from './markRead'
 
 export type Density = 'compact' | 'cards'
 
@@ -55,7 +56,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem('fluxus.density') as Density) || 'compact')
   const [searchOpen, setSearchOpen] = useState(view.kind === 'search')
   const [searchText, setSearchText] = useState(view.query ?? '')
-  const [remote, setRemote] = useState<{ items: EntryListItem[]; loading: boolean; error?: string } | null>(null)
+  const [remote, setRemote] = useState<{ items: EntryListItem[]; nextCursor: string | null; loading: boolean; loadingMore: boolean; error?: string } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
@@ -77,7 +78,8 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     }
   }, [view.kind, view.query])
 
-  // Recherche : côté serveur quand on est en ligne, sinon filtre local sur le titre.
+  // Recherche : côté serveur quand on est en ligne (paginée par curseur), sinon filtre local sur le titre.
+  const SEARCH_PAGE = 100
   useEffect(() => {
     if (view.kind !== 'search' || !view.query) {
       setRemote(null)
@@ -88,19 +90,46 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
       return
     }
     let cancelled = false
-    setRemote({ items: [], loading: true })
+    setRemote({ items: [], nextCursor: null, loading: true, loadingMore: false })
     api()
-      .GET('/api/entries', { params: { query: { q: view.query, limit: 100, status: unreadOnly ? 'unread' : 'all' } } })
+      .GET('/api/entries', { params: { query: { q: view.query, limit: SEARCH_PAGE, status: unreadOnly ? 'unread' : 'all' } } })
       .then((r) => {
         if (cancelled) return
         const page = unwrap(r)
-        setRemote({ items: page.items, loading: false })
+        setRemote({ items: page.items, nextCursor: page.next_cursor ?? null, loading: false, loadingMore: false })
       })
-      .catch((err) => !cancelled && setRemote({ items: [], loading: false, error: err instanceof Error ? err.message : 'Erreur' }))
+      .catch((err) => !cancelled && setRemote({ items: [], nextCursor: null, loading: false, loadingMore: false, error: err instanceof Error ? err.message : 'Erreur' }))
     return () => {
       cancelled = true
     }
   }, [view.kind, view.query, unreadOnly])
+
+  /** Page suivante des résultats distants (bouton ou défilement). */
+  const loadMoreRemote = useCallback(() => {
+    if (!remote || !remote.nextCursor || remote.loading || remote.loadingMore || view.kind !== 'search' || !view.query) return
+    const cursor = remote.nextCursor
+    setRemote((cur) => (cur ? { ...cur, loadingMore: true } : cur))
+    api()
+      .GET('/api/entries', { params: { query: { q: view.query, limit: SEARCH_PAGE, status: unreadOnly ? 'unread' : 'all', cursor } } })
+      .then((r) => {
+        const page = unwrap(r)
+        setRemote((cur) => {
+          if (!cur || cur.nextCursor !== cursor) return cur // la recherche a changé entre-temps
+          const seen = new Set(cur.items.map((e) => e.id))
+          return { ...cur, items: [...cur.items, ...page.items.filter((e) => !seen.has(e.id))], nextCursor: page.next_cursor ?? null, loadingMore: false }
+        })
+      })
+      .catch((err) => setRemote((cur) => (cur ? { ...cur, loadingMore: false, error: err instanceof Error ? err.message : 'Erreur' } : cur)))
+  }, [remote, view.kind, view.query, unreadOnly])
+
+  // Les résultats distants sont un instantané : l'état lu/favori vient de la base locale quand elle a l'article.
+  const remoteIdsKey = remote?.items.map((e) => e.id).join(',') ?? ''
+  const localForRemote = useLiveQuery(async () => {
+    if (!remoteIdsKey) return new Map<number, LocalEntry>()
+    const ids = remoteIdsKey.split(',').map(Number)
+    const rows = await db.entries.bulkGet(ids)
+    return new Map(rows.filter((r): r is LocalEntry => Boolean(r)).map((r) => [r.id, r]))
+  }, [remoteIdsKey])
 
   const entries = useLiveQuery(async (): Promise<LocalEntry[]> => {
     const wantUnread = unreadOnly || view.kind === 'unread'
@@ -141,7 +170,15 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     return coll.reverse().limit(limit).toArray()
   }, [view.kind, view.id, view.query, unreadOnly, limit, feeds])
 
-  const items: Array<LocalEntry | EntryListItem> = remote && !remote.loading && !remote.error ? remote.items : entries ?? []
+  const items: Array<LocalEntry | EntryListItem> = useMemo(() => {
+    if (remote && !remote.loading && !remote.error) {
+      return remote.items.map((e) => {
+        const local = localForRemote?.get(e.id)
+        return local ? { ...e, read: local.read, starred: local.starred, has_summary: local.has_summary || e.has_summary } : e
+      })
+    }
+    return entries ?? []
+  }, [remote, localForRemote, entries])
 
   useEffect(() => {
     onVisibleEntries(items.map((e) => e.id))
@@ -157,10 +194,10 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   const onScroll = useCallback(() => {
     const el = listRef.current
     if (!el) return
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600 && (entries?.length ?? 0) >= limit) {
-      setLimit((l) => l + PAGE)
-    }
-  }, [entries?.length, limit])
+    if (el.scrollTop + el.clientHeight < el.scrollHeight - 600) return
+    if (remote) loadMoreRemote()
+    else if ((entries?.length ?? 0) >= limit) setLimit((l) => l + PAGE)
+  }, [entries?.length, limit, remote, loadMoreRemote])
 
   /** Résultat de recherche absent de la base locale : on le récupère avant d'ouvrir le lecteur. */
   async function select(id: number) {
@@ -175,10 +212,24 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     onSelect(id)
   }
 
+  /** Tout le périmètre de la vue (index Dexie + requête serveur ciblée) ; la recherche ne traite que l'affiché. */
   async function markAllRead() {
-    const ids = items.filter((e) => !e.read).map((e) => e.id)
-    if (ids.length === 0) return
-    await recordBulkRead(ids, true)
+    const displayed = items.filter((e) => !e.read).map((e) => e.id)
+    if (view.kind === 'search' && displayed.length === 0) return
+    if (view.kind !== 'search') {
+      // Le compteur de la barre latérale vaut pour tout le périmètre : on confirme au-delà d'un seuil.
+      const scopeCount = unreadCount
+      if (scopeCount > CONFIRM_THRESHOLD && !window.confirm(`Marquer ${scopeCount} articles comme lus ?`)) return
+    }
+    setBatchBusy(true)
+    try {
+      const res = await markViewRead(view, feeds, displayed)
+      if (res.count > CONFIRM_THRESHOLD || res.mode === 'outbox') toast(res.mode === 'outbox' ? `${res.count} articles marqués, envoi à la prochaine synchronisation` : `${res.count} articles marqués comme lus`, 'success')
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Erreur', 'error')
+    } finally {
+      setBatchBusy(false)
+    }
   }
 
   function toggleDensity() {
@@ -188,7 +239,28 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   }
 
   const heading = titleFor(view, feedMap, category?.title, smartFeed?.name)
-  const unreadCount = items.filter((e) => !e.read).length
+  // Non lus de tout le périmètre de la vue (pas seulement la page chargée) ; recherche : l'affiché.
+  const scopeUnread = useLiveQuery(async () => {
+    switch (view.kind) {
+      case 'feed':
+        return db.entries.where('[feed_id+readFlag+publishedTs]').between([view.id, 0, -Infinity], [view.id, 0, Infinity]).count()
+      case 'category': {
+        const ids = feeds.filter((f) => f.category_id === view.id).map((f) => f.id)
+        const counts = await Promise.all(ids.map((id) => db.entries.where('[feed_id+readFlag+publishedTs]').between([id, 0, -Infinity], [id, 0, Infinity]).count()))
+        return counts.reduce((a, b) => a + b, 0)
+      }
+      case 'smart':
+        return db.entries.where('smart_feed_ids').equals(view.id!).and((e) => e.readFlag === 0).count()
+      case 'starred':
+        return db.entries.where('[starredFlag+publishedTs]').between([1, -Infinity], [1, Infinity]).and((e) => e.readFlag === 0).count()
+      case 'all':
+      case 'unread':
+        return db.entries.where('readFlag').equals(0).count()
+      default:
+        return null
+    }
+  }, [view.kind, view.id, feeds])
+  const unreadCount = view.kind === 'search' || scopeUnread == null ? items.filter((e) => !e.read).length : scopeUnread
   const unsummarized = view.kind === 'smart' ? items.filter((e) => !e.has_summary).length : 0
 
   async function summarizeAll() {
@@ -288,7 +360,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         <IconButton label={density === 'compact' ? 'Vue cartes' : 'Vue compacte'} onClick={toggleDensity} size="sm" className="hidden sm:inline-flex">
           {density === 'compact' ? <Rows3 className="size-4" /> : <LayoutList className="size-4" />}
         </IconButton>
-        <IconButton label="Tout marquer comme lu" onClick={() => void markAllRead()} size="sm" disabled={unreadCount === 0}>
+        <IconButton label={view.kind === 'search' ? 'Marquer les résultats affichés comme lus' : 'Tout marquer comme lu'} onClick={() => void markAllRead()} size="sm" disabled={unreadCount === 0 || batchBusy} data-testid="mark-all-read">
           <CheckCheck className="size-4" />
         </IconButton>
       </header>
@@ -317,6 +389,13 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
           <div className="flex justify-center p-4">
             <Button size="sm" variant="ghost" onClick={() => setLimit((l) => l + PAGE)}>
               Charger plus
+            </Button>
+          </div>
+        )}
+        {remote && !remote.loading && remote.nextCursor && (
+          <div className="flex justify-center p-4">
+            <Button size="sm" variant="ghost" onClick={loadMoreRemote} disabled={remote.loadingMore}>
+              {remote.loadingMore ? 'Chargement…' : 'Charger plus'}
             </Button>
           </div>
         )}
