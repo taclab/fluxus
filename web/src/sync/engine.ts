@@ -162,8 +162,19 @@ async function applyRetention() {
   }
 }
 
+/** Passe supplémentaire demandée pendant une passe en cours (une seule, quel que soit le nombre d'appels). */
+let queued: Promise<void> | null = null
+
 export async function syncNow(): Promise<void> {
-  if (inFlight) return inFlight
+  if (inFlight) {
+    // Une passe en cours a pu lire le serveur avant le changement qui motive cet appel :
+    // on en relance une à sa suite au lieu de se contenter de l'attendre.
+    queued ??= inFlight.then(() => {
+      queued = null
+      return syncNow()
+    })
+    return queued
+  }
   inFlight = (async () => {
     if (!getToken()) return
     if (!isOnline()) {

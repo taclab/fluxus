@@ -55,6 +55,8 @@ class Feed(Base):
     title: Mapped[str] = mapped_column(String(500), default="")
     description: Mapped[str | None] = mapped_column(Text)
     icon_url: Mapped[str | None] = mapped_column(String(2048))
+    # Ordre manuel dans son dossier (un nouveau flux prend min(position) - 1 : il arrive en tête)
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     etag: Mapped[str | None] = mapped_column(String(500))
     last_modified: Mapped[str | None] = mapped_column(String(200))

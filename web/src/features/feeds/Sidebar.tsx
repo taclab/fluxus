@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronDown, ChevronRight, Folder, Inbox, LayoutDashboard, Play, Plus, RefreshCw, Rss, Settings, Sparkles, Star, Unlink } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { Inbox, LayoutDashboard, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { Category, Feed, SmartFeed } from '../../api/client'
@@ -12,6 +12,8 @@ import { syncNow } from '../../sync/engine'
 import { useSyncState } from '../../sync/useSync'
 import { viewPath, type View } from '../../app/view'
 import { AddFeedDialog } from './AddFeedDialog'
+import { Count, FeedIcon } from './FeedIcon'
+import { SubscriptionTree } from './SubscriptionTree'
 import { useUnreadCountsFull } from './useUnreadCounts'
 
 interface Props {
@@ -22,10 +24,10 @@ interface Props {
   onEditSmartFeed: (smartFeed: SmartFeed | null) => void
 }
 
-const UNCATEGORIZED = -1
 const EMPTY_FEEDS: Feed[] = []
 const EMPTY_CATEGORIES: Category[] = []
 const EMPTY_SMART: SmartFeed[] = []
+const COLLAPSED_KEY = 'fluxus.collapsed'
 
 export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmartFeed }: Props) {
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
@@ -37,7 +39,7 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
   const [addOpen, setAddOpen] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<number>>(() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem('fluxus.collapsed') ?? '[]') as number[])
+      return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]') as number[])
     } catch {
       return new Set()
     }
@@ -45,26 +47,18 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
 
   const totalUnread = useMemo(() => [...unreadByFeed.values()].reduce((a, b) => a + b, 0), [unreadByFeed])
 
-  const groups = useMemo(() => {
-    const byCat = new Map<number, Feed[]>()
-    for (const f of feeds) {
-      const key = f.category_id ?? UNCATEGORIZED
-      if (!byCat.has(key)) byCat.set(key, [])
-      byCat.get(key)!.push(f)
-    }
-    for (const list of byCat.values()) list.sort((a, b) => a.title.localeCompare(b.title, 'fr'))
-    return byCat
-  }, [feeds])
+  const updateCollapsed = useCallback((fn: (next: Set<number>) => void) => {
+    setCollapsed((cur) => {
+      const next = new Set(cur)
+      fn(next)
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
+      return next
+    })
+  }, [])
+  const toggle = useCallback((id: number) => updateCollapsed((next) => (next.has(id) ? next.delete(id) : next.add(id))), [updateCollapsed])
+  const expand = useCallback((id: number) => updateCollapsed((next) => next.delete(id)), [updateCollapsed])
 
-  function toggle(id: number) {
-    const next = new Set(collapsed)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    setCollapsed(next)
-    localStorage.setItem('fluxus.collapsed', JSON.stringify([...next]))
-  }
-
-  const isActive = (v: View) => view.kind === v.kind && (v.id === undefined || view.id === v.id)
+  const isActive = useCallback((v: View) => view.kind === v.kind && (v.id === undefined || view.id === v.id), [view])
 
   return (
     <nav className="flex h-full flex-col bg-panel">
@@ -85,86 +79,22 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
         <NavItem icon={<Rss className="size-4" />} label="Non lus" count={totalUnread} active={isActive({ kind: 'unread' })} onClick={() => onSelect({ kind: 'unread' })} />
         <NavItem icon={<Star className="size-4" />} label="Favoris" count={starredCount} muted active={isActive({ kind: 'starred' })} onClick={() => onSelect({ kind: 'starred' })} />
 
-        <div className="mt-3 px-4 pb-1 flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Flux intelligents</span>
-          <button type="button" onClick={() => onEditSmartFeed(null)} className="text-[11px] text-muted hover:text-app" title="Nouveau flux intelligent" data-testid="new-smartfeed">
-            + nouveau
-          </button>
-        </div>
-        {smartFeeds.length === 0 && <p className="px-4 pb-2 text-xs text-muted">Une recherche enregistrée à travers vos flux, par sujet.</p>}
-        {smartFeeds.map((sf) => {
-          const orphan = (sf.scope_kind === 'category' && !categories.some((c) => c.id === sf.scope_id)) || (sf.scope_kind === 'feed' && !feeds.some((f) => f.id === sf.scope_id))
-          const count = bySmartFeed.get(sf.id) ?? 0
-          const active = isActive({ kind: 'smart', id: sf.id })
-          return (
-            <button
-              key={sf.id}
-              type="button"
-              data-smartfeed-id={sf.id}
-              onClick={() => onSelect({ kind: 'smart', id: sf.id })}
-              onDoubleClick={() => onEditSmartFeed(sf)}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                onEditSmartFeed(sf)
-              }}
-              title={orphan ? 'La catégorie ou le flux ciblé a disparu' : sf.name}
-              className={clsx('flex w-full items-center gap-2.5 px-4 py-1.5 text-sm text-left min-w-0', active ? 'bg-accent-50 dark:bg-accent-900/20 text-accent-700 dark:text-accent-200 font-medium' : 'text-app hover:bg-muted')}
-            >
-              <Sparkles className={clsx('size-4 shrink-0', active ? 'text-accent-600 dark:text-accent-300' : 'text-accent-500/80')} />
-              <span className={clsx('flex-1 truncate', count === 0 && !active && 'text-muted')}>{sf.name}</span>
-              {orphan && <Unlink className="size-3.5 shrink-0 text-amber-500" />}
-              {sf.auto_summary && <span className="size-1.5 shrink-0 rounded-full bg-accent-400" title="Résumé automatique" />}
-              {count > 0 && <Count n={count} />}
-            </button>
-          )
-        })}
-
-        <div className="mt-3 px-4 pb-1 flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Abonnements</span>
-          <button type="button" onClick={() => onEditCategory(null)} className="text-[11px] text-muted hover:text-app" title="Nouvelle catégorie">
-            + catégorie
-          </button>
-        </div>
-
-        {categories.map((cat) => {
-          const list = groups.get(cat.id) ?? []
-          const count = list.reduce((a, f) => a + (unreadByFeed.get(f.id) ?? 0), 0)
-          const open = !collapsed.has(cat.id)
-          return (
-            <div key={cat.id}>
-              <div className={clsx('group flex items-center pr-2', isActive({ kind: 'category', id: cat.id }) && 'bg-accent-50 dark:bg-accent-900/20')}>
-                <button type="button" onClick={() => toggle(cat.id)} className="pl-3 pr-1 py-2 text-muted hover:text-app" aria-label={open ? 'Replier' : 'Déplier'}>
-                  {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSelect({ kind: 'category', id: cat.id })}
-                  onDoubleClick={() => onEditCategory(cat)}
-                  className="flex flex-1 items-center gap-2 py-2 text-sm text-left min-w-0"
-                >
-                  <Folder className="size-4 text-muted shrink-0" />
-                  <span className="truncate font-medium">{cat.title}</span>
-                  {count > 0 && <Count n={count} />}
-                </button>
-              </div>
-              {open && list.map((f) => <FeedItem key={f.id} feed={f} count={unreadByFeed.get(f.id) ?? 0} active={isActive({ kind: 'feed', id: f.id })} onClick={() => onSelect({ kind: 'feed', id: f.id })} onEdit={() => onEditFeed(f)} indent />)}
-            </div>
-          )
-        })}
-
-        {(groups.get(UNCATEGORIZED) ?? []).map((f) => (
-          <FeedItem key={f.id} feed={f} count={unreadByFeed.get(f.id) ?? 0} active={isActive({ kind: 'feed', id: f.id })} onClick={() => onSelect({ kind: 'feed', id: f.id })} onEdit={() => onEditFeed(f)} />
-        ))}
-
-        {feeds.length === 0 && (
-          <p className="px-4 py-6 text-sm text-muted">
-            Aucun abonnement pour l’instant.{' '}
-            <button type="button" className="text-accent-600 dark:text-accent-300 underline" onClick={() => setAddOpen(true)}>
-              Ajouter un flux
-            </button>{' '}
-            ou importer un fichier OPML depuis les paramètres.
-          </p>
-        )}
+        <SubscriptionTree
+          feeds={feeds}
+          categories={categories}
+          smartFeeds={smartFeeds}
+          unreadByFeed={unreadByFeed}
+          unreadBySmartFeed={bySmartFeed}
+          collapsed={collapsed}
+          onToggleCategory={toggle}
+          onExpandCategory={expand}
+          isActive={isActive}
+          onSelect={onSelect}
+          onEditFeed={onEditFeed}
+          onEditCategory={onEditCategory}
+          onEditSmartFeed={onEditSmartFeed}
+          onAddFeed={() => setAddOpen(true)}
+        />
       </div>
 
       <div className="border-t border-app px-2 py-2 flex items-center gap-1 shrink-0">
@@ -195,43 +125,6 @@ function NavItem({ icon, label, count, active, onClick, muted }: { icon: ReactNo
   )
 }
 
-function FeedItem({ feed, count, active, onClick, onEdit, indent }: { feed: Feed; count: number; active: boolean; onClick: () => void; onEdit: () => void; indent?: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onDoubleClick={onEdit}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        onEdit()
-      }}
-      title={feed.last_error ? `Erreur : ${feed.last_error}` : feed.title}
-      className={clsx(
-        'group flex w-full items-center gap-2.5 py-1.5 pr-3 text-sm text-left min-w-0',
-        indent ? 'pl-9' : 'pl-4',
-        active ? 'bg-accent-50 dark:bg-accent-900/20 text-accent-700 dark:text-accent-200 font-medium' : 'text-app hover:bg-muted',
-        feed.disabled && 'opacity-50',
-      )}
-    >
-      <FeedIcon feed={feed} />
-      <span className={clsx('flex-1 truncate', count === 0 && !active && 'text-muted')}>{feed.title || feed.url}</span>
-      {feed.error_count > 2 && <span className="size-1.5 rounded-full bg-red-500 shrink-0" title={feed.last_error ?? 'Erreur'} />}
-      {count > 0 && <Count n={count} />}
-    </button>
-  )
-}
-
-export function FeedIcon({ feed, className }: { feed: Feed; className?: string }) {
-  const [failed, setFailed] = useState(false)
-  if (feed.is_youtube) return <Play className={clsx('size-4 text-red-500 shrink-0 fill-current', className)} />
-  if (!feed.icon_url || failed) return <Rss className={clsx('size-4 text-muted shrink-0', className)} />
-  return <img src={feed.icon_url} alt="" onError={() => setFailed(true)} className={clsx('size-4 rounded-sm shrink-0 object-contain', className)} loading="lazy" referrerPolicy="no-referrer" />
-}
-
-function Count({ n, muted }: { n: number; muted?: boolean }) {
-  return <span className={clsx('text-xs tabular-nums shrink-0', muted ? 'text-muted' : 'text-muted font-medium')}>{n > 999 ? '999+' : n}</span>
-}
-
 function SyncBadge() {
   const s = useSyncState()
   const label = s.status === 'syncing' ? 'Synchronisation…' : s.status === 'offline' ? 'Hors ligne' : s.status === 'error' ? 'Erreur de sync' : s.lastSyncAt ? 'À jour' : ''
@@ -244,4 +137,4 @@ function SyncBadge() {
   )
 }
 
-export { viewPath }
+export { FeedIcon, viewPath }

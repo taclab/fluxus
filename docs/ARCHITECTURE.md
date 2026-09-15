@@ -122,7 +122,7 @@ jobs            settings (clé/valeur)          device_tokens
 | Table | Rôle | Colonnes notables |
 |---|---|---|
 | `categories` | dossiers de la barre latérale | `title` unique, `position` |
-| `feeds` | abonnements | `url` unique · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` |
+| `feeds` | abonnements | `url` unique · `position` (ordre manuel dans son dossier ; un nouveau flux prend `min(position) − 1`) · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` |
 | `entries` | articles | `guid` unique par flux · `hash` (dédup par URL normalisée ou titre+date) · `summary_html` (contenu du flux, nettoyé) · `content_html`, `content_text`, `extraction_status` ∈ {`none`,`pending`,`done`,`failed`} · `read`, `starred` · `meta` JSONB (`youtube_id`, `cover`, `enclosures`, `extraction_method`) · `updated_at` (pivot de la synchronisation) · `search_vector` |
 | `summaries` | résumés produits | `kind` ∈ {`article`,`video`} · `provider`, `model`, `prompt_version` · `text_md` · `input_tokens`, `output_tokens` · `origin` ∈ {`manual`,`auto`} · `smart_feed_id` (SET NULL) |
 | `smart_feeds` | recherches enregistrées | `name` unique · `scope_kind` ∈ {`all`,`category`,`feed`}, `scope_id` · `mode` ∈ {`keywords`,`regex`} · `keywords_any/all/none` JSONB · `regex` (≤ 300) · `fields` JSONB (title, excerpt, author, url, content) · `auto_summary`, `summary_daily_cap` |
@@ -242,6 +242,11 @@ applyRetention : supprime localement les articles lus, non favoris, > 30 j
 Le curseur composite `(updated_at, id)` est indispensable : un import OPML crée des centaines
 d'entrées dans la même seconde, et une pagination par simple timestamp avec marge tournait en rond.
 
+`syncNow()` appelé pendant une passe en cours ne se contente pas de l'attendre : il **met une seconde
+passe en file** (une seule, quel que soit le nombre d'appels). La passe en cours a pu lire le serveur
+avant le changement qui motive l'appel (création d'un flux intelligent, réorganisation), et la
+première synchronisation d'un appareil dure plusieurs secondes.
+
 ### 5.5 Flux intelligents
 
 Une seule évaluation, en SQL (`smartfeeds/rules.py` → `build_condition`) : portée (`feed_id`,
@@ -294,7 +299,8 @@ mention) :
 |---|---|
 | auth | `GET status`*, `POST setup`*, `POST login`*, `POST refresh` (JWT seulement), `POST password` (renvoie un nouveau JWT), `GET devices`, `POST devices`*, `DELETE devices/{id}` |
 | catégories | `GET/POST categories`, `PUT/DELETE categories/{id}` |
-| flux | `GET/POST feeds`, `POST feeds/discover`, `GET/PUT/DELETE feeds/{id}`, `POST feeds/{id}/refresh`, `POST feeds/refresh-all`, `POST opml/import`, `GET opml/export` |
+| ordre | `POST subscriptions/reorder` : positions des dossiers, des flux (avec `category_id`) et des flux intelligents en une transaction ; un flux qui change de dossier est ré-évalué par les flux intelligents à portée catégorie |
+| flux | `GET/POST feeds` (triés par dossier puis `position`), `POST feeds/discover`, `GET/PUT/DELETE feeds/{id}`, `POST feeds/{id}/refresh`, `POST feeds/refresh-all`, `POST opml/import`, `GET opml/export` |
 | articles | `GET entries` (filtres `feed`, `category`, `status`, `starred`, `q`, `cursor`, `limit`, `order`), `GET/PATCH entries/{id}`, `POST entries/mark-read`, `POST entries/{id}/fetch-content`, `GET entries/{id}/summaries` |
 | résumés | `POST entries/{id}/summarize` (SSE), `GET/DELETE entries/{id}/summary` |
 | sync | `GET sync` (renvoie aussi `smart_feeds`), `POST sync` |
@@ -377,6 +383,29 @@ Dashboard ─ DashboardDataProvider (feeds, categories, unreadByFeed : 3 liveQue
   animation de dépôt. Capteurs souris (distance 6 px), tactile (appui 250 ms, `touch-none` sur la
   poignée seulement) et clavier (`sortableKeyboardCoordinates`). Le drag n'est actif qu'en mode
   « Personnaliser » ; le menu Monter/Descendre couvre l'accessibilité et le mobile.
+
+### Ordre de la barre latérale (`features/feeds/SubscriptionTree.tsx`, `sidebarOrder.ts`)
+
+Un seul `DndContext` couvre les flux intelligents et les abonnements. Les capteurs souris et
+tactile exigent un **clic long** (300 ms, tolérance 6 px) : un clic court reste un clic, un mouvement
+tactile avant le délai reste un défilement (dnd-kit annule la prise et laisse passer le geste). Pas de
+capteur clavier : Entrée et Espace doivent continuer à ouvrir la vue.
+
+Le motif est celui du tableau de bord : stratégie de tri neutre et **brouillon** (`Draft` :
+ordre des dossiers, flux par conteneur, flux intelligents) réordonné réellement dans `onDragOver`
+par `moveInDraft`, le DOM reflue donc pendant le geste. Les règles sont pures et sans React
+(`sidebarOrder.ts`) : un dossier ne survole que des dossiers, un flux ne survole que des flux, des
+en-têtes de dossier ou la zone « sans dossier » (`canDropOn`, appliqué comme filtre de détection de
+collision). Un en-tête replié attend 600 ms avant de s'ouvrir ; le dépôt sur cet en-tête s'applique
+même avant.
+
+Au dépôt, `diffDraft` renumérote `0..n-1` les seules listes modifiées (dossiers, flux intelligents,
+conteneurs source et destination des flux) et produit à la fois le corps de
+`POST /api/subscriptions/reorder` et les lignes Dexie : écriture locale optimiste, requête, puis
+`syncNow()` (le serveur fait foi ; en cas d'échec ou hors-ligne, un toast et la sync restaurent
+l'ordre serveur). Le brouillon reste affiché jusqu'à ce que Dexie reflète le dépôt, pour éviter un
+retour furtif à l'ancien ordre ; un filet de 3 s le relâche sinon, jamais pendant un autre glisser.
+Les clics droit et double-clic (édition) sont ignorés pendant une prise.
 
 ### Thème
 
@@ -482,7 +511,10 @@ web/
     feeds/useUnreadCounts   non lus par flux et par flux intelligent, une passe, partagé Sidebar / dashboard
     smartfeeds/SmartFeedDialog  éditeur de flux intelligent avec aperçu
     auth/LoginPage          création du mot de passe, connexion, adresse serveur
-    feeds/Sidebar           navigation, compteurs, badge de sync, FeedIcon
+    feeds/Sidebar           navigation, compteurs, badge de sync
+    feeds/SubscriptionTree  sections flux intelligents + abonnements, glisser-déposer au clic long
+    feeds/sidebarOrder      règles pures du réordonnancement (brouillon, déplacement, diff → reorder)
+    feeds/FeedIcon          icône de flux et compteur, partagés
     feeds/AddFeedDialog     ajout avec découverte et choix multiple
     feeds/FeedDialog        édition/suppression d'un flux, CategoryDialog
     entries/EntryList       liste, filtres, recherche, densité, tout marquer lu

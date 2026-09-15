@@ -28,6 +28,7 @@ npm run gen:api                                # après tout changement de route
 - Tests E2E : lancer l'image `fluxus-browser` avec `-u 0` (elle tourne en `pwuser`) pour pouvoir écrire les captures.
 - Flux intelligents : toute condition passe par `smartfeeds/rules.build_condition` (SQL, `coalesce` systématique) ; jamais de filtrage en JavaScript. Toute écriture sur `smart_feed_matches` bump `entries.updated_at` (horloge Python).
 - Tests E2E Playwright : `bypass_csp=True` dans le contexte (la CSP interdit `eval`, utilisé par `wait_for_function`).
+- Ordre de la barre latérale : `position` est la clé de tri partout (barre, `GET /feeds`, OPML) ; un nouveau flux prend `min(position) − 1` de son dossier (`feeds/router._first_position`). Les règles de déplacement vivent dans `features/feeds/sidebarOrder.ts`, sans React ; pas de capteur clavier dnd-kit dans la barre (Entrée doit ouvrir la vue).
 - Point d'étape et dette connue : `docs/AUDIT-2026-09-14.md`.
 - Migration : `uv run alembic revision --autogenerate`, relire le fichier (triggers et index partiels non détectés).
 

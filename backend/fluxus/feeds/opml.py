@@ -74,9 +74,9 @@ def build_opml(categories: list[Category], feeds: list[Feed]) -> str:
         if not cat_feeds:
             continue
         lines.append(f"    <outline text={quoteattr(cat.title)} title={quoteattr(cat.title)}>")
-        lines.extend(outline(f) for f in sorted(cat_feeds, key=lambda f: f.title.lower()))
+        lines.extend(outline(f) for f in sorted(cat_feeds, key=lambda f: (f.position, f.title.lower())))
         lines.append("    </outline>")
-    for f in sorted(by_cat.get(None, []), key=lambda f: f.title.lower()):
+    for f in sorted(by_cat.get(None, []), key=lambda f: (f.position, f.title.lower())):
         lines.append(outline(f).replace("      <outline", "    <outline", 1))
     lines += ["  </body>", "</opml>", ""]
     return "\n".join(lines)

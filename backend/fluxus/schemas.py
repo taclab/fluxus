@@ -25,6 +25,7 @@ class CategoryIn(BaseModel):
 class FeedOut(BaseModel):
     id: int
     category_id: int | None
+    position: int
     url: str
     site_url: str | None
     title: str
@@ -57,6 +58,30 @@ class FeedUpdate(BaseModel):
     extraction_mode: ExtractionMode | None = None
     disabled: bool | None = None
     fetch_interval_min: int | None = Field(default=None, ge=5, le=7 * 24 * 60)
+
+
+class ReorderCategory(BaseModel):
+    id: int
+    position: int
+
+
+class ReorderFeed(BaseModel):
+    id: int
+    position: int
+    category_id: int | None = None
+
+
+class ReorderSmartFeed(BaseModel):
+    id: int
+    position: int
+
+
+class ReorderIn(BaseModel):
+    """Nouvel ordre de la barre latérale : seules les listes touchées par un dépôt sont envoyées."""
+
+    categories: list[ReorderCategory] = Field(default_factory=list, max_length=1000)
+    feeds: list[ReorderFeed] = Field(default_factory=list, max_length=1000)
+    smart_feeds: list[ReorderSmartFeed] = Field(default_factory=list, max_length=1000)
 
 
 class DiscoverIn(BaseModel):

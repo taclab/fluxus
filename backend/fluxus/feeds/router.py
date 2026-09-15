@@ -16,7 +16,7 @@ from ..fetcher.http import UnsafeURLError
 from ..fetcher.parse import normalize_url
 from ..fetcher.service import fetch_feed_preview
 from ..jobs import enqueue
-from ..models import Category, Entry, Feed
+from ..models import Category, Entry, Feed, SmartFeed
 from ..schemas import (
     CategoryIn,
     CategoryOut,
@@ -26,6 +26,7 @@ from ..schemas import (
     FeedOut,
     FeedUpdate,
     OpmlImportResult,
+    ReorderIn,
 )
 from .opml import build_opml, parse_opml
 
@@ -38,6 +39,16 @@ async def _unread_by_feed(session: AsyncSession) -> dict[int, int]:
         select(Entry.feed_id, func.count()).where(Entry.read.is_(False)).group_by(Entry.feed_id)
     )
     return {feed_id: count for feed_id, count in result}
+
+
+async def _first_position(session: AsyncSession, category_id: int | None, *, exclude_id: int | None = None) -> int:
+    """Position qui place un flux en tête de son dossier (les valeurs négatives sont acceptées)."""
+    cond = Feed.category_id.is_(None) if category_id is None else Feed.category_id == category_id
+    query = select(func.min(Feed.position)).where(cond)
+    if exclude_id is not None:
+        query = query.where(Feed.id != exclude_id)
+    lowest = (await session.execute(query)).scalar_one()
+    return (lowest if lowest is not None else 1) - 1
 
 
 def _feed_out(feed: Feed, unread: dict[int, int]) -> FeedOut:
@@ -104,7 +115,7 @@ async def delete_category(category_id: int, _: Auth, session: Session) -> None:
 
 @router.get("/feeds", response_model=list[FeedOut])
 async def list_feeds(_: Auth, session: Session) -> list[FeedOut]:
-    feeds = (await session.execute(select(Feed).order_by(Feed.title))).scalars().all()
+    feeds = (await session.execute(select(Feed).order_by(Feed.category_id, Feed.position, Feed.title))).scalars().all()
     unread = await _unread_by_feed(session)
     return [_feed_out(f, unread) for f in feeds]
 
@@ -167,6 +178,7 @@ async def create_feed(body: FeedCreate, _: Auth, session: Session) -> FeedOut:
         description=(parsed.description or None),
         icon_url=parsed.icon_url,
         category_id=body.category_id,
+        position=await _first_position(session, body.category_id),
         extraction_mode=body.extraction_mode,
         is_youtube=parsed.is_youtube,
         next_fetch_at=datetime.now(UTC),
@@ -177,6 +189,51 @@ async def create_feed(body: FeedCreate, _: Auth, session: Session) -> FeedOut:
     await session.commit()
     await session.refresh(feed)
     return _feed_out(feed, {})
+
+
+@router.post("/subscriptions/reorder", status_code=204)
+async def reorder_subscriptions(body: ReorderIn, _: Auth, session: Session) -> None:
+    """Applique en une transaction le nouvel ordre de la barre latérale (dossiers, flux, flux intelligents)."""
+    if body.categories:
+        rows = (await session.execute(select(Category).where(Category.id.in_([c.id for c in body.categories])))).scalars().all()
+        by_id = {c.id: c for c in rows}
+        for item in body.categories:
+            cat = by_id.get(item.id)
+            if cat is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
+            cat.position = item.position
+    moved: list[Feed] = []
+    if body.feeds:
+        target_ids = {f.category_id for f in body.feeds if f.category_id is not None}
+        if target_ids:
+            known = set((await session.execute(select(Category.id).where(Category.id.in_(target_ids)))).scalars().all())
+            if known != target_ids:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
+        rows = (await session.execute(select(Feed).where(Feed.id.in_([f.id for f in body.feeds])))).scalars().all()
+        by_feed = {f.id: f for f in rows}
+        for item in body.feeds:
+            feed = by_feed.get(item.id)
+            if feed is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Flux introuvable")
+            feed.position = item.position
+            if feed.category_id != item.category_id:
+                feed.category_id = item.category_id
+                moved.append(feed)
+    if body.smart_feeds:
+        rows = (await session.execute(select(SmartFeed).where(SmartFeed.id.in_([s.id for s in body.smart_feeds])))).scalars().all()
+        by_sf = {s.id: s for s in rows}
+        for item in body.smart_feeds:
+            sf = by_sf.get(item.id)
+            if sf is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Flux intelligent introuvable")
+            sf.position = item.position
+    if moved:
+        from ..smartfeeds.service import reevaluate_feed
+
+        await session.flush()
+        for feed in moved:
+            await reevaluate_feed(session, feed)
+    await session.commit()
 
 
 @router.get("/feeds/{feed_id}", response_model=FeedOut)
@@ -212,6 +269,7 @@ async def update_feed(feed_id: int, body: FeedUpdate, _: Auth, session: Session)
     if feed.category_id != previous_category:
         from ..smartfeeds.service import reevaluate_feed
 
+        feed.position = await _first_position(session, feed.category_id, exclude_id=feed.id)
         await session.flush()
         await reevaluate_feed(session, feed)
     if body.extraction_mode is not None:
@@ -275,6 +333,14 @@ async def opml_import(file: UploadFile, _: Auth, session: Session) -> OpmlImport
     existing_urls = set((await session.execute(select(Feed.url))).scalars().all())
     cats = {c.title.lower(): c for c in (await session.execute(select(Category))).scalars().all()}
     imported = skipped = created_cats = 0
+    # Le lot importé passe en tête de chaque dossier, dans l'ordre du fichier : on réserve autant de
+    # positions au-dessus du minimum actuel qu'il y a de flux à importer dans ce dossier.
+    to_import = [i for i in items if i.url.startswith(("http://", "https://")) and len(i.url) <= 2048 and i.url not in existing_urls]
+    per_category: dict[str | None, int] = {}
+    for i in to_import:
+        key = i.category[:200].lower() if i.category else None
+        per_category[key] = per_category.get(key, 0) + 1
+    next_position: dict[int | None, int] = {}
     for item in items:
         if not item.url.startswith(("http://", "https://")) or len(item.url) > 2048 or item.url in existing_urls:
             skipped += 1
@@ -289,14 +355,20 @@ async def opml_import(file: UploadFile, _: Auth, session: Session) -> OpmlImport
                 await session.flush()
                 cats[item.category.lower()] = cat
                 created_cats += 1
+        cat_id = cat.id if cat else None
+        if cat_id not in next_position:
+            count = per_category.get(item.category.lower() if item.category else None, 1)
+            next_position[cat_id] = await _first_position(session, cat_id) - (count - 1)
         feed = Feed(
             url=item.url,
             site_url=(item.site_url or None) and item.site_url[:2048],
             title=(item.title or item.url)[:500],
-            category_id=cat.id if cat else None,
+            category_id=cat_id,
+            position=next_position[cat_id],
             is_youtube="youtube.com/feeds" in item.url,
             next_fetch_at=datetime.now(UTC),
         )
+        next_position[cat_id] += 1
         session.add(feed)
         await session.flush()
         await enqueue(session, "fetch_feed", {"feed_id": feed.id}, dedupe_key=f"fetch_feed:{feed.id}")

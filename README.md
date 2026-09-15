@@ -194,6 +194,23 @@ Sur tablette la barre latérale devient un tiroir ; sur téléphone un seul vole
 L'URL encode la vue courante (`/feed/12?entry=345&unread=1`) : le bouton retour et les favoris du
 navigateur fonctionnent.
 
+### Organiser la barre latérale
+
+Un **clic long** (souris ou doigt, environ un tiers de seconde) saisit un dossier, un flux ou un flux
+intelligent ; il suffit ensuite de le déposer :
+
+- un dossier au-dessus ou au-dessous d'un autre pour changer l'ordre des dossiers ;
+- un flux entre deux flux, dans son dossier ou dans un autre ;
+- un flux sur l'en-tête d'un dossier pour l'y placer en tête (un dossier replié s'ouvre après un
+  court survol) ;
+- un flux sur la zone « Sans dossier », qui apparaît en bas pendant le geste, pour le sortir de tout
+  dossier ;
+- un flux intelligent au-dessus ou au-dessous d'un autre.
+
+L'ordre est **manuel et prioritaire** : un flux ajouté, importé ou changé de dossier arrive en tête
+de son dossier, et l'ordre est le même sur tous vos appareils et dans l'export OPML. Un clic court
+reste un clic, un défilement au doigt reste un défilement ; la réorganisation exige d'être en ligne.
+
 ### Raccourcis clavier
 
 | Touche | Action | Touche | Action |

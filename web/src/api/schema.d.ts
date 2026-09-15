@@ -202,6 +202,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/subscriptions/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reorder Subscriptions
+         * @description Applique en une transaction le nouvel ordre de la barre latérale (dossiers, flux, flux intelligents).
+         */
+        post: operations["reorder_subscriptions_api_subscriptions_reorder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/feeds/{feed_id}": {
         parameters: {
             query?: never;
@@ -777,6 +797,8 @@ export interface components {
             id: number;
             /** Category Id */
             category_id: number | null;
+            /** Position */
+            position: number;
             /** Url */
             url: string;
             /** Site Url */
@@ -911,6 +933,41 @@ export interface components {
              * Format: date-time
              */
             published_at: string;
+        };
+        /** ReorderCategory */
+        ReorderCategory: {
+            /** Id */
+            id: number;
+            /** Position */
+            position: number;
+        };
+        /** ReorderFeed */
+        ReorderFeed: {
+            /** Id */
+            id: number;
+            /** Position */
+            position: number;
+            /** Category Id */
+            category_id?: number | null;
+        };
+        /**
+         * ReorderIn
+         * @description Nouvel ordre de la barre latérale : seules les listes touchées par un dépôt sont envoyées.
+         */
+        ReorderIn: {
+            /** Categories */
+            categories?: components["schemas"]["ReorderCategory"][];
+            /** Feeds */
+            feeds?: components["schemas"]["ReorderFeed"][];
+            /** Smart Feeds */
+            smart_feeds?: components["schemas"]["ReorderSmartFeed"][];
+        };
+        /** ReorderSmartFeed */
+        ReorderSmartFeed: {
+            /** Id */
+            id: number;
+            /** Position */
+            position: number;
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1645,6 +1702,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DiscoverOut"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_subscriptions_api_subscriptions_reorder_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
