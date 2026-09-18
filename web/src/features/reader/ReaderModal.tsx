@@ -1,13 +1,16 @@
 /**
  * Fenêtre de lecture centrée (disposition « pleine largeur ») : contient le lecteur habituel, avec
  * les boutons précédent/suivant et le compteur de position. Pas de `data-dialog` : les raccourcis
- * clavier globaux (← →, m, s, r…) doivent rester actifs pendant la lecture.
+ * clavier globaux (m, s, r…) doivent rester actifs pendant la lecture ; ← → sont déclarées ici,
+ * et seulement ici, pour n'être capturées que lorsque la fenêtre est ouverte.
  */
 
 import clsx from 'clsx'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+
+import { useKeyboard } from '../../app/useKeyboard'
 
 interface Props {
   entryId: number
@@ -23,7 +26,10 @@ export function ReaderModal({ entryId, index, total, onClose, onMove, children }
   const hasPrev = index > 0
   const hasNext = index !== -1 && index < total - 1
 
-  // Le fond ne défile pas ; le focus va dans la fenêtre puis revient à la carte de l'article fermé.
+  const arrows = useMemo(() => ({ ArrowLeft: () => onMove(-1), ArrowRight: () => onMove(1) }), [onMove])
+  useKeyboard(arrows)
+
+  // Le fond ne défile pas ; le focus va dans la fenêtre.
   useEffect(() => {
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -32,14 +38,15 @@ export function ReaderModal({ entryId, index, total, onClose, onMove, children }
       document.body.style.overflow = previous
     }
   }, [])
-  // À la fermeture seulement (pas à chaque changement d'article), le focus revient à la carte du dernier article lu.
+  // À la fermeture seulement (pas à chaque changement d'article), le focus revient à la ligne du dernier
+  // article lu, via le contrat `data-entry-focus` posé par EntryList sur l'élément d'ouverture de chaque ligne.
   const lastId = useRef(entryId)
   useEffect(() => {
     lastId.current = entryId
   }, [entryId])
   useEffect(
     () => () => {
-      document.querySelector<HTMLElement>(`[data-entry-id="${lastId.current}"] [role="button"], [data-entry-id="${lastId.current}"] button`)?.focus({ preventScroll: true })
+      document.querySelector<HTMLElement>(`[data-entry-id="${lastId.current}"] [data-entry-focus]`)?.focus({ preventScroll: true })
     },
     [],
   )

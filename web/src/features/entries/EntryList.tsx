@@ -4,6 +4,7 @@ import { AlignJustify, Check, CheckCheck, ChevronLeft, Circle, CircleCheck, Gall
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type EntryListItem, type Feed, type SmartFeed } from '../../api/client'
+import { createDevicePref, oneOf, type DevicePref } from '../../app/devicePref'
 import type { View } from '../../app/view'
 import { Button, EmptyState, IconButton, Spinner, useToast } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
@@ -19,16 +20,39 @@ export type FullDensity = 'grid' | 'magazine' | 'list' | 'titles'
 export type Variant = Density | FullDensity
 export type ListLayoutProp = 'split' | 'full'
 
-const SPLIT_DENSITIES: { id: Density; label: string; Icon: typeof Rows3 }[] = [
-  { id: 'compact', label: 'Compacte', Icon: Rows3 },
-  { id: 'cards', label: 'Cartes', Icon: LayoutList },
-]
-const FULL_DENSITIES: { id: FullDensity; label: string; Icon: typeof Rows3 }[] = [
-  { id: 'grid', label: 'Grille', Icon: LayoutGrid },
-  { id: 'magazine', label: 'Magazine', Icon: GalleryVertical },
-  { id: 'list', label: 'Liste', Icon: Rows3 },
-  { id: 'titles', label: 'Titres', Icon: AlignJustify },
-]
+interface VariantSpec {
+  label: string
+  Icon: typeof Rows3
+  /** Disposition dans laquelle la présentation est proposée. */
+  layout: ListLayoutProp
+  /** Classes du <ul>. */
+  listClass: string
+}
+
+/** Table unique des présentations : le menu, le <ul>, le rendu des lignes et la validation des préférences en dérivent. */
+const VARIANTS: Record<Variant, VariantSpec> = {
+  compact: { label: 'Compacte', Icon: Rows3, layout: 'split', listClass: '' },
+  cards: { label: 'Cartes', Icon: LayoutList, layout: 'split', listClass: 'p-2 space-y-2' },
+  grid: { label: 'Grille', Icon: LayoutGrid, layout: 'full', listClass: 'grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4' },
+  magazine: { label: 'Magazine', Icon: GalleryVertical, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
+  list: { label: 'Liste', Icon: Rows3, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
+  titles: { label: 'Titres', Icon: AlignJustify, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
+}
+const VARIANT_IDS = Object.keys(VARIANTS) as Variant[]
+
+function variantsFor(layout: ListLayoutProp): Variant[] {
+  return VARIANT_IDS.filter((v) => VARIANTS[v].layout === layout)
+}
+
+function isFullVariant(v: Variant): v is FullDensity {
+  return VARIANTS[v].layout === 'full'
+}
+
+/** Une préférence par disposition, validée contre la table (une valeur stockée inconnue retombe sur le défaut). */
+const VARIANT_PREF: Record<ListLayoutProp, DevicePref<Variant>> = {
+  split: createDevicePref<Variant>('fluxus.density', oneOf(variantsFor('split'), 'compact')),
+  full: createDevicePref<Variant>('fluxus.fullDensity', oneOf(variantsFor('full'), 'grid')),
+}
 
 interface Props {
   view: View
@@ -71,9 +95,7 @@ function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string, 
 
 export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnread, onOpenSidebar, onSearch, onBack, onVisibleEntries, onEditSmartFeed, layout = 'split' }: Props) {
   const [limit, setLimit] = useState(PAGE)
-  const [density, setDensity] = useState<Density>(() => (localStorage.getItem('fluxus.density') as Density) || 'compact')
-  const [fullDensity, setFullDensity] = useState<FullDensity>(() => (localStorage.getItem('fluxus.fullDensity') as FullDensity) || 'grid')
-  const variant: Variant = layout === 'full' ? fullDensity : density
+  const variant = VARIANT_PREF[layout].useValue()
   const [densityOpen, setDensityOpen] = useState(false)
   const densityRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -214,12 +236,29 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     onVisibleEntries(items.map((e) => e.id))
   }, [items, onVisibleEntries])
 
-  // Garde l'article sélectionné visible quand on navigue au clavier.
+  // Garde l'article sélectionné visible quand on navigue au clavier. Une seule fois par sélection, mais
+  // en réessayant tant que la ligne n'est pas encore rendue (lien profond : la liste arrive après l'article).
+  const scrolledFor = useRef<number | null>(null)
+  useEffect(() => {
+    if (selectedId == null || scrolledFor.current === selectedId) return
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-entry-id="${selectedId}"]`)
+    if (!el) return
+    scrolledFor.current = selectedId
+    el.scrollIntoView({ block: 'nearest' })
+  }, [selectedId, items])
+
+  // L'article sélectionné approche de la fin de la page chargée (fenêtre de lecture : « suivant » ne
+  // doit pas buter sur la 60e carte) : on charge la page suivante sans attendre le défilement.
   useEffect(() => {
     if (selectedId == null) return
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-entry-id="${selectedId}"]`)
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [selectedId])
+    const idx = items.findIndex((e) => e.id === selectedId)
+    if (idx === -1 || idx < items.length - 3) return
+    if (remote) {
+      if (remote.nextCursor && !remote.loading && !remote.loadingMore) loadMoreRemote()
+    } else if ((entries?.length ?? 0) >= limit) {
+      setLimit((l) => l + PAGE)
+    }
+  }, [selectedId, items, remote, entries?.length, limit, loadMoreRemote])
 
   const onScroll = useCallback(() => {
     const el = listRef.current
@@ -263,13 +302,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   }
 
   function chooseVariant(next: Variant) {
-    if (layout === 'full') {
-      setFullDensity(next as FullDensity)
-      localStorage.setItem('fluxus.fullDensity', next)
-    } else {
-      setDensity(next as Density)
-      localStorage.setItem('fluxus.density', next)
-    }
+    VARIANT_PREF[layout].set(next)
     setDensityOpen(false)
   }
 
@@ -394,14 +427,11 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         </IconButton>
         <div className={clsx('relative', layout === 'split' && 'hidden sm:block')} ref={densityRef}>
           <IconButton label="Présentation de la liste" onClick={() => setDensityOpen((o) => !o)} active={densityOpen} size="sm" data-testid="density-menu" aria-haspopup="menu" aria-expanded={densityOpen}>
-            {(() => {
-              const Icon = (layout === 'full' ? FULL_DENSITIES : SPLIT_DENSITIES).find((d) => d.id === variant)?.Icon ?? Rows3
-              return <Icon className="size-4" />
-            })()}
+            <VariantIcon variant={variant} />
           </IconButton>
           {densityOpen && (
             <div role="menu" className="absolute right-0 top-full z-20 mt-1 w-44 rounded-xl border border-app bg-panel p-1 shadow-lg text-sm">
-              {(layout === 'full' ? FULL_DENSITIES : SPLIT_DENSITIES).map(({ id, label, Icon }) => (
+              {variantsFor(layout).map((id) => (
                 <button
                   key={id}
                   type="button"
@@ -411,8 +441,8 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
                   onClick={() => chooseVariant(id)}
                   className={clsx('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted', id === variant ? 'text-app font-medium' : 'text-muted')}
                 >
-                  <Icon className="size-4" />
-                  <span className="flex-1">{label}</span>
+                  <VariantIcon variant={id} />
+                  <span className="flex-1">{VARIANTS[id].label}</span>
                   {id === variant && <Check className="size-4 text-accent-600 dark:text-accent-300" />}
                 </button>
               ))}
@@ -439,14 +469,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
             action={unreadOnly && view.kind !== 'unread' ? <Button size="sm" onClick={() => onToggleUnread(false)}>Afficher tout</Button> : undefined}
           />
         )}
-        <ul
-          data-density={variant}
-          className={clsx(
-            variant === 'cards' && 'p-2 space-y-2',
-            variant === 'grid' && 'grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4',
-            (variant === 'magazine' || variant === 'list' || variant === 'titles') && 'mx-auto w-full max-w-6xl',
-          )}
-        >
+        <ul data-density={variant} className={VARIANTS[variant].listClass || undefined}>
           {items.map((e) => (
             <EntryRow key={e.id} entry={e} feed={feedMap.get(e.feed_id)} selected={e.id === selectedId} density={variant} showFeed={view.kind !== 'feed'} onClick={() => void select(e.id)} />
           ))}
@@ -472,13 +495,14 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
 
 export function EntryRow({ entry, feed, selected, density, showFeed, onClick }: { entry: LocalEntry | EntryListItem; feed?: Feed; selected: boolean; density: Variant; showFeed: boolean; onClick: () => void }) {
   const source = feed?.title || hostname(entry.url)
-  if (density === 'grid' || density === 'magazine' || density === 'list' || density === 'titles') {
+  if (isFullVariant(density)) {
     return <FullRow entry={entry} feed={feed} source={source} selected={selected} variant={density} showFeed={showFeed} onClick={onClick} />
   }
   return (
     <li data-entry-id={entry.id}>
       <button
         type="button"
+        data-entry-focus
         onClick={onClick}
         className={clsx(
           'group w-full text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-400',
@@ -515,14 +539,15 @@ function Cover({ entry, className }: { entry: LocalEntry | EntryListItem; classN
   return <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} className={clsx('bg-muted object-cover', className)} />
 }
 
-/** Actions rapides d'une carte : favori et lu/non lu, sans ouvrir l'article. */
+function VariantIcon({ variant }: { variant: Variant }) {
+  const Icon = VARIANTS[variant].Icon
+  return <Icon className="size-4" />
+}
+
+/** Actions rapides d'une ligne : favori et lu/non lu. Frères du bouton d'ouverture, au-dessus de son pseudo-élément étiré. */
 function RowActions({ entry }: { entry: LocalEntry | EntryListItem }) {
-  const stop = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }
   return (
-    <span className="flex items-center gap-0.5 shrink-0" onClick={stop}>
+    <span className="relative z-10 flex items-center gap-0.5 shrink-0">
       <IconButton label={entry.starred ? 'Retirer des favoris' : 'Ajouter aux favoris'} size="sm" active={entry.starred} onClick={() => void recordChange(entry.id, { starred: !entry.starred })}>
         <Star className={clsx('size-4', entry.starred && 'fill-amber-400 text-amber-400')} />
       </IconButton>
@@ -533,7 +558,13 @@ function RowActions({ entry }: { entry: LocalEntry | EntryListItem }) {
   )
 }
 
-/** Rendus « pleine largeur » : grille de cartes, magazine (vignette à gauche), liste, titres. */
+/**
+ * Rendus « pleine largeur » : grille de cartes, magazine (vignette à gauche), liste, titres.
+ * Le titre est le seul bouton d'ouverture ; un pseudo-élément l'étire sur toute la ligne (le conteneur
+ * est `relative`), et les actions rapides sont des frères placés au-dessus : pas de contenu interactif
+ * imbriqué, donc Entrée ou Espace sur « favori » n'ouvrent pas l'article. `data-entry-focus` est le
+ * contrat que la fenêtre de lecture cible pour rendre le focus à la fermeture.
+ */
 function FullRow({ entry, feed, source, selected, variant, showFeed, onClick }: { entry: LocalEntry | EntryListItem; feed?: Feed; source: string; selected: boolean; variant: FullDensity; showFeed: boolean; onClick: () => void }) {
   const titleClass = clsx('leading-snug', entry.read ? 'text-muted font-normal' : 'text-app font-semibold')
   const meta = (
@@ -545,22 +576,25 @@ function FullRow({ entry, feed, source, selected, variant, showFeed, onClick }: 
       {entry.has_summary && <Sparkles className="size-3.5 text-accent-500 shrink-0" />}
     </>
   )
-  // Le conteneur est un div cliquable (les actions rapides sont des boutons : pas de bouton dans un bouton).
-  const open = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onClick()
-    }
-  }
-  const interactive = 'group cursor-pointer text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400'
+  const titleButton = (
+    <button
+      type="button"
+      data-entry-focus
+      onClick={onClick}
+      className="text-left focus:outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-accent-400 focus-visible:after:rounded-[inherit]"
+    >
+      {entry.title}
+    </button>
+  )
+  const rowClass = clsx('group relative transition-colors', selected ? 'bg-accent-50 dark:bg-accent-900/20' : 'hover:bg-panel dark:hover:bg-slate-800/60')
 
   if (variant === 'grid') {
     return (
       <li data-entry-id={entry.id} className="min-w-0">
-        <div role="button" tabIndex={0} onClick={onClick} onKeyDown={open} className={clsx(interactive, 'flex h-full flex-col overflow-hidden rounded-xl border bg-panel', selected ? 'border-accent-400 ring-2 ring-accent-400' : 'border-app hover:border-accent-300 dark:hover:border-accent-700')}>
+        <div className={clsx('group relative flex h-full flex-col overflow-hidden rounded-xl border bg-panel transition-colors', selected ? 'border-accent-400 ring-2 ring-accent-400' : 'border-app hover:border-accent-300 dark:hover:border-accent-700')}>
           <Cover entry={entry} className="aspect-video w-full" />
           <div className="flex flex-1 flex-col gap-1.5 p-4">
-            <h3 className={clsx(titleClass, 'text-[15px] line-clamp-3')}>{entry.title}</h3>
+            <h3 className={clsx(titleClass, 'text-[15px] line-clamp-3')}>{titleButton}</h3>
             <div className="flex items-center gap-1.5 text-xs text-muted min-w-0">{meta}</div>
             {entry.excerpt && <p className="text-sm text-muted line-clamp-4">{entry.excerpt}</p>}
             <div className="mt-auto flex items-center justify-between pt-2 text-xs text-muted">
@@ -575,7 +609,7 @@ function FullRow({ entry, feed, source, selected, variant, showFeed, onClick }: 
   if (variant === 'magazine') {
     return (
       <li data-entry-id={entry.id}>
-        <div role="button" tabIndex={0} onClick={onClick} onKeyDown={open} className={clsx(interactive, 'flex gap-4 border-b border-app px-4 py-3', selected ? 'bg-accent-50 dark:bg-accent-900/20' : 'hover:bg-panel dark:hover:bg-slate-800/60')}>
+        <div className={clsx(rowClass, 'flex gap-4 border-b border-app px-4 py-3')}>
           <div className="w-40 shrink-0 overflow-hidden rounded-lg bg-muted aspect-[4/3] hidden sm:block">
             <Cover entry={entry} className="h-full w-full" />
           </div>
@@ -584,7 +618,7 @@ function FullRow({ entry, feed, source, selected, variant, showFeed, onClick }: 
               {meta}
               <span className="ml-auto shrink-0 tabular-nums">{relativeDate(entry.published_at)}</span>
             </div>
-            <h3 className={clsx(titleClass, 'text-base line-clamp-2')}>{entry.title}</h3>
+            <h3 className={clsx(titleClass, 'text-base line-clamp-2')}>{titleButton}</h3>
             {entry.excerpt && <p className="mt-1 text-sm text-muted line-clamp-2">{entry.excerpt}</p>}
             <div className="mt-auto flex justify-end pt-1">
               <RowActions entry={entry} />
@@ -595,29 +629,35 @@ function FullRow({ entry, feed, source, selected, variant, showFeed, onClick }: 
     )
   }
   if (variant === 'titles') {
+    // Sans actions rapides : la ligne entière est le bouton, comme en colonnes.
     return (
       <li data-entry-id={entry.id}>
-        <div role="button" tabIndex={0} onClick={onClick} onKeyDown={open} className={clsx(interactive, 'flex h-9 items-center gap-2 border-b border-app px-4 text-sm', selected ? 'bg-accent-50 dark:bg-accent-900/20' : 'hover:bg-panel dark:hover:bg-slate-800/60')}>
+        <button
+          type="button"
+          data-entry-focus
+          onClick={onClick}
+          className={clsx(rowClass, 'flex h-9 w-full items-center gap-2 border-b border-app px-4 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-400')}
+        >
           {!entry.read ? <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label="Non lu" /> : <span className="size-2 shrink-0" />}
           {showFeed && feed && <FeedIcon feed={feed} className="size-3.5" />}
           <span className={clsx('flex-1 truncate', titleClass)}>{entry.title}</span>
           {showFeed && <span className="hidden md:inline w-40 truncate text-xs text-muted">{source}</span>}
           {entry.starred && <Star className="size-3.5 fill-amber-400 text-amber-400 shrink-0" />}
           <span className="w-14 text-right text-xs text-muted tabular-nums shrink-0">{relativeDate(entry.published_at)}</span>
-        </div>
+        </button>
       </li>
     )
   }
   // list
   return (
     <li data-entry-id={entry.id}>
-      <div role="button" tabIndex={0} onClick={onClick} onKeyDown={open} className={clsx(interactive, 'flex gap-3 border-b border-app px-4 py-3', selected ? 'bg-accent-50 dark:bg-accent-900/20' : 'hover:bg-panel dark:hover:bg-slate-800/60')}>
+      <div className={clsx(rowClass, 'flex gap-3 border-b border-app px-4 py-3')}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 text-xs text-muted mb-1 min-w-0">
             {meta}
             <span className="ml-auto shrink-0 tabular-nums">{relativeDate(entry.published_at)}</span>
           </div>
-          <h3 className={clsx(titleClass, 'text-[15px] line-clamp-2')}>{entry.title}</h3>
+          <h3 className={clsx(titleClass, 'text-[15px] line-clamp-2')}>{titleButton}</h3>
           {entry.excerpt && <p className="mt-1 text-sm text-muted line-clamp-2">{entry.excerpt}</p>}
         </div>
         <Cover entry={entry} className="hidden sm:block size-20 rounded-lg shrink-0" />

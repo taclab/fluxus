@@ -28,7 +28,11 @@ export function openExternal(url: string | null | undefined) {
 }
 
 export function Reader({ entryId, onBack, summaryRequested, fullContentRequested, onCreateSmartFeed }: Props) {
-  const entry = useLiveQuery(async () => (entryId ? ((await db.entries.get(entryId)) ?? null) : null), [entryId])
+  const raw = useLiveQuery(async () => (entryId ? ((await db.entries.get(entryId)) ?? null) : null), [entryId])
+  // Entre deux articles, useLiveQuery renvoie encore le résultat précédent jusqu'à la première émission de
+  // la nouvelle requête : on le traite comme « en chargement » plutôt que d'afficher un instant l'ancien
+  // article sous le nouvel identifiant (même comportement en colonnes et dans la fenêtre de lecture).
+  const entry = raw === null ? null : raw && raw.id === entryId ? raw : undefined
   const feed = useLiveQuery(() => (entry ? db.feeds.get(entry.feed_id) : undefined), [entry?.feed_id]) as Feed | undefined
   const [showFull, setShowFull] = useState(true)
   const [extracting, setExtracting] = useState(false)

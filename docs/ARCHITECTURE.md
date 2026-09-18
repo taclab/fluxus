@@ -412,12 +412,19 @@ Préférence par appareil `fluxus.listLayout` (`split` par défaut, `full`), exp
 `useListLayout()` (`useSyncExternalStore`) et modifiable uniquement dans Paramètres → Affichage. En
 `full`, `Layout` monte `EntryList` en `flex-1` avec `layout="full"` et, si un article est ouvert, la
 fenêtre `ReaderModal` (portail, plein écran sous `md`) qui contient le `Reader` habituel avec
-`onBack` = fermer ; `← →` appellent le même `move()` que `j/k`, la position « n / total » vient de
-l'ordre fourni par `onVisibleEntries`. La fenêtre **ne porte pas `data-dialog`** : les raccourcis
-globaux doivent y rester actifs (à la différence des vrais dialogues). `EntryList` mémorise une
+`onBack` = fermer ; `← →` sont déclarées **dans la fenêtre** (`useKeyboard` monté avec elle, donc
+jamais capturées ailleurs) et appellent le même `move()` que `j/k` ; la position « n / total » vient
+de l'ordre fourni par `onVisibleEntries` (état de `Layout`, remplacé seulement si l'ordre change). La
+fenêtre **ne porte pas `data-dialog`** : les raccourcis globaux doivent y rester actifs (à la
+différence des vrais dialogues). `EntryList` mémorise une
 présentation par disposition (`fluxus.density` en colonnes : compacte, cartes ; `fluxus.fullDensity`
-en pleine largeur : grille, magazine, liste, titres) choisie par le menu de l'en-tête ; les rendus
-pleine largeur (`FullRow`) sont des `div[role=button]` pour accueillir les actions rapides favori et lu.
+en pleine largeur : grille, magazine, liste, titres) choisie par le menu de l'en-tête, le tout dérivé
+d'une table unique `VARIANTS` (libellé, icône, disposition, classes du `<ul>`) et de préférences
+validées par `createDevicePref` (`app/devicePref.ts`, aussi utilisé par `display.ts`). Dans les rendus
+pleine largeur (`FullRow`), le titre est le seul bouton d'ouverture, étiré sur la ligne par un
+pseudo-élément ; les actions rapides favori et lu sont des frères placés au-dessus : pas de bouton dans
+un bouton, Entrée sur « favori » n'ouvre pas l'article. L'élément d'ouverture de chaque ligne porte
+`data-entry-focus`, contrat que la fenêtre de lecture cible pour rendre le focus à la fermeture.
 
 ### Ordre de la barre latérale (`features/feeds/SubscriptionTree.tsx`, `sidebarOrder.ts`)
 
@@ -613,6 +620,13 @@ Modifier `models.py`, puis `uv run alembic revision --autogenerate -m "…"`, re
 (les triggers et index partiels ne sont pas toujours détectés), `alembic upgrade head`. Si une
 colonne d'`entries` doit être synchronisée, l'ajouter à `EntryOut` (`schemas.py`) et à
 `LocalEntry` (`db.ts`), puis incrémenter la version Dexie si un index change.
+
+### Tester (harnais E2E)
+
+Les parcours `scripts/e2e-*.py` partagent `scripts/e2e_common.py` : `api()`, `login()`,
+`new_context()` (viewport, locale, `bypass_csp`), `watch_errors()` et `main(run, results, …)` qui gère
+la capture d'échec, le code de sortie et la remise en état (`cleanup`). Lancement :
+`docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/out fluxus-browser python /scripts/e2e-<nom>.py`.
 
 ### Tester
 

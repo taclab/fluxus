@@ -1,6 +1,6 @@
-"""Parcours E2E des flux intelligents (Playwright, image fluxus-browser, --network host, -u 0).
+"""Parcours E2E des flux intelligents (Playwright, image fluxus-browser).
 
-docker run --rm --network host -u 0 -v $PWD/scripts/e2e-smartfeeds.py:/out/e2e-smartfeeds.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-smartfeeds.py
+docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/out fluxus-browser python /scripts/e2e-smartfeeds.py
 """
 
 import json
@@ -8,30 +8,16 @@ import re
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://localhost:8000"
-PASSWORD = "motdepasse-test"
+from e2e_common import BASE, api, login, new_context, watch_errors
+
 results: dict = {}
-
-
-def api(page, method, path, **kw):
-    token = page.evaluate("localStorage.getItem('fluxus.token')")
-    return page.request.fetch(BASE + path, method=method, headers={"Authorization": f"Bearer {token}", "content-type": "application/json"}, **kw)
-
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--no-sandbox"])
-    # bypass_csp : la CSP du site interdit eval, dont Playwright a besoin pour wait_for_function
-    ctx = browser.new_context(viewport={"width": 1400, "height": 900}, locale="fr-FR", bypass_csp=True)
+    ctx = new_context(browser)
     page = ctx.new_page()
-    errors = []
-    page.on("pageerror", lambda e: errors.append(str(e)))
-    page.on("console", lambda m: errors.append(m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
-
-    page.goto(BASE, wait_until="networkidle")
-    page.fill("input[type=password]", PASSWORD)
-    page.click("button[type=submit]")
-    page.wait_for_selector("[data-widget]", timeout=60000)
-    page.wait_for_timeout(1500)
+    errors = watch_errors(page)
+    login(page)
 
     # Nettoyage des flux intelligents d'un passage précédent
     for sf in api(page, "GET", "/api/smart-feeds").json()["items"]:

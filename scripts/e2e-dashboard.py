@@ -1,6 +1,6 @@
-"""Parcours E2E du tableau de bord (Playwright, à exécuter dans l'image fluxus-browser, --network host).
+"""Parcours E2E du tableau de bord (Playwright, image fluxus-browser).
 
-docker run --rm --network host -v $PWD/scripts/e2e-dashboard.py:/out/e2e-dashboard.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-dashboard.py
+docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/out fluxus-browser python /scripts/e2e-dashboard.py
 """
 
 import json
@@ -9,8 +9,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://localhost:8000"
-PASSWORD = "motdepasse-test"
+from e2e_common import BASE, api, login, new_context, watch_errors
+
 results: dict = {}
 
 
@@ -20,29 +20,18 @@ def patch_layout(page, layout_json):
     return api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": layout_json}, "dashboard_layout_base_version": version}))
 
 
-def api(page, method, path, **kw):
-    token = page.evaluate("localStorage.getItem('fluxus.token')")
-    return page.request.fetch(BASE + path, method=method, headers={"Authorization": f"Bearer {token}", "content-type": "application/json"}, **kw)
-
-
 def widget_ids(page):
     return page.eval_on_selector_all("[data-widget]", "els => els.map(e => e.dataset.widgetId)")
 
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--no-sandbox"])
-    ctx = browser.new_context(viewport={"width": 1400, "height": 900}, locale="fr-FR")
+    ctx = new_context(browser)
     page = ctx.new_page()
-    errors = []
-    page.on("pageerror", lambda e: errors.append(str(e)))
-    # Les 404 de favicons et les échecs réseau volontaires (hors-ligne) ne sont pas des erreurs applicatives.
-    page.on("console", lambda m: errors.append(f"console.error: {m.text}") if m.type == "error" and "Failed to load resource" not in m.text else None)
+    errors = watch_errors(page)
 
     # Repart d'une disposition serveur vide.
-    page.goto(BASE, wait_until="networkidle")
-    page.fill("input[type=password]", PASSWORD)
-    page.click("button[type=submit]")
-    page.wait_for_selector("[data-widget]", timeout=60000)
+    login(page, settle_ms=0)
     patch_layout(page, "")
     page.evaluate("indexedDB.open('fluxus')")  # no-op ; le cache meta est vidé par reload + reconcile
     page.reload(wait_until="networkidle")
@@ -195,7 +184,7 @@ with sync_playwright() as p:
 
     # Mobile + thème sombre + hors-ligne
     page.evaluate("localStorage.setItem('fluxus.theme','dark')")
-    mobile = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, storage_state=ctx.storage_state())
+    mobile = new_context(browser, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, storage_state=ctx.storage_state())
     mp = mobile.new_page()
     mp.goto(BASE, wait_until="networkidle")
     mp.wait_for_selector("[data-widget]", timeout=60000)

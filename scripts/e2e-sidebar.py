@@ -1,22 +1,14 @@
-"""Parcours E2E du glisser-déposer de la barre latérale (Playwright, image fluxus-browser, --network host, -u 0).
+"""Parcours E2E du glisser-déposer de la barre latérale (Playwright, image fluxus-browser).
 
-docker run --rm --network host -u 0 -v $PWD/scripts/e2e-sidebar.py:/out/e2e-sidebar.py:ro -v /tmp/shots:/out fluxus-browser python /out/e2e-sidebar.py
+docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/out fluxus-browser python /scripts/e2e-sidebar.py
 """
 
 import json
-import os
 
-from playwright.sync_api import sync_playwright
+from e2e_common import BASE, api, login, main, new_context
 
-BASE = os.environ.get("E2E_BASE", "http://localhost:8000")
-PASSWORD = "motdepasse-test"
 HOLD_MS = 450
 results: dict = {}
-
-
-def api(page, method, path, **kw):
-    token = page.evaluate("localStorage.getItem('fluxus.token')")
-    return page.request.fetch(BASE + path, method=method, headers={"Authorization": f"Bearer {token}", "content-type": "application/json"}, **kw)
 
 
 def center(loc):
@@ -159,13 +151,10 @@ def run(page, ctx, errors):
     page.screenshot(path="/out/82-sidebar-after.png")
 
     # 8. Mobile (tactile via CDP) : le tiroir défile au geste rapide, l'appui long saisit et réordonne
-    mctx = ctx.browser.new_context(viewport={"width": 390, "height": 844}, locale="fr-FR", bypass_csp=True, has_touch=True, is_mobile=True)
+    mctx = new_context(ctx.browser, viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
     mpage = mctx.new_page()
     mpage.on("pageerror", lambda e: errors.append(str(e)))
-    mpage.goto(BASE, wait_until="networkidle")
-    mpage.fill("input[type=password]", PASSWORD)
-    mpage.click("button[type=submit]")
-    mpage.wait_for_selector("[data-widget]", timeout=60000)
+    login(mpage, settle_ms=0)
     mpage.evaluate("localStorage.setItem('fluxus.collapsed', '[]')")
     mpage.goto(BASE + "/all", wait_until="networkidle")
     mpage.wait_for_timeout(800)
@@ -214,30 +203,4 @@ def run(page, ctx, errors):
     results["js_errors"] = errors[:5]
 
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(args=["--no-sandbox"])
-    ctx = browser.new_context(viewport={"width": 1400, "height": 1000}, locale="fr-FR", bypass_csp=True)
-    page = ctx.new_page()
-    errors = []
-    page.on("pageerror", lambda e: errors.append(str(e)))
-    page.on("console", lambda m: errors.append(m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
-
-    page.goto(BASE, wait_until="networkidle")
-    page.fill("input[type=password]", PASSWORD)
-    page.click("button[type=submit]")
-    page.wait_for_selector("[data-widget]", timeout=60000)
-    page.wait_for_timeout(2000)
-
-    try:
-        run(page, ctx, errors)
-    except Exception as exc:  # noqa: BLE001
-        results["exception"] = repr(exc)
-        results["url_at_failure"] = page.url
-        results["js_errors"] = errors[:5]
-        page.screenshot(path="/out/89-sidebar-failure.png")
-        browser.close()
-        print(json.dumps(results, ensure_ascii=False, indent=1))
-        raise SystemExit(1)
-    browser.close()
-
-print(json.dumps(results, ensure_ascii=False, indent=1))
+main(run, results, failure_shot="89-sidebar-failure", settle_ms=2000, viewport={"width": 1400, "height": 1000})

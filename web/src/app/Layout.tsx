@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { Category, Feed, SmartFeed } from '../api/client'
 import { db } from '../db/db'
@@ -42,15 +42,14 @@ export function Layout() {
   const openSmartEditor = useCallback((sf: SmartFeed | null, preset: { scope_kind: 'feed' | 'category'; scope_id: number } | null = null) => setEditSmart({ open: true, smartFeed: sf, preset }), [])
   const [summaryTick, setSummaryTick] = useState(0)
   const [fullTick, setFullTick] = useState(0)
-  const visibleIds = useRef<number[]>([])
-  // Miroir d'état pour la fenêtre de lecture (position « n / total ») : la ref ne déclenche pas de rendu.
+  // Ordre des articles affichés par la liste (navigation j/k, ← →, position « n / total »). La liste le
+  // renvoie à chaque émission de Dexie : on ne remplace l'état que si l'ordre a réellement changé.
   const [visible, setVisible] = useState<number[]>([])
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? []
   const current = useLiveQuery(() => (entryId ? db.entries.get(entryId) : undefined), [entryId])
 
   const onVisibleEntries = useCallback((ids: number[]) => {
-    visibleIds.current = ids
-    setVisible(ids)
+    setVisible((prev) => (prev.length === ids.length && prev.every((v, i) => v === ids[i]) ? prev : ids))
   }, [])
   const visibleIndex = useMemo(() => (entryId ? visible.indexOf(entryId) : -1), [entryId, visible])
 
@@ -64,13 +63,13 @@ export function Layout() {
 
   const move = useCallback(
     (delta: 1 | -1) => {
-      const ids = visibleIds.current
+      const ids = visible
       if (ids.length === 0) return
       const idx = entryId ? ids.indexOf(entryId) : -1
       const next = idx === -1 ? (delta === 1 ? 0 : ids.length - 1) : Math.min(ids.length - 1, Math.max(0, idx + delta))
       if (ids[next] !== undefined) setEntry(ids[next], true)
     },
-    [entryId, setEntry],
+    [visible, entryId, setEntry],
   )
 
   const goHome = useCallback(() => setView({ kind: 'dashboard' }), [setView])
@@ -97,9 +96,6 @@ export function Layout() {
       k: () => move(-1),
       ArrowDown: () => move(1),
       ArrowUp: () => move(-1),
-      // Fenêtre de lecture (pleine largeur) : ← → passent d'un article à l'autre.
-      ArrowLeft: () => fullList && entryId && move(-1),
-      ArrowRight: () => fullList && entryId && move(1),
       m: () => current && void recordChange(current.id, { read: !current.read }),
       s: () => current && void recordChange(current.id, { starred: !current.starred }),
       v: () => openExternal(current?.url),
@@ -110,7 +106,7 @@ export function Layout() {
       '/': focusSearch,
       '?': help,
     }),
-    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly, goHome, focusSearch, help, fullList],
+    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly, goHome, focusSearch, help],
   )
   useKeyboard(isDashboard ? dashboardShortcuts : shortcuts)
 
@@ -172,7 +168,6 @@ export function Layout() {
       {fullList && entryId !== null && (
         <ReaderModal entryId={entryId} index={visibleIndex} total={visible.length} onClose={() => setEntry(null)} onMove={move}>
           <Reader
-            key={entryId}
             entryId={entryId}
             onBack={() => setEntry(null)}
             summaryRequested={summaryTick}

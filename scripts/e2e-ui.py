@@ -1,35 +1,26 @@
-"""Parcours E2E de l'interface Fluxus avec Playwright (exécuté dans l'image fluxus-browser)."""
+"""Parcours E2E de l'interface Fluxus (Playwright, image fluxus-browser).
+
+docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/out fluxus-browser python /scripts/e2e-ui.py
+"""
 
 import json
-import sys
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://localhost:8000"
-OUT = "/out"
-PASSWORD = "motdepasse-test"
+from e2e_common import BASE, login, new_context, shot, watch_errors
+
 results = {}
-
-
-def shot(page, name):
-    page.screenshot(path=f"{OUT}/{name}.png", full_page=False)
-
 
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--no-sandbox"])
-    ctx = browser.new_context(viewport={"width": 1400, "height": 900}, locale="fr-FR")
+    ctx = new_context(browser)
     page = ctx.new_page()
-    errors = []
-    page.on("pageerror", lambda e: errors.append(str(e)))
-    page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type in ("error",) else None)
+    errors = watch_errors(page)
 
     page.goto(BASE, wait_until="networkidle")
     shot(page, "01-login")
-    page.fill("input[type=password]", PASSWORD)
-    page.click("button[type=submit]")
-    page.wait_for_selector("text=Tous les articles", timeout=15000)
     # La page d'accueil est le tableau de bord ; la liste classique est sur /all.
-    page.wait_for_selector("[data-widget]", timeout=30000)
+    login(page, settle_ms=0)
     page.locator("nav button:has-text('Tous les articles')").click()
     page.wait_for_url("**/all**")
     page.wait_for_selector("[data-entry-id]", timeout=30000)
@@ -94,7 +85,7 @@ with sync_playwright() as p:
 
     # Mode sombre + mobile
     page.evaluate("localStorage.setItem('fluxus.theme','dark')")
-    mobile = browser.new_context(viewport={"width": 390, "height": 844}, locale="fr-FR", is_mobile=True, storage_state=ctx.storage_state())
+    mobile = new_context(browser, viewport={"width": 390, "height": 844}, is_mobile=True, storage_state=ctx.storage_state())
     mpage = mobile.new_page()
     mpage.goto(BASE + "/all", wait_until="networkidle")
     mpage.wait_for_selector("[data-entry-id]", timeout=30000)
@@ -125,4 +116,3 @@ with sync_playwright() as p:
     browser.close()
 
 print(json.dumps(results, ensure_ascii=False, indent=1))
-sys.exit(0)
