@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import Auth
 from .db import get_session
 from .models import Entry, Feed, Job, Summary
+from .schemas import VIEW_MODES
 from .settings_store import (
     DEFAULTS,
     LAYOUT_VERSION_KEY,
@@ -115,6 +116,8 @@ async def patch_settings(body: SettingsPatch, _: Auth, session: Session) -> Sett
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Identifiant de modèle trop long (100 caractères maximum)")
         if key == "llm_auto_daily_token_budget" and not (value.strip().isdigit() and int(value) <= 10_000_000):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Budget quotidien invalide (entier de 0 à 10 000 000 tokens)")
+        if key == "default_view_mode" and value not in VIEW_MODES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Présentation inconnue")
         if key == "sync_prefetch_days" and not (value.strip().isdigit() and 1 <= int(value) <= 365):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "sync_prefetch_days doit être un entier entre 1 et 365")
         await set_setting(session, key, value.strip())

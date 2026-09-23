@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Annotated
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import func, select, update
+from pydantic import BaseModel
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Auth
+from ..config import get_settings
 from ..db import get_session
 from ..fetcher.discover import discover_feeds
 from ..fetcher.http import UnsafeURLError
@@ -23,11 +25,19 @@ from ..schemas import (
     CategoryOut,
     DiscoverIn,
     DiscoverOut,
+    FeedBulkIn,
+    FeedBulkOut,
     FeedCreate,
     FeedOut,
+    FeedSettingsIn,
+    FeedStats,
     FeedUpdate,
     OpmlImportResult,
     ReorderIn,
+    SummarizeAllIn,
+    SummarizeAllOut,
+    ViewModeIn,
+    view_mode_value,
 )
 from .opml import build_opml, parse_opml
 
@@ -82,7 +92,7 @@ async def list_categories(_: Auth, session: Session) -> list[CategoryOut]:
     for feed_id, cat_id in feeds:
         per_cat[cat_id] = per_cat.get(cat_id, 0) + unread.get(feed_id, 0)
     return [
-        CategoryOut(id=c.id, title=c.title, position=c.position, unread_count=per_cat.get(c.id, 0))
+        CategoryOut(id=c.id, title=c.title, position=c.position, view_mode=c.view_mode, unread_count=per_cat.get(c.id, 0))
         for c in cats
     ]
 
@@ -94,11 +104,11 @@ async def create_category(body: CategoryIn, _: Auth, session: Session) -> Catego
         raise HTTPException(status.HTTP_409_CONFLICT, "Cette catégorie existe déjà")
     if body.position is None:
         body.position = await _root_end_position(session)
-    cat = Category(title=body.title, position=body.position)
+    cat = Category(title=body.title, position=body.position, view_mode=view_mode_value(body.view_mode) if body.view_mode else None)
     session.add(cat)
     await session.commit()
     await session.refresh(cat)
-    return CategoryOut(id=cat.id, title=cat.title, position=cat.position)
+    return CategoryOut(id=cat.id, title=cat.title, position=cat.position, view_mode=cat.view_mode)
 
 
 @router.put("/categories/{category_id}", response_model=CategoryOut)
@@ -112,13 +122,15 @@ async def update_category(category_id: int, body: CategoryIn, _: Auth, session: 
     cat.title = body.title
     if body.position is not None:
         cat.position = body.position
+    if body.view_mode is not None:
+        cat.view_mode = view_mode_value(body.view_mode)
     try:
         await session.commit()
     except IntegrityError as exc:
         # Course entre le contrôle et l'écriture : la contrainte d'unicité tranche.
         await session.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Cette catégorie existe déjà") from exc
-    return CategoryOut(id=cat.id, title=cat.title, position=cat.position)
+    return CategoryOut(id=cat.id, title=cat.title, position=cat.position, view_mode=cat.view_mode)
 
 
 @router.delete("/categories/{category_id}", status_code=204)
@@ -262,6 +274,97 @@ async def reorder_subscriptions(body: ReorderIn, _: Auth, session: Session) -> N
     await session.commit()
 
 
+async def _apply_feed_settings(session: AsyncSession, feed: Feed, body: FeedSettingsIn, *, category: Category | None = None) -> None:
+    """Réglages communs à la modification d'un flux et aux actions groupées de l'écran Abonnements.
+
+    `category` : dossier cible déjà vérifié par l'appelant (évite une lecture par flux en lot).
+    """
+    previous_category = feed.category_id
+    if body.clear_category:
+        feed.category_id = None
+    elif body.category_id is not None:
+        if category is None:
+            category = await session.get(Category, body.category_id)
+        if category is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
+        feed.category_id = body.category_id
+    if feed.category_id != previous_category:
+        from ..smartfeeds.service import reevaluate_feed
+
+        feed.position = await _first_position(session, feed.category_id, exclude_id=feed.id)
+        await session.flush()
+        await reevaluate_feed(session, feed)
+    if body.extraction_mode is not None:
+        feed.extraction_mode = body.extraction_mode
+    if body.disabled is not None:
+        feed.disabled = body.disabled
+    if body.view_mode is not None:
+        feed.view_mode = view_mode_value(body.view_mode)
+    if body.auto_summary is not None:
+        feed.auto_summary = body.auto_summary
+    if body.summary_daily_cap is not None:
+        feed.summary_daily_cap = body.summary_daily_cap
+    if body.fetch_interval_fixed_min is not None:
+        fixed = body.fetch_interval_fixed_min or None
+        if fixed != feed.fetch_interval_fixed_min:
+            feed.fetch_interval_fixed_min = fixed
+            # L'intervalle effectif suit l'intervalle imposé, ou repart du défaut au retour en adaptatif ;
+            # la prochaine récupération est avancée si elle tombait au-delà (jamais reculée).
+            interval = fixed or get_settings().default_fetch_interval_min
+            feed.fetch_interval_min = interval
+            soonest = datetime.now(UTC) + timedelta(minutes=interval)
+            if feed.next_fetch_at is None or feed.next_fetch_at > soonest:
+                feed.next_fetch_at = soonest
+
+
+@router.post("/feeds/bulk", response_model=FeedBulkOut)
+async def bulk_update_feeds(body: FeedBulkIn, _: Auth, session: Session) -> FeedBulkOut:
+    """Applique les mêmes réglages à une sélection de flux (tout ou rien)."""
+    ids = set(body.feed_ids)
+    feeds = (await session.execute(select(Feed).where(Feed.id.in_(ids)))).scalars().all()
+    if len(feeds) != len(ids):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flux introuvable")
+    category = None
+    if body.changes.category_id is not None and not body.changes.clear_category:
+        category = await session.get(Category, body.changes.category_id)
+        if category is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
+    # Chaque flux déplacé prend la tête de son dossier : on les traite du dernier au premier pour que la
+    # sélection garde son ordre relatif à l'arrivée.
+    for feed in sorted(feeds, key=lambda f: f.position, reverse=True):
+        await _apply_feed_settings(session, feed, body.changes, category=category)
+    await session.commit()
+    unread = await _unread_by_feed(session)
+    fresh = (await session.execute(select(Feed).where(Feed.id.in_(ids)).order_by(Feed.position).execution_options(populate_existing=True))).scalars().all()
+    return FeedBulkOut(feeds=[_feed_out(f, unread) for f in fresh])
+
+
+@router.get("/feeds/stats", response_model=list[FeedStats])
+async def feed_stats(_: Auth, session: Session) -> list[FeedStats]:
+    """Activité de chaque flux (écran Abonnements) : aide à choisir l'intervalle de récupération."""
+    from ..summarize.auto import feed_auto_counts_today
+
+    now = datetime.now(UTC)
+    week, month = now - timedelta(days=7), now - timedelta(days=30)
+    rows = (
+        await session.execute(
+            select(
+                Feed.id,
+                func.count(case((Entry.published_at >= week, 1))),
+                func.count(case((Entry.published_at >= month, 1))),
+                func.max(Entry.published_at),
+            )
+            .outerjoin(Entry, Entry.feed_id == Feed.id)
+            .group_by(Feed.id)
+        )
+    ).all()
+    auto = await feed_auto_counts_today(session)
+    return [
+        FeedStats(feed_id=fid, entries_7d=int(w), entries_30d=int(m), last_entry_at=last, auto_summaries_today=auto.get(fid, 0))
+        for fid, w, m, last in rows
+    ]
+
+
 @router.get("/feeds/{feed_id}", response_model=FeedOut)
 async def get_feed(feed_id: int, _: Auth, session: Session) -> FeedOut:
     feed = await session.get(Feed, feed_id)
@@ -285,28 +388,49 @@ async def update_feed(feed_id: int, body: FeedUpdate, _: Auth, session: Session)
         feed.etag = None
         feed.last_modified = None
         feed.next_fetch_at = datetime.now(UTC)
-    previous_category = feed.category_id
-    if body.clear_category:
-        feed.category_id = None
-    elif body.category_id is not None:
-        if await session.get(Category, body.category_id) is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Catégorie introuvable")
-        feed.category_id = body.category_id
-    if feed.category_id != previous_category:
-        from ..smartfeeds.service import reevaluate_feed
-
-        feed.position = await _first_position(session, feed.category_id, exclude_id=feed.id)
-        await session.flush()
-        await reevaluate_feed(session, feed)
-    if body.extraction_mode is not None:
-        feed.extraction_mode = body.extraction_mode
-    if body.disabled is not None:
-        feed.disabled = body.disabled
-    if body.fetch_interval_min is not None:
-        feed.fetch_interval_min = body.fetch_interval_min
+    await _apply_feed_settings(session, feed, body)
     await session.commit()
     await session.refresh(feed)
     return _feed_out(feed, await _unread_by_feed(session))
+
+
+@router.post("/feeds/{feed_id}/summarize-all", response_model=SummarizeAllOut)
+async def summarize_feed_all(feed_id: int, body: SummarizeAllIn, _: Auth, session: Session) -> SummarizeAllOut:
+    """« Résumer les non résumés » d'un flux : lot déclenché par l'utilisateur, borné par le budget du jour."""
+    from ..summarize.auto import summarize_feed_batch
+
+    feed = await session.get(Feed, feed_id)
+    if feed is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flux introuvable")
+    result = await summarize_feed_batch(session, feed, unread_only=body.unread_only)
+    await session.commit()
+    return SummarizeAllOut(**result)
+
+
+class ViewModeUpdate(BaseModel):
+    """Présentation choisie depuis l'en-tête d'une vue ; `default` modifie le défaut global."""
+
+    kind: Literal["feed", "category", "smart", "default"]
+    id: int | None = None
+    view_mode: ViewModeIn
+
+
+@router.put("/view-mode", status_code=204)
+async def set_view_mode(body: ViewModeUpdate, _: Auth, session: Session) -> None:
+    if body.kind == "default":
+        from ..settings_store import set_setting
+
+        if body.view_mode == "inherit":
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Le défaut ne peut pas hériter")
+        await set_setting(session, "default_view_mode", body.view_mode)
+        await session.commit()
+        return
+    model = {"feed": Feed, "category": Category, "smart": SmartFeed}[body.kind]
+    target = await session.get(model, body.id) if body.id is not None else None
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Vue introuvable")
+    target.view_mode = view_mode_value(body.view_mode)
+    await session.commit()
 
 
 @router.delete("/feeds/{feed_id}", status_code=204)

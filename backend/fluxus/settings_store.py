@@ -28,6 +28,8 @@ DEFAULTS: dict[str, str] = {
     "llm_auto_daily_token_budget": "200000",
     # Disposition du tableau de bord (JSON produit par le front ; vide = disposition par défaut).
     "dashboard_layout": "",
+    # Présentation de liste des vues sans présentation propre (flux, dossier ou flux intelligent).
+    "default_view_mode": "compact",
 }
 
 # Compteur d'écritures de la disposition (clé interne, non éditable directement) : un client doit

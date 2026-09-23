@@ -41,13 +41,13 @@ async def _prepare_source(session: AsyncSession, entry: Entry) -> tuple[str, str
         transcript = entry.transcript
         if transcript is None:
             vt = await fetch_transcript(video_id)
-            transcript = Transcript(
+            # Rattachée à l'entrée : une seconde préparation (estimation du budget puis résumé) la réutilise.
+            entry.transcript = Transcript(
                 entry_id=entry.id,
                 language=vt.language,
                 text=vt.text,
                 segments=[{"start": s.start, "duration": s.duration, "text": s.text} for s in vt.segments],
             )
-            session.add(transcript)
             await session.flush()
         else:
             vt = VideoTranscript(
@@ -66,6 +66,16 @@ async def _prepare_source(session: AsyncSession, entry: Entry) -> tuple[str, str
     if len(text) < MIN_SOURCE_CHARS:
         raise SummarizerError("Le contenu est trop court pour être résumé (l'article complet n'a pas pu être récupéré)")
     return "article", text, "article"
+
+
+async def prepare_source(session: AsyncSession, entry_id: int) -> str:
+    """Texte réellement envoyé au modèle (extraction ou transcription comprises, sans appel LLM) :
+    base de l'estimation d'un résumé automatique avant la réservation de budget."""
+    entry = (
+        await session.execute(select(Entry).options(selectinload(Entry.feed), selectinload(Entry.transcript)).where(Entry.id == entry_id))
+    ).scalar_one()
+    _, text, _ = await _prepare_source(session, entry)
+    return text
 
 
 def _chunks(text: str, size: int = CHUNK_SIZE) -> list[str]:

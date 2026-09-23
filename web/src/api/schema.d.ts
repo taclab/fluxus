@@ -222,6 +222,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/feeds/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Update Feeds
+         * @description Applique les mêmes réglages à une sélection de flux (tout ou rien).
+         */
+        post: operations["bulk_update_feeds_api_feeds_bulk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feeds/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Feed Stats
+         * @description Activité de chaque flux (écran Abonnements) : aide à choisir l'intervalle de récupération.
+         */
+        get: operations["feed_stats_api_feeds_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/feeds/{feed_id}": {
         parameters: {
             query?: never;
@@ -236,6 +276,43 @@ export interface paths {
         post?: never;
         /** Delete Feed */
         delete: operations["delete_feed_api_feeds__feed_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feeds/{feed_id}/summarize-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Summarize Feed All
+         * @description « Résumer les non résumés » d'un flux : lot déclenché par l'utilisateur, borné par le budget du jour.
+         */
+        post: operations["summarize_feed_all_api_feeds__feed_id__summarize_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/view-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set View Mode */
+        put: operations["set_view_mode_api_view_mode_put"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -610,6 +687,8 @@ export interface components {
             title: string;
             /** Position */
             position?: number | null;
+            /** View Mode */
+            view_mode?: ("compact" | "cards" | "grid" | "magazine" | "list" | "titles" | "inherit") | null;
         };
         /** CategoryOut */
         CategoryOut: {
@@ -619,6 +698,8 @@ export interface components {
             title: string;
             /** Position */
             position: number;
+            /** View Mode */
+            view_mode?: ("compact" | "cards" | "grid" | "magazine" | "list" | "titles") | null;
             /**
              * Unread Count
              * @default 0
@@ -783,6 +864,17 @@ export interface components {
             /** Starred */
             starred?: boolean | null;
         };
+        /** FeedBulkIn */
+        FeedBulkIn: {
+            /** Feed Ids */
+            feed_ids: number[];
+            changes: components["schemas"]["FeedSettingsIn"];
+        };
+        /** FeedBulkOut */
+        FeedBulkOut: {
+            /** Feeds */
+            feeds: components["schemas"]["FeedOut"][];
+        };
         /** FeedCreate */
         FeedCreate: {
             /** Url */
@@ -825,6 +917,8 @@ export interface components {
             next_fetch_at: string;
             /** Fetch Interval Min */
             fetch_interval_min: number;
+            /** Fetch Interval Fixed Min */
+            fetch_interval_fixed_min?: number | null;
             /** Error Count */
             error_count: number;
             /** Last Error */
@@ -835,6 +929,18 @@ export interface components {
             is_youtube: boolean;
             /** Disabled */
             disabled: boolean;
+            /** View Mode */
+            view_mode?: ("compact" | "cards" | "grid" | "magazine" | "list" | "titles") | null;
+            /**
+             * Auto Summary
+             * @default false
+             */
+            auto_summary: boolean;
+            /**
+             * Summary Daily Cap
+             * @default 10
+             */
+            summary_daily_cap: number;
             /**
              * Unread Count
              * @default 0
@@ -846,12 +952,11 @@ export interface components {
              */
             updated_at: string;
         };
-        /** FeedUpdate */
-        FeedUpdate: {
-            /** Title */
-            title?: string | null;
-            /** Url */
-            url?: string | null;
+        /**
+         * FeedSettingsIn
+         * @description Réglages applicables à un flux comme à une sélection de flux (écran Abonnements).
+         */
+        FeedSettingsIn: {
             /** Category Id */
             category_id?: number | null;
             /**
@@ -863,8 +968,53 @@ export interface components {
             extraction_mode?: ("none" | "http" | "browser" | "auto") | null;
             /** Disabled */
             disabled?: boolean | null;
-            /** Fetch Interval Min */
-            fetch_interval_min?: number | null;
+            /** View Mode */
+            view_mode?: ("compact" | "cards" | "grid" | "magazine" | "list" | "titles" | "inherit") | null;
+            /** Auto Summary */
+            auto_summary?: boolean | null;
+            /** Summary Daily Cap */
+            summary_daily_cap?: number | null;
+            /** Fetch Interval Fixed Min */
+            fetch_interval_fixed_min?: number | null;
+        };
+        /** FeedStats */
+        FeedStats: {
+            /** Feed Id */
+            feed_id: number;
+            /** Entries 7D */
+            entries_7d: number;
+            /** Entries 30D */
+            entries_30d: number;
+            /** Last Entry At */
+            last_entry_at: string | null;
+            /** Auto Summaries Today */
+            auto_summaries_today: number;
+        };
+        /** FeedUpdate */
+        FeedUpdate: {
+            /** Category Id */
+            category_id?: number | null;
+            /**
+             * Clear Category
+             * @default false
+             */
+            clear_category: boolean;
+            /** Extraction Mode */
+            extraction_mode?: ("none" | "http" | "browser" | "auto") | null;
+            /** Disabled */
+            disabled?: boolean | null;
+            /** View Mode */
+            view_mode?: ("compact" | "cards" | "grid" | "magazine" | "list" | "titles" | "inherit") | null;
+            /** Auto Summary */
+            auto_summary?: boolean | null;
+            /** Summary Daily Cap */
+            summary_daily_cap?: number | null;
+            /** Fetch Interval Fixed Min */
+            fetch_interval_fixed_min?: number | null;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
         };
         /** FetchContentIn */
         FetchContentIn: {
@@ -1136,6 +1286,8 @@ export interface components {
             auto_summary: boolean;
             /** Summary Daily Cap */
             summary_daily_cap: number;
+            /** View Mode */
+            view_mode?: ("compact" | "cards" | "grid" | "magazine" | "list" | "titles") | null;
             /**
              * Match Count
              * @default 0
@@ -1200,6 +1352,17 @@ export interface components {
              */
             unread_only: boolean;
         };
+        /** SummarizeAllOut */
+        SummarizeAllOut: {
+            /** Queued */
+            queued: number;
+            /** Skipped Budget */
+            skipped_budget: number;
+            /** Already Summarized */
+            already_summarized: number;
+            /** Budget Remaining */
+            budget_remaining: number;
+        };
         /** SummaryOut */
         SummaryOut: {
             /** Id */
@@ -1245,6 +1408,12 @@ export interface components {
             server_time: string;
             /** Retention Days */
             retention_days: number;
+            /**
+             * Default View Mode
+             * @default compact
+             * @enum {string}
+             */
+            default_view_mode: "compact" | "cards" | "grid" | "magazine" | "list" | "titles";
             /** Categories */
             categories: components["schemas"]["CategoryOut"][];
             /** Feeds */
@@ -1313,6 +1482,24 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * ViewModeUpdate
+         * @description Présentation choisie depuis l'en-tête d'une vue ; `default` modifie le défaut global.
+         */
+        ViewModeUpdate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "feed" | "category" | "smart" | "default";
+            /** Id */
+            id?: number | null;
+            /**
+             * View Mode
+             * @enum {string}
+             */
+            view_mode: "compact" | "cards" | "grid" | "magazine" | "list" | "titles" | "inherit";
         };
     };
     responses: never;
@@ -1778,6 +1965,59 @@ export interface operations {
             };
         };
     };
+    bulk_update_feeds_api_feeds_bulk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedBulkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedBulkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    feed_stats_api_feeds_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedStats"][];
+                };
+            };
+        };
+    };
     get_feed_api_feeds__feed_id__get: {
         parameters: {
             query?: never;
@@ -1854,6 +2094,72 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    summarize_feed_all_api_feeds__feed_id__summarize_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feed_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SummarizeAllIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummarizeAllOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_view_mode_api_view_mode_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewModeUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
@@ -2463,9 +2769,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["SummarizeAllOut"];
                 };
             };
             /** @description Validation Error */

@@ -10,9 +10,19 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..jobs.queue import enqueue
-from ..models import Entry, Feed, Job, LlmUsage, SmartFeed, SmartFeedMatch, Summary
+from ..models import Entry, Feed, SmartFeed, SmartFeedMatch, Summary
 from ..settings_store import get_setting
+from ..summarize.auto import (  # noqa: F401 (réexportés : API historique du module)
+    already_summarized,
+    auto_budget,
+    auto_tokens_today,
+    estimate_input_tokens,
+    pending_jobs,
+    queue_auto,
+    queue_batch,
+    reserve_auto_budget,
+    today_start,
+)
 from .rules import InvalidDefinition, SmartFeedDefinition, build_condition, scope_includes_feed, uses_content
 
 log = logging.getLogger(__name__)
@@ -20,8 +30,6 @@ log = logging.getLogger(__name__)
 EVALUATE_TIMEOUT = "5s"
 APPLY_TIMEOUT = "15s"
 PREVIEW_LIMIT = 8
-# Étalement des résumés automatiques : un job toutes les 20 s pour ne pas monopoliser le worker.
-AUTO_SUMMARY_SPACING = timedelta(seconds=20)
 
 
 class RegexRejected(ValueError):
@@ -34,11 +42,6 @@ class EvaluationFailed(RuntimeError):
     À distinguer d'un résultat vide : « aucune correspondance » n'est jamais renvoyé par erreur.
     """
 
-
-# Verrou consultatif de la réservation de budget LLM (sérialise le contrôle « solde + réservation »).
-BUDGET_LOCK_KEY = 727002
-# Une réservation jamais soldée (processus tué) cesse de peser sur le budget après ce délai.
-RESERVATION_TTL = timedelta(hours=1)
 
 
 async def _set_timeout(session: AsyncSession, value: str) -> None:
@@ -257,99 +260,20 @@ async def smart_feed_ids_for(session: AsyncSession, entry_ids: list[int]) -> dic
     return out
 
 
+
+
 # --- Résumés automatiques ------------------------------------------------------------------------
-
-
-def _today_start() -> datetime:
-    now = datetime.now(UTC)
-    return now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-
-async def auto_tokens_today(session: AsyncSession) -> int:
-    """Consommation automatique du jour (UTC) d'après le journal `llm_usage` : tokens réels des appels
-    soldés (réussis ou échoués) + estimation des réservations en cours non expirées. Indépendant des
-    résumés conservés : un résumé supprimé ou un appel échoué a coûté quand même."""
-    settled = (
-        await session.execute(
-            select(func.coalesce(func.sum(LlmUsage.tokens), 0)).where(
-                LlmUsage.origin == "auto", LlmUsage.status.in_(["done", "failed"]), LlmUsage.created_at >= _today_start()
-            )
-        )
-    ).scalar_one()
-    reserved = (
-        await session.execute(
-            select(func.coalesce(func.sum(LlmUsage.estimated_tokens), 0)).where(
-                LlmUsage.origin == "auto",
-                LlmUsage.status == "reserved",
-                LlmUsage.created_at >= _today_start(),
-                LlmUsage.created_at >= datetime.now(UTC) - RESERVATION_TTL,
-            )
-        )
-    ).scalar_one()
-    return int(settled) + int(reserved)
-
-
-# Plancher de sortie sous lequel un résumé n'a plus de sens : on abandonne plutôt que de tronquer.
-MIN_OUTPUT_TOKENS = 256
-MAX_OUTPUT_TOKENS = 4000
-
-
-def estimate_input_tokens(text: str) -> int:
-    """Estimation prudente (≈ 3 caractères par token en français) + enveloppe des consignes."""
-    return len(text) // 3 + 300
-
-
-async def reserve_auto_budget(session: AsyncSession, *, entry_id: int, smart_feed_id: int | None, input_tokens: int) -> LlmUsage | None:
-    """Réserve, sous verrou consultatif, la part de budget d'un résumé automatique.
-
-    Renvoie la ligne `reserved` (avec `estimated_tokens` = entrée + sortie plafonnée) ou None si le solde
-    ne permet pas au moins MIN_OUTPUT_TOKENS de sortie. La réservation doit être committée par l'appelant
-    avant l'appel externe. Le plafond de sortie à appliquer est `estimated_tokens - input_tokens`.
-    """
-    budget = await auto_budget(session)
-    if budget <= 0:
-        return None
-    await session.execute(select(func.pg_advisory_xact_lock(BUDGET_LOCK_KEY)))
-    used = await auto_tokens_today(session)
-    output_cap = min(MAX_OUTPUT_TOKENS, budget - used - input_tokens)
-    if output_cap < MIN_OUTPUT_TOKENS:
-        return None
-    row = LlmUsage(entry_id=entry_id, smart_feed_id=smart_feed_id, origin="auto", status="reserved", estimated_tokens=input_tokens + output_cap)
-    session.add(row)
-    await session.flush()
-    return row
-
-
-async def auto_budget(session: AsyncSession) -> int:
-    try:
-        return max(0, int(await get_setting(session, "llm_auto_daily_token_budget") or 0))
-    except ValueError:
-        return 0
+# Budget, réservation et mise en file : `summarize/auto.py` (partagés avec les flux « tout résumer »).
 
 
 async def auto_count_today(session: AsyncSession, smart_feed_id: int) -> int:
     """Résumés déjà produits aujourd'hui + jobs en attente ou en cours (sinon la concurrence dépasse le quota)."""
     done = (
         await session.execute(
-            select(func.count()).where(Summary.origin == "auto", Summary.smart_feed_id == smart_feed_id, Summary.created_at >= _today_start())
+            select(func.count()).where(Summary.origin == "auto", Summary.smart_feed_id == smart_feed_id, Summary.created_at >= today_start())
         )
     ).scalar_one()
-    pending = (
-        await session.execute(
-            select(func.count()).where(
-                Job.type == "summarize_entry",
-                Job.status.in_(["queued", "running"]),
-                Job.payload["smart_feed_id"].as_integer() == smart_feed_id,
-            )
-        )
-    ).scalar_one()
-    return int(done) + int(pending)
-
-
-async def _already_summarized(session: AsyncSession, entry_ids: set[int]) -> set[int]:
-    if not entry_ids:
-        return set()
-    return set((await session.execute(select(Summary.entry_id).where(Summary.entry_id.in_(entry_ids)))).scalars())
+    return int(done) + await pending_jobs(session, "smart_feed_id", smart_feed_id)
 
 
 async def schedule_auto_summaries(session: AsyncSession, new_pairs: list[tuple[SmartFeed, set[int]]]) -> int:
@@ -366,54 +290,15 @@ async def schedule_auto_summaries(session: AsyncSession, new_pairs: list[tuple[S
         remaining = sf.summary_daily_cap - await auto_count_today(session, sf.id)
         if remaining <= 0:
             continue
-        candidates = ids - await _already_summarized(session, ids)
-        # Les plus récents d'abord.
-        ordered = (await session.execute(select(Entry.id).where(Entry.id.in_(candidates)).order_by(Entry.published_at.desc()))).scalars().all()
-        for i, entry_id in enumerate(ordered[:remaining]):
-            job = await enqueue(
-                session,
-                "summarize_entry",
-                {"entry_id": entry_id, "smart_feed_id": sf.id},
-                dedupe_key=f"summarize:{entry_id}",
-                run_at=datetime.now(UTC) + AUTO_SUMMARY_SPACING * i,
-                max_attempts=2,
-            )
-            if job is not None:
-                queued += 1
+        candidates = ids - await already_summarized(session, ids)
+        queued += await queue_auto(session, candidates, remaining, {"smart_feed_id": sf.id})
     return queued
 
 
 async def summarize_all(session: AsyncSession, sf: SmartFeed, *, unread_only: bool) -> dict:
     """Met en file les articles du flux intelligent non encore résumés, dans la limite du budget restant."""
-    budget = await auto_budget(session)
-    used = await auto_tokens_today(session)
     q = select(Entry.id).join(SmartFeedMatch, SmartFeedMatch.entry_id == Entry.id).where(SmartFeedMatch.smart_feed_id == sf.id)
     if unread_only:
         q = q.where(Entry.read.is_(False))
     ids = set((await session.execute(q)).scalars())
-    summarized = await _already_summarized(session, ids)
-    candidates = ids - summarized
-    if budget <= 0 or used >= budget:
-        return {"queued": 0, "skipped_budget": len(candidates), "already_summarized": len(summarized), "budget_remaining": max(0, budget - used)}
-    # Estimation prudente : ~3 000 tokens par résumé (article moyen + sortie) ; le job réserve ensuite le
-    # montant exact sous verrou, ce qui rend le budget contraignant même en concurrence.
-    affordable = max(0, (budget - used) // 3000)
-    ordered = (await session.execute(select(Entry.id).where(Entry.id.in_(candidates)).order_by(Entry.published_at.desc()))).scalars().all()
-    queued = 0
-    for i, entry_id in enumerate(ordered[:affordable]):
-        job = await enqueue(
-            session,
-            "summarize_entry",
-            {"entry_id": entry_id, "smart_feed_id": sf.id, "manual_batch": True},
-            dedupe_key=f"summarize:{entry_id}",
-            run_at=datetime.now(UTC) + AUTO_SUMMARY_SPACING * i,
-            max_attempts=2,
-        )
-        if job is not None:
-            queued += 1
-    return {
-        "queued": queued,
-        "skipped_budget": max(0, len(ordered) - affordable),
-        "already_summarized": len(summarized),
-        "budget_remaining": max(0, budget - used),
-    }
+    return await queue_batch(session, ids, {"smart_feed_id": sf.id})

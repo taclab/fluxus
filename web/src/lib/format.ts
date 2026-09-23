@@ -12,6 +12,21 @@ export function relativeDate(iso: string): string {
   return format(d, 'd MMM yyyy', { locale: fr })
 }
 
+/** Date passée précédée de « il y a » quand c'est une durée : « il y a 5 min », « à l'instant », « hier ». */
+export function agoDate(iso: string): string {
+  const r = relativeDate(iso)
+  return /^\d/.test(r) ? `il y a ${r}` : r
+}
+
+/** Date à venir : « dans 25 min », « dans 3 h », « imminente ». */
+export function untilDate(iso: string): string {
+  const diff = Date.parse(iso) - Date.now()
+  if (diff <= 60_000) return 'imminente'
+  if (diff < 3600_000) return `dans ${Math.round(diff / 60_000)} min`
+  if (diff < 48 * 3600_000) return `dans ${Math.round(diff / 3600_000)} h`
+  return `dans ${Math.round(diff / (24 * 3600_000))} j`
+}
+
 export function fullDate(iso: string): string {
   const d = new Date(iso)
   if (isToday(d)) return `aujourd'hui à ${format(d, 'HH:mm')}`

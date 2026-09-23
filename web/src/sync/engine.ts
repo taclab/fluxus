@@ -10,6 +10,7 @@ import { api, isOnline, unwrap, type EntryOut, type SyncPull } from '../api/clie
 import { getToken } from '../api/auth'
 import { db, getMeta, setMeta, toLocalEntry, type LocalEntry } from '../db/db'
 import { flushDashboardLayout } from '../features/dashboard/useDashboardLayout'
+import { flushViewModes, mergeViewModes, migrateLegacyDisplay } from '../features/entries/useViewMode'
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error'
 
@@ -124,13 +125,14 @@ export function pushOutbox(): Promise<void> {
 }
 
 async function mergeFeeds(page: SyncPull) {
-  await db.transaction('rw', db.entries, db.feeds, db.categories, db.smartFeeds, db.summaries, async () => {
+  await db.transaction('rw', [db.entries, db.feeds, db.categories, db.smartFeeds, db.summaries, db.meta], async () => {
     await db.categories.clear()
     await db.categories.bulkPut(page.categories)
     await db.feeds.clear()
     await db.feeds.bulkPut(page.feeds)
     await db.smartFeeds.clear()
     await db.smartFeeds.bulkPut(page.smart_feeds)
+    await mergeViewModes(page)
     // Entrées dont le flux a été supprimé côté serveur.
     const orphanIds = await db.entries.where('feed_id').noneOf(page.feed_ids).primaryKeys()
     if (orphanIds.length) {
@@ -138,6 +140,7 @@ async function mergeFeeds(page: SyncPull) {
       await db.summaries.where('entry_id').anyOf(orphanIds).delete()
     }
   })
+  await migrateLegacyDisplay(page.default_view_mode)
 }
 
 async function mergeEntries(page: SyncPull) {
@@ -195,6 +198,7 @@ export async function syncNow(): Promise<void> {
     try {
       await pushOutbox()
       await flushDashboardLayout()
+      await flushViewModes()
       const since = (await getMeta('sync.since')) ?? undefined
       let cursor: string | undefined
       let runStartedAt: string | undefined

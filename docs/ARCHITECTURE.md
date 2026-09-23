@@ -121,11 +121,11 @@ jobs            settings (clé/valeur)          device_tokens
 
 | Table | Rôle | Colonnes notables |
 |---|---|---|
-| `categories` | dossiers de la barre latérale | `title` unique, `position` |
-| `feeds` | abonnements | `url` unique · `position` (ordre manuel dans son dossier ; sans dossier, sur la même échelle que `categories.position` : la racine mélange dossiers et flux ; un nouveau flux prend `min(position) − 1` de son conteneur) · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` |
+| `categories` | dossiers de la barre latérale | `title` unique, `position` · `view_mode` (présentation, héritée par ses flux ; null = défaut) |
+| `feeds` | abonnements | `url` unique · `position` (ordre manuel dans son dossier ; sans dossier, sur la même échelle que `categories.position` : la racine mélange dossiers et flux ; un nouveau flux prend `min(position) − 1` de son conteneur) · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` · `fetch_interval_fixed_min` (null = adaptatif) · `view_mode` (null = dossier, puis défaut) · `auto_summary`, `summary_daily_cap` (résumés automatiques de tous les nouveaux articles) |
 | `entries` | articles | `guid` unique par flux · `hash` (dédup par URL normalisée ou titre+date) · `summary_html` (contenu du flux, nettoyé) · `content_html`, `content_text`, `extraction_status` ∈ {`none`,`pending`,`done`,`failed`} · `read`, `starred` · `meta` JSONB (`youtube_id`, `cover`, `enclosures`, `extraction_method`) · `updated_at` (pivot de la synchronisation) · `search_vector` |
 | `summaries` | résumés produits | `kind` ∈ {`article`,`video`} · `provider`, `model`, `prompt_version` · `text_md` · `input_tokens`, `output_tokens` · `origin` ∈ {`manual`,`auto`} · `smart_feed_id` (SET NULL) |
-| `smart_feeds` | recherches enregistrées | `name` unique · `scope_kind` ∈ {`all`,`category`,`feed`}, `scope_id` · `mode` ∈ {`keywords`,`regex`} · `keywords_any/all/none` JSONB · `regex` (≤ 300) · `fields` JSONB (title, excerpt, author, url, content) · `auto_summary`, `summary_daily_cap` |
+| `smart_feeds` | recherches enregistrées | `name` unique · `scope_kind` ∈ {`all`,`category`,`feed`}, `scope_id` · `mode` ∈ {`keywords`,`regex`} · `keywords_any/all/none` JSONB · `regex` (≤ 300) · `fields` JSONB (title, excerpt, author, url, content) · `auto_summary`, `summary_daily_cap` · `view_mode` |
 | `smart_feed_matches` | correspondances calculées | PK (`smart_feed_id`, `entry_id`), `matched_at` ; exposées comme `smart_feed_ids` sur chaque entrée |
 | `transcripts` | sous-titres YouTube | `language`, `text`, `segments` JSONB (`start`, `duration`, `text`) |
 | `jobs` | file de travail | `type`, `payload` JSONB · `status` ∈ {`queued`,`running`,`done`,`failed`} · `run_at`, `attempts`, `max_attempts`, `locked_at` · `dedupe_key` (index unique partiel) |
@@ -286,9 +286,16 @@ feeds.update_feed (catégorie) ► reevaluate_feed(feed)
 instruction) de la différence symétrique : les clients reçoivent les entrées qui entrent **et** qui
 sortent, `bulkPut` remplaçant l'objet entier. `remove` collecte les ids avant la cascade.
 
-Résumés automatiques : quota du jour = résumés `origin='auto'` du flux intelligent + jobs
-`summarize_entry` en attente ou en cours ; budget global = tokens `origin='auto'` du jour (UTC) ;
-vérifiés à la planification et au démarrage du job. Le job classe les erreurs : permanentes
+Résumés automatiques (`summarize/auto.py` : budget, réservation, mise en file, partagés) : quota du
+jour = résumés `origin='auto'` du flux intelligent + jobs `summarize_entry` en attente ou en cours ;
+budget global = tokens `origin='auto'` du jour (UTC) d'après `llm_usage` ; vérifiés à la
+planification et au démarrage du job. Un **flux** peut aussi résumer tous ses nouveaux articles
+(`feeds.auto_summary`, opt-in) : `schedule_feed_auto_summaries` est appelé à l'insertion, après les
+flux intelligents ; son quota compte les résumés `auto` du jour des articles du flux + les jobs dont
+`payload.feed_id` est ce flux ; le job vérifie que l'option est toujours active. La clé de
+dédoublonnage `summarize:{entry_id}` est commune : un article couvert par les deux n'est résumé
+qu'une fois. « Résumer les non résumés » existe pour un flux (`POST /api/feeds/{id}/summarize-all`)
+comme pour un flux intelligent : lot manuel borné par le budget restant. Le job classe les erreurs : permanentes
 (contenu absent, clé absente…) → terminé sans relance ; fournisseur → relance ×2. Modèle dédié
 `llm_auto_model` via `build_summarizer({**settings, "llm_model": …})`.
 
@@ -406,25 +413,54 @@ Dashboard ─ DashboardDataProvider (feeds, categories, unreadByFeed : 3 liveQue
   poignée seulement) et clavier (`sortableKeyboardCoordinates`). Le drag n'est actif qu'en mode
   « Personnaliser » ; le menu Monter/Descendre couvre l'accessibilité et le mobile.
 
-### Disposition de lecture (`app/display.ts`, `features/reader/ReaderModal.tsx`)
+### Présentation par vue (`features/entries/viewMode.ts`, `useViewMode.ts`, `features/reader/ReaderModal.tsx`)
 
-Préférence par appareil `fluxus.listLayout` (`split` par défaut, `full`), exposée par
-`useListLayout()` (`useSyncExternalStore`) et modifiable uniquement dans Paramètres → Affichage. En
-`full`, `Layout` monte `EntryList` en `flex-1` avec `layout="full"` et, si un article est ouvert, la
-fenêtre `ReaderModal` (portail, plein écran sous `md`) qui contient le `Reader` habituel avec
-`onBack` = fermer ; `← →` sont déclarées **dans la fenêtre** (`useKeyboard` monté avec elle, donc
-jamais capturées ailleurs) et appellent le même `move()` que `j/k` ; la position « n / total » vient
-de l'ordre fourni par `onVisibleEntries` (état de `Layout`, remplacé seulement si l'ordre change). La
-fenêtre **ne porte pas `data-dialog`** : les raccourcis globaux doivent y rester actifs (à la
-différence des vrais dialogues). `EntryList` mémorise une
-présentation par disposition (`fluxus.density` en colonnes : compacte, cartes ; `fluxus.fullDensity`
-en pleine largeur : grille, magazine, liste, titres) choisie par le menu de l'en-tête, le tout dérivé
-d'une table unique `VARIANTS` (libellé, icône, disposition, classes du `<ul>`) et de préférences
-validées par `createDevicePref` (`app/devicePref.ts`, aussi utilisé par `display.ts`). Dans les rendus
-pleine largeur (`FullRow`), le titre est le seul bouton d'ouverture, étiré sur la ligne par un
-pseudo-élément ; les actions rapides favori et lu sont des frères placés au-dessus : pas de bouton dans
-un bouton, Entrée sur « favori » n'ouvre pas l'article. L'élément d'ouverture de chaque ligne porte
-`data-entry-focus`, contrat que la fenêtre de lecture cible pour rendre le focus à la fermeture.
+Six présentations dans une table unique `VIEW_MODE_SPECS` (libellé, icône, disposition, classes du
+`<ul>`) : `compact` et `cards` gardent l'article **à côté** de la liste, `grid`, `magazine`, `list` et
+`titles` donnent la **pleine largeur**. La disposition se déduit de la présentation (`layoutOf`) : il
+n'y a plus de réglage de disposition séparé.
+
+La présentation est un **attribut serveur**, synchronisé : colonne `view_mode` (nullable) de `feeds`,
+`categories` et `smart_feeds`, et réglage `default_view_mode` (envoyé aussi dans `GET /api/sync`).
+Résolution (`resolveViewMode`, pur) : flux → son dossier → défaut ; dossier ou flux intelligent → le
+sien → défaut ; Tous, Non lus, Favoris et Recherche → défaut, donc le menu de ces vues modifie le
+défaut. `useViewMode(view)` lit par clé dans Dexie (`feeds.get`, `categories.get`, `meta`), sans
+scan. `Layout` résout une fois et passe le résultat à `EntryList` ; rien n'est monté tant que la
+première lecture n'est pas revenue, pour éviter une disposition qui basculerait aussitôt.
+
+Écriture (`setViewMode(target, mode | 'inherit')`) : mise à jour Dexie immédiate, puis
+`PUT /api/view-mode` ; en cas d'échec réseau le choix reste dans `meta.viewMode.pending`, rejoué par
+`syncNow` avant la passe de lecture, et réappliqué par `mergeFeeds` (dans la même transaction) tant
+qu'il n'est pas parti. Les écritures par un autre chemin (fenêtre du flux, action groupée) retirent la
+clé de la file (`forgetPendingViewModes`). Les anciennes préférences d'appareil
+(`fluxus.listLayout`, `fluxus.density`, `fluxus.fullDensity`) sont reprises une fois comme défaut si
+le serveur a encore le défaut d'origine, puis effacées.
+
+En pleine largeur, `Layout` monte `EntryList` en `flex-1` et, si un article est ouvert, la fenêtre
+`ReaderModal` (portail, plein écran sous `md`) qui contient le `Reader` habituel avec `onBack` =
+fermer ; `← →` sont déclarées **dans la fenêtre** (`useKeyboard` monté avec elle) et appellent le
+même `move()` que `j/k` ; la position « n / total » vient de l'ordre fourni par `onVisibleEntries`.
+La fenêtre **ne porte pas `data-dialog`** : les raccourcis globaux doivent y rester actifs. Dans les
+rendus pleine largeur (`FullRow`), le titre est le seul bouton d'ouverture, étiré sur la ligne par un
+pseudo-élément ; les actions rapides favori et lu sont des frères placés au-dessus. L'élément
+d'ouverture de chaque ligne porte `data-entry-focus`, contrat que la fenêtre de lecture cible pour
+rendre le focus à la fermeture.
+
+### Écran Abonnements (`features/feeds/SubscriptionsPage.tsx`, `feedSettings.ts`)
+
+Route `/abonnements`. Flux et dossiers lus dans Dexie (consultables hors ligne), activité
+(`GET /api/feeds/stats` : articles sur 7 et 30 jours, dernier article, résumés automatiques du jour,
+une requête agrégée) et budget en ligne. Tableau groupé par dossier dans l'ordre `position` (ou liste
+triée), édition sur place optimiste (`updateFeed` : patch Dexie, `PUT /feeds/{id}`, réponse serveur
+ou retour arrière), actions groupées par `POST /api/feeds/bulk` (tout ou rien, même logique que la
+modification unitaire : `feeds/router._apply_feed_settings`). Sur téléphone, une carte par flux ouvre
+`FeedDialog`, qui partage libellés et écritures via `feedSettings.ts`.
+
+Réglages par flux côté serveur : `disabled` (plus aucune récupération), `extraction_mode` (« toujours »
+= extraction de chaque nouvel article en arrière-plan), `fetch_interval_fixed_min` (null = intervalle
+adaptatif ; sinon `_next_interval` le renvoie tel quel, le recul sur erreur ne descend jamais sous lui,
+et un changement avance `next_fetch_at` sans jamais le reculer), `auto_summary` + `summary_daily_cap`
+(voir ci-dessous) et `view_mode`.
 
 ### Ordre de la barre latérale (`features/feeds/SubscriptionTree.tsx`, `sidebarOrder.ts`)
 

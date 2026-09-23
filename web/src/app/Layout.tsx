@@ -7,12 +7,13 @@ import { db } from '../db/db'
 import { recordChange } from '../sync/engine'
 import { Dashboard } from '../features/dashboard/Dashboard'
 import { EntryList } from '../features/entries/EntryList'
+import { useViewMode } from '../features/entries/useViewMode'
+import { DEFAULT_VIEW_MODE, layoutOf } from '../features/entries/viewMode'
 import { CategoryDialog, FeedDialog } from '../features/feeds/FeedDialog'
 import { Sidebar } from '../features/feeds/Sidebar'
 import { SmartFeedDialog } from '../features/smartfeeds/SmartFeedDialog'
 import { openExternal, Reader } from '../features/reader/Reader'
 import { ReaderModal } from '../features/reader/ReaderModal'
-import { useListLayout } from './display'
 import { useKeyboard } from './useKeyboard'
 import { useView } from './view'
 
@@ -30,9 +31,11 @@ function useMediaQuery(query: string): boolean {
 export function Layout() {
   const { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly, openEntryIn } = useView()
   const isDashboard = view.kind === 'dashboard'
-  const listLayout = useListLayout()
-  // Disposition « pleine largeur » : la liste occupe tout, l'article s'ouvre dans une fenêtre.
-  const fullList = listLayout === 'full' && !isDashboard
+  // Présentation propre à la vue (flux → dossier → défaut) ; elle fixe aussi la disposition :
+  // « pleine largeur », la liste occupe tout et l'article s'ouvre dans une fenêtre.
+  const viewMode = useViewMode(view)
+  const mode = viewMode?.mode ?? DEFAULT_VIEW_MODE
+  const fullList = layoutOf(mode) === 'full' && !isDashboard
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const isTablet = useMediaQuery('(min-width: 768px)')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -111,8 +114,10 @@ export function Layout() {
   useKeyboard(isDashboard ? dashboardShortcuts : shortcuts)
 
   // Mobile : une seule colonne à la fois. Pleine largeur : la liste reste toujours montée, l'article vit dans la fenêtre.
-  const showList = fullList || isTablet || entryId === null
-  const showReader = !fullList && (isTablet || entryId !== null)
+  // Première lecture de la présentation : rien n'est monté plutôt qu'une disposition qui basculerait aussitôt.
+  const ready = viewMode !== undefined
+  const showList = ready && (fullList || isTablet || entryId === null)
+  const showReader = ready && !fullList && (isTablet || entryId !== null)
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -139,7 +144,7 @@ export function Layout() {
       {!isDashboard && showList && (
         <div className={clsx(fullList ? 'flex-1 min-w-0' : clsx('shrink-0 border-r border-app', isTablet ? 'w-[24rem] xl:w-[26rem]' : 'w-full'))}>
           <EntryList
-            layout={fullList ? 'full' : 'split'}
+            viewMode={viewMode}
             view={view}
             unreadOnly={unreadOnly}
             selectedId={entryId}
@@ -165,7 +170,7 @@ export function Layout() {
         </div>
       )}
 
-      {fullList && entryId !== null && (
+      {ready && fullList && entryId !== null && (
         <ReaderModal entryId={entryId} index={visibleIndex} total={visible.length} onClose={() => setEntry(null)} onMove={move}>
           <Reader
             entryId={entryId}

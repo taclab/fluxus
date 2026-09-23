@@ -29,7 +29,10 @@ class FetchResult:
 
 
 def _next_interval(feed: Feed, parsed: ParsedFeed | None, new_entries: int) -> int:
-    """Intervalle adaptatif : dense si le flux publie beaucoup, plus lâche sinon."""
+    """Intervalle adaptatif : dense si le flux publie beaucoup, plus lâche sinon ; l'intervalle fixe
+    choisi par l'utilisateur prime."""
+    if feed.fetch_interval_fixed_min:
+        return feed.fetch_interval_fixed_min
     settings = get_settings()
     lo, hi = settings.min_fetch_interval_min, settings.max_fetch_interval_min
     current = feed.fetch_interval_min or settings.default_fetch_interval_min
@@ -151,7 +154,11 @@ async def _insert_new_entries(session: AsyncSession, feed: Feed, parsed: ParsedF
     # Flux intelligents : correspondances des nouveaux articles, puis résumés automatiques sous quotas.
     if new_entries:
         from ..smartfeeds.service import evaluate, schedule_auto_summaries
+        from ..summarize.auto import schedule_feed_auto_summaries
 
+        # Flux « tout résumer » d'abord : sa promesse porte sur chaque nouvel article, alors qu'un job de
+        # flux intelligent peut être abandonné (règle modifiée). Clé de dédoublonnage commune : un seul résumé.
+        await schedule_feed_auto_summaries(session, feed, [e.id for e in new_entries])
         pairs = await evaluate(session, feed, [e.id for e in new_entries])
         if pairs:
             await schedule_auto_summaries(session, pairs)
@@ -175,10 +182,13 @@ async def _record_error(session: AsyncSession, feed: Feed, message: str, now: da
     feed.error_count += 1
     feed.last_error = message[:2000]
     feed.last_fetched_at = now
-    # Recul exponentiel plafonné : 2^n × intervalle courant.
-    backoff = min(
-        settings.max_fetch_interval_min,
-        (feed.fetch_interval_min or settings.default_fetch_interval_min) * (2 ** min(feed.error_count, 6)),
+    # Recul exponentiel plafonné : 2^n × intervalle courant (jamais moins que l'intervalle fixe).
+    backoff = max(
+        feed.fetch_interval_fixed_min or 0,
+        min(
+            settings.max_fetch_interval_min,
+            (feed.fetch_interval_min or settings.default_fetch_interval_min) * (2 ** min(feed.error_count, 6)),
+        ),
     )
     feed.next_fetch_at = now + timedelta(minutes=backoff)
     log.info("flux #%s en erreur (%s): %s", feed.id, feed.error_count, message)

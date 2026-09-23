@@ -5,6 +5,7 @@ import { getToken, isCapacitor } from '../api/auth'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { ToastProvider } from '../components/ui'
 import { LoginPage } from '../features/auth/LoginPage'
+import { SubscriptionsPage } from '../features/feeds/SubscriptionsPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 import { startAutoSync } from '../sync/engine'
 import { Layout } from './Layout'
@@ -59,6 +60,7 @@ export function App() {
         {authed ? (
           <Routes>
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/abonnements" element={<SubscriptionsPage />} />
             <Route path="/all" element={<Layout />} />
             <Route path="/feed/:id" element={<Layout />} />
             <Route path="/category/:id" element={<Layout />} />

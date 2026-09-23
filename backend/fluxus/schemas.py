@@ -5,21 +5,34 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ExtractionMode = Literal["none", "http", "browser", "auto"]
+# Présentation de la liste d'une vue : compact et cards gardent l'article à côté de la liste,
+# les autres occupent toute la largeur et ouvrent l'article dans une fenêtre.
+ViewMode = Literal["compact", "cards", "grid", "magazine", "list", "titles"]
+VIEW_MODES: tuple[str, ...] = ("compact", "cards", "grid", "magazine", "list", "titles")
+# En écriture, « inherit » efface la présentation propre (retour au dossier ou au défaut).
+ViewModeIn = Literal["compact", "cards", "grid", "magazine", "list", "titles", "inherit"]
+
+
+def view_mode_value(value: str) -> str | None:
+    """Valeur à stocker pour une présentation reçue : null pour « inherit »."""
+    return None if value == "inherit" else value
 
 
 class CategoryOut(BaseModel):
     id: int
     title: str
     position: int
+    view_mode: ViewMode | None = None
     unread_count: int = 0
 
 
 class CategoryIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     position: int | None = None
+    view_mode: ViewModeIn | None = None
 
 
 class FeedOut(BaseModel):
@@ -34,11 +47,15 @@ class FeedOut(BaseModel):
     last_fetched_at: datetime | None
     next_fetch_at: datetime
     fetch_interval_min: int
+    fetch_interval_fixed_min: int | None = None
     error_count: int
     last_error: str | None
     extraction_mode: str
     is_youtube: bool
     disabled: bool
+    view_mode: ViewMode | None = None
+    auto_summary: bool = False
+    summary_daily_cap: int = 10
     unread_count: int = 0
     updated_at: datetime
 
@@ -50,14 +67,58 @@ class FeedCreate(BaseModel):
     extraction_mode: ExtractionMode = "auto"
 
 
-class FeedUpdate(BaseModel):
-    title: str | None = Field(default=None, max_length=500)
-    url: str | None = Field(default=None, max_length=2048)
+class FeedSettingsIn(BaseModel):
+    """Réglages applicables à un flux comme à une sélection de flux (écran Abonnements)."""
+
     category_id: int | None = None
     clear_category: bool = False
     extraction_mode: ExtractionMode | None = None
     disabled: bool | None = None
-    fetch_interval_min: int | None = Field(default=None, ge=5, le=7 * 24 * 60)
+    view_mode: ViewModeIn | None = None
+    auto_summary: bool | None = None
+    summary_daily_cap: int | None = Field(default=None, ge=1, le=200)
+    # Minutes entre deux récupérations ; 0 = intervalle adaptatif.
+    fetch_interval_fixed_min: int | None = Field(default=None, ge=0, le=7 * 24 * 60)
+
+    @field_validator("fetch_interval_fixed_min")
+    @classmethod
+    def _interval(cls, value: int | None) -> int | None:
+        if value is not None and 0 < value < 5:
+            raise ValueError("L'intervalle fixe est d'au moins 5 minutes")
+        return value
+
+
+class FeedUpdate(FeedSettingsIn):
+    title: str | None = Field(default=None, max_length=500)
+    url: str | None = Field(default=None, max_length=2048)
+
+
+class FeedBulkIn(BaseModel):
+    feed_ids: list[int] = Field(min_length=1, max_length=2000)
+    changes: FeedSettingsIn
+
+
+class FeedBulkOut(BaseModel):
+    feeds: list[FeedOut]
+
+
+class FeedStats(BaseModel):
+    feed_id: int
+    entries_7d: int
+    entries_30d: int
+    last_entry_at: datetime | None
+    auto_summaries_today: int
+
+
+class SummarizeAllIn(BaseModel):
+    unread_only: bool = True
+
+
+class SummarizeAllOut(BaseModel):
+    queued: int
+    skipped_budget: int
+    already_summarized: int
+    budget_remaining: int
 
 
 class ReorderCategory(BaseModel):

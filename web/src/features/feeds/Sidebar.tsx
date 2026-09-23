@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Inbox, LayoutDashboard, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
+import { Inbox, LayoutDashboard, ListChecks, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -100,6 +100,9 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
       <div className="border-t border-app px-2 py-2 flex items-center gap-1 shrink-0">
         <Link to="/settings" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:text-app hover:bg-muted">
           <Settings className="size-4" /> Paramètres
+        </Link>
+        <Link to="/abonnements" title="Abonnements : gérer tous les flux" aria-label="Abonnements" className="flex items-center rounded-lg p-1.5 text-muted hover:text-app hover:bg-muted" data-testid="sidebar-subscriptions">
+          <ListChecks className="size-4" />
         </Link>
         <ThemeToggle />
         <div className="flex-1" />

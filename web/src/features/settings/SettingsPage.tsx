@@ -1,16 +1,17 @@
-import { ChevronLeft, Download, Trash2, Upload } from 'lucide-react'
+import { ChevronLeft, Download, ListChecks, Trash2, Upload } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { getServerUrl, isDeviceToken, getToken, setToken } from '../../api/auth'
 import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, type StatsOut } from '../../api/client'
-import { setListLayout, useListLayout, type ListLayout } from '../../app/display'
 import type { Theme } from '../../app/theme'
 import { useTheme } from '../../components/ThemeToggle'
 import { TypographyPicker } from '../../components/TypographyPicker'
 import { Button, Field, IconButton, Input, Select, Spinner, useToast } from '../../components/ui'
 import { clearDatabase } from '../../db/db'
 import { resetDashboardLayout } from '../dashboard/useDashboardLayout'
+import { setViewMode, useDefaultViewMode } from '../entries/useViewMode'
+import { LAYOUT_GROUPS, VIEW_MODE_SPECS, modesFor, type ListLayout } from '../entries/viewMode'
 import { formatTokens, relativeDate } from '../../lib/format'
 import { resetAndSync, syncNow } from '../../sync/engine'
 
@@ -249,8 +250,11 @@ export function SettingsPage() {
             </div>
           </Section>
 
-          <Section title="Affichage" description="Disposition de la liste et de l’article. Réglage propre à cet appareil.">
-            <LayoutPicker />
+          <Section
+            title="Affichage par défaut"
+            description="Présentation des vues Tous, Non lus, Favoris et Recherche, et de tout flux ou dossier sans présentation propre. Chaque flux ou dossier se règle depuis le menu Présentation de sa vue ou depuis l’écran Abonnements ; un flux sans réglage suit son dossier. Synchronisé entre appareils."
+          >
+            <DefaultViewModePicker />
           </Section>
 
           <Section title="Lecture" description="Combinaison de polices, taille et largeur de colonne pour les articles. Réglage propre à cet appareil, aussi accessible par le bouton Aa du lecteur.">
@@ -286,8 +290,11 @@ export function SettingsPage() {
             </div>
           </Section>
 
-          <Section title="Abonnements" description="Import et export au format OPML, compatible avec tous les lecteurs.">
+          <Section title="Abonnements" description="Réglages flux par flux (pause, article complet, résumés automatiques, intervalle, présentation) dans l’écran Abonnements ; import et export au format OPML, compatible avec tous les lecteurs.">
             <div className="flex flex-wrap gap-2">
+              <Button variant="primary" onClick={() => navigate('/abonnements')} data-testid="open-subscriptions">
+                <ListChecks className="size-4" /> Gérer les abonnements
+              </Button>
               <Button onClick={() => fileRef.current?.click()}>
                 <Upload className="size-4" /> Importer un OPML
               </Button>
@@ -383,36 +390,47 @@ export function SettingsPage() {
   )
 }
 
-const LAYOUTS: { id: ListLayout; label: string; description: string }[] = [
-  { id: 'split', label: 'Côte à côte', description: 'Liste à gauche, article à droite.' },
-  { id: 'full', label: 'Pleine largeur', description: 'Articles sur toute la largeur (grille, magazine, liste ou titres), lecture dans une fenêtre ; ← → pour changer d’article.' },
-]
+const LAYOUT_HINTS: Record<ListLayout, string> = {
+  split: 'Liste à gauche, article à droite.',
+  full: 'Articles sur toute la largeur, lecture dans une fenêtre ; ← → pour changer d’article.',
+}
 
-/** Choix de la disposition, avec un petit schéma de chaque mode. */
-function LayoutPicker() {
-  const current = useListLayout()
+/** Présentation par défaut : deux familles (article à côté / pleine largeur), avec un schéma de chacune. */
+function DefaultViewModePicker() {
+  const current = useDefaultViewMode()
   return (
-    <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Disposition">
-      {LAYOUTS.map((l) => {
-        const active = l.id === current
-        return (
-          <button
-            key={l.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            data-testid={`layout-${l.id}`}
-            onClick={() => setListLayout(l.id)}
-            className={`flex gap-3 rounded-xl border p-3 text-left transition-colors ${active ? 'border-accent-500 bg-accent-50 dark:bg-accent-900/20' : 'border-app hover:bg-muted'}`}
-          >
-            <LayoutSketch layout={l.id} />
+    <div className="grid gap-3 sm:grid-cols-2">
+      {LAYOUT_GROUPS.map((g) => (
+        <div key={g.layout} className="rounded-xl border border-app p-3">
+          <div className="flex gap-3">
+            <LayoutSketch layout={g.layout} />
             <span className="min-w-0">
-              <span className="block font-medium text-app">{l.label}</span>
-              <span className="block text-xs text-muted mt-0.5">{l.description}</span>
+              <span className="block font-medium text-app">{g.label}</span>
+              <span className="block text-xs text-muted mt-0.5">{LAYOUT_HINTS[g.layout]}</span>
             </span>
-          </button>
-        )
-      })}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label={g.label}>
+            {modesFor(g.layout).map((id) => {
+              const { Icon, label } = VIEW_MODE_SPECS[id]
+              const active = id === current
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  data-testid={`default-view-${id}`}
+                  onClick={() => void setViewMode({ kind: 'default' }, id)}
+                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm transition-colors ${active ? 'border-accent-500 bg-accent-50 font-medium text-app dark:bg-accent-900/20' : 'border-app text-muted hover:bg-muted'}`}
+                >
+                  <Icon className="size-4" />
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

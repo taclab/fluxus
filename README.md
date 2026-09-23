@@ -194,16 +194,37 @@ Sur tablette la barre latérale devient un tiroir ; sur téléphone un seul vole
 L'URL encode la vue courante (`/feed/12?entry=345&unread=1`) : le bouton retour et les favoris du
 navigateur fonctionnent.
 
-### Deux dispositions de lecture
+### Une présentation par flux
 
-Par défaut, la liste des articles est à gauche et l'article à droite. Dans **Paramètres → Affichage**,
-la disposition **Pleine largeur** donne toute la place à la liste : le menu de présentation, dans
-l'en-tête de la liste, propose alors **Grille** (cartes avec image), **Magazine** (vignette à gauche),
-**Liste** et **Titres**. Un clic sur un article l'ouvre dans une fenêtre centrée ; les flèches ← →,
-ou les boutons de part et d'autre, passent à l'article précédent ou suivant dans l'ordre de la liste,
-Échap ou le bouton retour referment. Les raccourcis habituels (m, s, v, f, r) restent actifs dans la
-fenêtre. Ces réglages sont propres à l'appareil ; en colonnes, le menu garde les présentations
-compacte et cartes.
+Le bouton **Présentation**, dans l'en-tête de chaque vue, propose six présentations en deux familles :
+**avec l'article à côté** (Compacte, Cartes : liste à gauche, article à droite) et **pleine largeur**
+(Grille avec images, Magazine avec vignette, Liste, Titres : un clic ouvre l'article dans une fenêtre
+centrée ; ← → ou les boutons de part et d'autre passent à l'article voisin, Échap referme ; les
+raccourcis m, s, v, f, r restent actifs).
+
+Le choix est **mémorisé pour la vue affichée** et synchronisé entre appareils : Hacker News en Liste,
+Korben en Magazine. Un flux sans présentation propre suit **son dossier**, puis la **présentation par
+défaut** (Paramètres → Affichage par défaut), qui vaut aussi pour Tous, Non lus, Favoris et Recherche.
+« Revenir à l'affichage du dossier » efface le choix propre à un flux.
+
+### Écran Abonnements
+
+**Abonnements** (icône en bas de la barre latérale, ou Paramètres → Gérer les abonnements) liste
+tous les flux par dossier, avec leur état (actif, en pause, en erreur ×n), la dernière et la prochaine
+récupération et l'activité des 7 derniers jours. Chaque réglage se modifie sur place :
+
+- **pause** : le flux n'est plus récupéré ;
+- **intervalle** : automatique (resserré quand le flux publie beaucoup, espacé quand il est calme) ou
+  fixe, de 15 min à une fois par jour ;
+- **article complet** : à la demande, ou toujours (chaque nouvel article est récupéré en arrière-plan,
+  lisible hors ligne), en HTTP ou via le navigateur pour les sites JavaScript ;
+- **résumés automatiques** : tous les nouveaux articles du flux sont résumés, au plus N par jour, dans
+  la limite du budget quotidien des résumés automatiques (partagé avec les flux intelligents) ;
+- **présentation** du flux et de chaque dossier.
+
+Recherche, filtres (dossier, état) et tris (nom, dernière récupération, activité, erreurs) ; en
+cochant plusieurs flux, une barre d'actions groupées applique pause, reprise, déplacement,
+présentation, article complet, intervalle, résumés automatiques, rafraîchissement ou désabonnement.
 
 ### Organiser la barre latérale
 

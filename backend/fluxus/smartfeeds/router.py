@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import Auth
 from ..db import get_session
 from ..models import Entry, SmartFeed, SmartFeedMatch
+from ..schemas import SummarizeAllIn, SummarizeAllOut, ViewMode
 from . import service
 from .rules import InvalidDefinition, normalize_definition
 
@@ -62,6 +63,7 @@ class SmartFeedOut(BaseModel):
     fields: dict[str, bool]
     auto_summary: bool
     summary_daily_cap: int
+    view_mode: ViewMode | None = None
     match_count: int = 0
     unread_count: int = 0
     auto_today: int = 0
@@ -84,10 +86,6 @@ class PreviewSample(BaseModel):
 class PreviewOut(BaseModel):
     count: int
     samples: list[PreviewSample]
-
-
-class SummarizeAllIn(BaseModel):
-    unread_only: bool = True
 
 
 class _DefView:
@@ -242,11 +240,11 @@ async def delete_smart_feed(smart_feed_id: int, _: Auth, session: Session) -> No
     await session.commit()
 
 
-@router.post("/{smart_feed_id}/summarize-all")
-async def summarize_all(smart_feed_id: int, body: SummarizeAllIn, _: Auth, session: Session) -> dict:
+@router.post("/{smart_feed_id}/summarize-all", response_model=SummarizeAllOut)
+async def summarize_all(smart_feed_id: int, body: SummarizeAllIn, _: Auth, session: Session) -> SummarizeAllOut:
     sf = await session.get(SmartFeed, smart_feed_id)
     if sf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Flux intelligent introuvable")
     result = await service.summarize_all(session, sf, unread_only=body.unread_only)
     await session.commit()
-    return result
+    return SummarizeAllOut(**result)

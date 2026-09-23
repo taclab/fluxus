@@ -35,6 +35,9 @@ class Category(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(200), unique=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
+    # Présentation de la liste (compact | cards | grid | magazine | list | titles) ; null = défaut global.
+    # Héritée par les flux du dossier qui n'ont pas la leur.
+    view_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -64,7 +67,10 @@ class Feed(Base):
     next_fetch_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+    # Intervalle effectif (adaptatif, recalculé à chaque récupération, sauf si un intervalle fixe est imposé).
     fetch_interval_min: Mapped[int] = mapped_column(Integer, default=30)
+    # Intervalle imposé par l'utilisateur (minutes) ; null = adaptatif.
+    fetch_interval_fixed_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text)
 
@@ -72,6 +78,11 @@ class Feed(Base):
     extraction_mode: Mapped[str] = mapped_column(String(20), default="auto")
     is_youtube: Mapped[bool] = mapped_column(Boolean, default=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Présentation de la liste ; null = celle du dossier, sinon le défaut global.
+    view_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Résumés automatiques des nouveaux articles (opt-in, quota quotidien + budget partagé).
+    auto_summary: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    summary_daily_cap: Mapped[int] = mapped_column(Integer, default=10, server_default="10")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -210,6 +221,8 @@ class SmartFeed(Base):
     fields: Mapped[dict] = mapped_column(JsonType, default=dict)
     auto_summary: Mapped[bool] = mapped_column(Boolean, default=False)
     summary_daily_cap: Mapped[int] = mapped_column(Integer, default=10)
+    # Présentation de la liste ; null = défaut global.
+    view_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

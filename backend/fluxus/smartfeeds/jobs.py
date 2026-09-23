@@ -1,4 +1,5 @@
-"""Job `summarize_entry` : résumé automatique déclenché par un flux intelligent, sous quota et budget."""
+"""Job `summarize_entry` : résumé automatique déclenché par un flux intelligent ou par un flux
+« tout résumer », sous quota et budget."""
 
 from __future__ import annotations
 
@@ -6,12 +7,14 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..extract.clean import html_to_text
 from ..jobs.registry import job_handler
-from ..models import Entry, Job, LlmUsage, SmartFeed
+from ..models import Entry, Feed, Job, LlmUsage, SmartFeed
 from ..settings_store import get_setting
-from ..summarize.service import summarize_entry
-from .service import auto_count_today, entry_matches, estimate_input_tokens, reserve_auto_budget
+from ..summarize.auto import estimate_input_tokens, feed_auto_count_today, reserve_auto_budget
+from ..summarize.providers import SummarizerError
+from ..summarize.service import prepare_source, summarize_entry
+from ..youtube.transcript import TranscriptUnavailable
+from .service import auto_count_today, entry_matches
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +52,21 @@ async def _still_wanted(session: AsyncSession, job: Job, entry_id: int, sf: Smar
     return True
 
 
+def _feed_still_wanted(job: Job, entry: Entry | None, feed: Feed | None) -> bool:
+    """Même principe côté flux : l'option doit rester active et l'article appartenir au flux."""
+    entry_id = job.payload["entry_id"]
+    if feed is None:
+        log.info("résumé auto #%s abandonné : flux supprimé", entry_id)
+        return False
+    if not job.payload.get("manual_batch") and not feed.auto_summary:
+        log.info("résumé auto #%s abandonné : résumé automatique désactivé sur « %s »", entry_id, feed.title)
+        return False
+    if entry is None or entry.feed_id != feed.id:
+        log.info("résumé auto #%s abandonné : l'article n'appartient plus à « %s »", entry_id, feed.title)
+        return False
+    return True
+
+
 @job_handler("summarize_entry")
 async def summarize_entry_job(session: AsyncSession, job: Job) -> None:
     entry_id = int(job.payload["entry_id"])
@@ -67,12 +85,28 @@ async def summarize_entry_job(session: AsyncSession, job: Job) -> None:
                 return
 
     entry = await session.get(Entry, entry_id)
+    feed_id = job.payload.get("feed_id")
+    if feed_id:
+        feed = await session.get(Feed, int(feed_id))
+        if not _feed_still_wanted(job, entry, feed):
+            return
+        assert feed is not None
+        if not job.payload.get("manual_batch") and await feed_auto_count_today(session, feed.id) > feed.summary_daily_cap:
+            log.info("résumé auto #%s ignoré : quota du flux « %s » atteint", entry_id, feed.title)
+            return
     if entry is None:
         log.info("résumé auto #%s abandonné : article introuvable", entry_id)
         return
 
-    # Réservation du budget avant tout appel externe (plafond strict, sérialisé par verrou consultatif).
-    source = entry.content_text or html_to_text(entry.summary_html) or ""
+    # Réservation du budget avant tout appel externe (plafond strict, sérialisé par verrou consultatif),
+    # estimée sur le texte qui sera réellement envoyé : article complet extrait ou transcription, pas
+    # l'extrait du flux (la préparation n'appelle pas le modèle et son résultat est conservé).
+    try:
+        source = await prepare_source(session, entry_id)
+    except (TranscriptUnavailable, SummarizerError) as exc:
+        log.info("résumé auto #%s abandonné : %s", entry_id, exc)
+        await session.commit()
+        return
     reservation: LlmUsage | None = await reserve_auto_budget(
         session, entry_id=entry_id, smart_feed_id=sf.id if sf else None, input_tokens=estimate_input_tokens(source)
     )

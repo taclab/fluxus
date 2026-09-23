@@ -1,10 +1,9 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlignJustify, Check, CheckCheck, ChevronLeft, Circle, CircleCheck, GalleryVertical, LayoutGrid, LayoutList, Menu, Rows3, Search, Settings2, Sparkles, Star, X } from 'lucide-react'
+import { Check, CheckCheck, ChevronLeft, Circle, CircleCheck, Menu, Search, Settings2, Sparkles, Star, Undo2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type EntryListItem, type Feed, type SmartFeed } from '../../api/client'
-import { createDevicePref, oneOf, type DevicePref } from '../../app/devicePref'
 import type { View } from '../../app/view'
 import { Button, EmptyState, IconButton, Spinner, useToast } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
@@ -12,46 +11,15 @@ import { hostname, relativeDate } from '../../lib/format'
 import { recordChange, syncNow } from '../../sync/engine'
 import { FeedIcon } from '../feeds/Sidebar'
 import { CONFIRM_THRESHOLD, markViewRead } from './markRead'
+import { setViewMode } from './useViewMode'
+import { DEFAULT_VIEW_MODE, LAYOUT_GROUPS, VIEW_MODE_SPECS, layoutOf, modesFor, sourceLabel, type ResolvedViewMode, type ViewMode } from './viewMode'
 
-/** Présentations en colonnes (liste + article côte à côte). */
-export type Density = 'compact' | 'cards'
 /** Présentations en pleine largeur (article dans une fenêtre). */
-export type FullDensity = 'grid' | 'magazine' | 'list' | 'titles'
-export type Variant = Density | FullDensity
-export type ListLayoutProp = 'split' | 'full'
-
-interface VariantSpec {
-  label: string
-  Icon: typeof Rows3
-  /** Disposition dans laquelle la présentation est proposée. */
-  layout: ListLayoutProp
-  /** Classes du <ul>. */
-  listClass: string
-}
-
-/** Table unique des présentations : le menu, le <ul>, le rendu des lignes et la validation des préférences en dérivent. */
-const VARIANTS: Record<Variant, VariantSpec> = {
-  compact: { label: 'Compacte', Icon: Rows3, layout: 'split', listClass: '' },
-  cards: { label: 'Cartes', Icon: LayoutList, layout: 'split', listClass: 'p-2 space-y-2' },
-  grid: { label: 'Grille', Icon: LayoutGrid, layout: 'full', listClass: 'grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4' },
-  magazine: { label: 'Magazine', Icon: GalleryVertical, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
-  list: { label: 'Liste', Icon: Rows3, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
-  titles: { label: 'Titres', Icon: AlignJustify, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
-}
-const VARIANT_IDS = Object.keys(VARIANTS) as Variant[]
-
-function variantsFor(layout: ListLayoutProp): Variant[] {
-  return VARIANT_IDS.filter((v) => VARIANTS[v].layout === layout)
-}
+type FullDensity = Exclude<ViewMode, 'compact' | 'cards'>
+type Variant = ViewMode
 
 function isFullVariant(v: Variant): v is FullDensity {
-  return VARIANTS[v].layout === 'full'
-}
-
-/** Une préférence par disposition, validée contre la table (une valeur stockée inconnue retombe sur le défaut). */
-const VARIANT_PREF: Record<ListLayoutProp, DevicePref<Variant>> = {
-  split: createDevicePref<Variant>('fluxus.density', oneOf(variantsFor('split'), 'compact')),
-  full: createDevicePref<Variant>('fluxus.fullDensity', oneOf(variantsFor('full'), 'grid')),
+  return layoutOf(v) === 'full'
 }
 
 interface Props {
@@ -65,8 +33,8 @@ interface Props {
   onBack?: () => void
   onVisibleEntries: (ids: number[]) => void
   onEditSmartFeed?: (sf: SmartFeed) => void
-  /** `full` : liste sur toute la largeur (grille, magazine, liste, titres) ; défaut `split`. */
-  layout?: ListLayoutProp
+  /** Présentation résolue de la vue (flux → dossier → défaut), calculée par `Layout`. */
+  viewMode?: ResolvedViewMode
 }
 
 const PAGE = 60
@@ -93,9 +61,9 @@ function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string, 
   }
 }
 
-export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnread, onOpenSidebar, onSearch, onBack, onVisibleEntries, onEditSmartFeed, layout = 'split' }: Props) {
+export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnread, onOpenSidebar, onSearch, onBack, onVisibleEntries, onEditSmartFeed, viewMode }: Props) {
   const [limit, setLimit] = useState(PAGE)
-  const variant = VARIANT_PREF[layout].useValue()
+  const variant: Variant = viewMode?.mode ?? DEFAULT_VIEW_MODE
   const [densityOpen, setDensityOpen] = useState(false)
   const densityRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -301,9 +269,9 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     }
   }
 
-  function chooseVariant(next: Variant) {
-    VARIANT_PREF[layout].set(next)
+  function chooseVariant(next: Variant | 'inherit') {
     setDensityOpen(false)
+    if (viewMode) void setViewMode(viewMode.target, next)
   }
 
   const heading = titleFor(view, feedMap, category?.title, smartFeed?.name)
@@ -329,19 +297,25 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     }
   }, [view.kind, view.id, feeds])
   const unreadCount = view.kind === 'search' || scopeUnread == null ? items.filter((e) => !e.read).length : scopeUnread
-  const unsummarized = view.kind === 'smart' ? items.filter((e) => !e.has_summary).length : 0
+  const currentFeed = view.kind === 'feed' ? feedMap.get(view.id!) : undefined
+  const batchTarget = view.kind === 'smart' ? smartFeed?.name : currentFeed ? currentFeed.title || hostname(currentFeed.url) : undefined
+  const unsummarized = view.kind === 'smart' || view.kind === 'feed' ? items.filter((e) => !e.has_summary).length : 0
 
+  /** « Résumer les non résumés » d'un flux intelligent ou d'un flux : lot borné par le budget quotidien. */
   async function summarizeAll() {
-    if (!smartFeed) return
+    if (!batchTarget) return
     if (!isOnline()) {
       toast('Le résumé nécessite une connexion au serveur', 'error')
       return
     }
-    if (!window.confirm(`Résumer les articles non lus et non encore résumés de « ${smartFeed.name} » ?\nLe budget quotidien de tokens limite le nombre de résumés lancés.`)) return
+    const scope = unreadOnly ? 'non lus et non encore résumés' : 'non encore résumés'
+    if (!window.confirm(`Résumer les articles ${scope} de « ${batchTarget} » ?\nLe budget quotidien de tokens limite le nombre de résumés lancés.`)) return
     setBatchBusy(true)
     try {
-      const r = unwrap(await api().POST('/api/smart-feeds/{smart_feed_id}/summarize-all', { params: { path: { smart_feed_id: smartFeed.id } }, body: { unread_only: unreadOnly || view.kind === 'unread' ? true : false } }))
-      const res = r as { queued: number; skipped_budget: number; already_summarized: number }
+      const res =
+        view.kind === 'smart' && smartFeed
+          ? unwrap(await api().POST('/api/smart-feeds/{smart_feed_id}/summarize-all', { params: { path: { smart_feed_id: smartFeed.id } }, body: { unread_only: unreadOnly } }))
+          : unwrap(await api().POST('/api/feeds/{feed_id}/summarize-all', { params: { path: { feed_id: view.id! } }, body: { unread_only: unreadOnly } }))
       toast(res.queued ? `${res.queued} résumé${res.queued > 1 ? 's' : ''} en cours${res.skipped_budget ? `, ${res.skipped_budget} au-delà du budget` : ''}` : res.skipped_budget ? 'Budget quotidien épuisé' : 'Rien à résumer', res.queued ? 'success' : 'info')
       window.setTimeout(() => void syncNow(), 30000)
     } catch (err) {
@@ -410,11 +384,13 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
             </IconButton>
           </>
         )}
+        {batchTarget && (
+          <IconButton label={unsummarized ? `Résumer les non résumés (${unsummarized} visibles)` : 'Résumer les non résumés'} size="sm" onClick={() => void summarizeAll()} disabled={batchBusy} data-testid="summarize-all">
+            <Sparkles className={clsx('size-4', batchBusy && 'animate-pulse')} />
+          </IconButton>
+        )}
         {view.kind === 'smart' && smartFeed && (
           <>
-            <IconButton label={unsummarized ? `Résumer les non résumés (${unsummarized} visibles)` : 'Résumer les non résumés'} size="sm" onClick={() => void summarizeAll()} disabled={batchBusy} data-testid="summarize-all">
-              <Sparkles className={clsx('size-4', batchBusy && 'animate-pulse')} />
-            </IconButton>
             {onEditSmartFeed && (
               <IconButton label="Modifier ce flux intelligent" size="sm" onClick={() => onEditSmartFeed(smartFeed)} data-testid="edit-smartfeed">
                 <Settings2 className="size-4" />
@@ -425,27 +401,41 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         <IconButton label={unreadOnly ? 'Afficher tout' : 'Non lus seulement'} active={unreadOnly} onClick={() => onToggleUnread(!unreadOnly)} size="sm">
           <Circle className={clsx('size-4', unreadOnly && 'fill-current')} />
         </IconButton>
-        <div className={clsx('relative', layout === 'split' && 'hidden sm:block')} ref={densityRef}>
-          <IconButton label="Présentation de la liste" onClick={() => setDensityOpen((o) => !o)} active={densityOpen} size="sm" data-testid="density-menu" aria-haspopup="menu" aria-expanded={densityOpen}>
+        <div className="relative" ref={densityRef}>
+          <IconButton label="Présentation de la liste" onClick={() => setDensityOpen((o) => !o)} active={densityOpen} size="sm" data-testid="density-menu" aria-haspopup="menu" aria-expanded={densityOpen} disabled={!viewMode}>
             <VariantIcon variant={variant} />
           </IconButton>
-          {densityOpen && (
-            <div role="menu" className="absolute right-0 top-full z-20 mt-1 w-44 rounded-xl border border-app bg-panel p-1 shadow-lg text-sm">
-              {variantsFor(layout).map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={id === variant}
-                  data-density={id}
-                  onClick={() => chooseVariant(id)}
-                  className={clsx('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted', id === variant ? 'text-app font-medium' : 'text-muted')}
-                >
-                  <VariantIcon variant={id} />
-                  <span className="flex-1">{VARIANTS[id].label}</span>
-                  {id === variant && <Check className="size-4 text-accent-600 dark:text-accent-300" />}
-                </button>
+          {densityOpen && viewMode && (
+            <div role="menu" aria-label="Présentation de la liste" className="absolute right-0 top-full z-20 mt-1 w-60 rounded-xl border border-app bg-panel p-1 shadow-lg text-sm">
+              {LAYOUT_GROUPS.map((group) => (
+                <div key={group.layout} role="group" aria-label={group.label}>
+                  <p className="px-2 pb-0.5 pt-1.5 text-xs font-medium uppercase tracking-wide text-muted">{group.label}</p>
+                  {modesFor(group.layout).map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={id === variant}
+                      data-density={id}
+                      onClick={() => chooseVariant(id)}
+                      className={clsx('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted', id === variant ? 'text-app font-medium' : 'text-muted')}
+                    >
+                      <VariantIcon variant={id} />
+                      <span className="flex-1">{VIEW_MODE_SPECS[id].label}</span>
+                      {id === variant && <Check className="size-4 text-accent-600 dark:text-accent-300" />}
+                    </button>
+                  ))}
+                </div>
               ))}
+              <div className="mt-1 border-t border-app px-2 pb-1 pt-2 text-xs text-muted" data-testid="view-mode-source">
+                {sourceLabel(viewMode)}
+              </div>
+              {viewMode.source === 'own' && (
+                <button type="button" role="menuitem" onClick={() => chooseVariant('inherit')} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-muted hover:bg-muted" data-testid="view-mode-inherit">
+                  <Undo2 className="size-4" />
+                  <span className="flex-1">{view.kind === 'feed' && currentFeed?.category_id != null ? 'Revenir à l’affichage du dossier' : 'Revenir à l’affichage par défaut'}</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -469,7 +459,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
             action={unreadOnly && view.kind !== 'unread' ? <Button size="sm" onClick={() => onToggleUnread(false)}>Afficher tout</Button> : undefined}
           />
         )}
-        <ul data-density={variant} className={VARIANTS[variant].listClass || undefined}>
+        <ul data-density={variant} className={VIEW_MODE_SPECS[variant].listClass || undefined}>
           {items.map((e) => (
             <EntryRow key={e.id} entry={e} feed={feedMap.get(e.feed_id)} selected={e.id === selectedId} density={variant} showFeed={view.kind !== 'feed'} onClick={() => void select(e.id)} />
           ))}
@@ -540,7 +530,7 @@ function Cover({ entry, className }: { entry: LocalEntry | EntryListItem; classN
 }
 
 function VariantIcon({ variant }: { variant: Variant }) {
-  const Icon = VARIANTS[variant].Icon
+  const Icon = VIEW_MODE_SPECS[variant].Icon
   return <Icon className="size-4" />
 }
 

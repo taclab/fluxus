@@ -20,7 +20,7 @@ from ..auth import Auth
 from ..db import get_session
 from ..entries.router import to_entry_out
 from ..models import Category, Entry, Feed, SmartFeed, Summary
-from ..schemas import CategoryOut, EntryOut, FeedOut, SummaryOut
+from ..schemas import VIEW_MODES, CategoryOut, EntryOut, FeedOut, SummaryOut, ViewMode
 from ..settings_store import get_setting
 from ..smartfeeds.router import SmartFeedOut
 from ..smartfeeds.service import smart_feed_ids_for
@@ -35,6 +35,8 @@ class SyncPull(BaseModel):
     server_time: datetime
     # Horizon de conservation locale (jours), réglage `sync_prefetch_days`.
     retention_days: int
+    # Présentation de liste des vues sans présentation propre (réglage `default_view_mode`).
+    default_view_mode: ViewMode = "compact"
     categories: list[CategoryOut]
     feeds: list[FeedOut]
     feed_ids: list[int]
@@ -171,10 +173,12 @@ async def pull(
     last = rows[-1][0] if rows else None
     next_cursor = _encode_cursor(last.updated_at, last.id, min_published) if has_more and last else None
     horizon = await _visibility_horizon(session, now)
+    default_view_mode = await get_setting(session, "default_view_mode")
     return SyncPull(
         server_time=horizon,
         retention_days=retention_days,
-        categories=[CategoryOut(id=c.id, title=c.title, position=c.position) for c in cats],
+        default_view_mode=default_view_mode if default_view_mode in VIEW_MODES else "compact",
+        categories=[CategoryOut(id=c.id, title=c.title, position=c.position, view_mode=c.view_mode) for c in cats],
         feeds=[FeedOut.model_validate(f, from_attributes=True) for f in feeds],
         feed_ids=[f.id for f in feeds],
         smart_feeds=[SmartFeedOut.model_validate(s, from_attributes=True) for s in smart_feeds],
