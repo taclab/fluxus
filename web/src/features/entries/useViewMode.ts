@@ -62,9 +62,12 @@ async function applyLocal(target: ViewModeTarget, choice: ViewModeChoice): Promi
 }
 
 async function send(target: ViewModeTarget, choice: ViewModeChoice): Promise<void> {
+  // Époque connue : un choix fait avant un import de sauvegarde est refusé (409) plutôt qu'appliqué à
+  // l'objet qui porte désormais le même identifiant.
+  const epoch = (await getMeta('sync.epoch')) ?? null
   unwrap(
     await api().PUT('/api/view-mode', {
-      body: target.kind === 'default' ? { kind: 'default', view_mode: choice } : { kind: target.kind, id: target.id, view_mode: choice },
+      body: target.kind === 'default' ? { kind: 'default', view_mode: choice, epoch } : { kind: target.kind, id: target.id, view_mode: choice, epoch },
     }),
   )
 }

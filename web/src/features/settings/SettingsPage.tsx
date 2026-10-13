@@ -10,8 +10,10 @@ import { TypographyPicker } from '../../components/TypographyPicker'
 import { Button, Field, IconButton, Input, Select, Spinner, useToast } from '../../components/ui'
 import { clearDatabase } from '../../db/db'
 import { resetDashboardLayout } from '../dashboard/useDashboardLayout'
+import { BackupSection } from './BackupSection'
 import { setViewMode, useDefaultViewMode } from '../entries/useViewMode'
 import { LAYOUT_GROUPS, VIEW_MODE_SPECS, modesFor, type ListLayout } from '../entries/viewMode'
+import { saveBlob } from '../../lib/download'
 import { formatTokens, relativeDate } from '../../lib/format'
 import { resetAndSync, syncNow } from '../../sync/engine'
 
@@ -105,12 +107,7 @@ export function SettingsPage() {
   async function exportOpml() {
     try {
       const res = await fetch(apiUrl('/api/opml/export'), { headers: authHeaders() })
-      const blob = await res.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = 'fluxus.opml'
-      a.click()
-      URL.revokeObjectURL(a.href)
+      saveBlob(await res.blob(), 'fluxus.opml')
     } catch {
       toast('Export impossible', 'error')
     }
@@ -319,6 +316,10 @@ export function SettingsPage() {
                 {stats.jobs_failed > 0 && ` · ${stats.jobs_failed} tâches en échec`}
               </p>
             )}
+          </Section>
+
+          <Section title="Sauvegarde et migration" description="Pour changer de serveur ou garder une copie : exportez toute la base ici, puis importez le fichier sur l’autre instance (ou sur celle-ci pour la restaurer).">
+            <BackupSection onImported={() => void load()} />
           </Section>
 
           <Section title="Hors-ligne" description="Les articles des N derniers jours sont conservés sur chaque appareil avec leur contenu complet ; les favoris le sont toujours.">

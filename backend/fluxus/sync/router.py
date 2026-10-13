@@ -35,6 +35,9 @@ class SyncPull(BaseModel):
     server_time: datetime
     # Horizon de conservation locale (jours), réglage `sync_prefetch_days`.
     retention_days: int
+    # Époque de synchronisation : change à chaque import de sauvegarde ; un client qui voit une autre
+    # valeur que la sienne vide son cache et repart de zéro.
+    epoch: str = ""
     # Présentation de liste des vues sans présentation propre (réglage `default_view_mode`).
     default_view_mode: ViewMode = "compact"
     categories: list[CategoryOut]
@@ -79,6 +82,13 @@ class StateChange(BaseModel):
 
 class SyncPush(BaseModel):
     changes: list[StateChange]
+    # Époque connue du client : si la base a été remplacée depuis (import d'une sauvegarde), ses
+    # identifiants désignent d'autres articles ; l'envoi est refusé (409) au lieu d'être mal appliqué.
+    epoch: str | None = None
+
+
+class EpochOut(BaseModel):
+    epoch: str
 
 
 class SyncConflict(BaseModel):
@@ -127,6 +137,9 @@ async def pull(
     include_content: bool = Query(True),
 ) -> SyncPull:
     """Première page : `since` (dernière passe réussie). Pages suivantes : `cursor` renvoyé par la page précédente."""
+    from ..backup.service import sync_epoch
+
+    epoch = await sync_epoch(session)
     now = datetime.now(UTC)
     try:
         retention_days = max(1, min(365, int(await get_setting(session, "sync_prefetch_days") or 30)))
@@ -177,6 +190,7 @@ async def pull(
     return SyncPull(
         server_time=horizon,
         retention_days=retention_days,
+        epoch=epoch,
         default_view_mode=default_view_mode if default_view_mode in VIEW_MODES else "compact",
         categories=[CategoryOut(id=c.id, title=c.title, position=c.position, view_mode=c.view_mode) for c in cats],
         feeds=[FeedOut.model_validate(f, from_attributes=True) for f in feeds],
@@ -191,6 +205,14 @@ async def pull(
     )
 
 
+@router.get("/epoch", response_model=EpochOut)
+async def epoch(_: Auth, session: Session) -> EpochOut:
+    """Époque seule : vérifiée par le client avant d'envoyer ses changements en attente."""
+    from ..backup.service import sync_epoch
+
+    return EpochOut(epoch=await sync_epoch(session))
+
+
 @router.post("", response_model=SyncPushResult)
 async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
     """Dernière écriture gagne, **champ par champ** et à l'horloge des actions.
@@ -202,6 +224,10 @@ async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
     actions successives d'un même lot s'appliquent dans l'ordre. Les refus sont renvoyés avec l'état
     serveur courant pour que le client réaligne son cache.
     """
+    from ..backup.service import sync_epoch
+
+    if body.epoch is not None and body.epoch != await sync_epoch(session):
+        raise HTTPException(status.HTTP_409_CONFLICT, "La base du serveur a été remplacée : resynchronisation complète nécessaire")
     applied = ignored = 0
     conflicts: list[SyncConflict] = []
     ids = [c.entry_id for c in body.changes]

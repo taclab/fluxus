@@ -6,12 +6,13 @@ import signal
 import traceback
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 # L'import enregistre les handlers auprès du registre.
 from . import handlers  # noqa: F401
+from .backup.service import MAINTENANCE_LOCK_KEY
 from .config import get_settings, validate_runtime_config
-from .db import session_scope
+from .db import get_engine, session_scope
 from .jobs import queue
 from .jobs.registry import get_handler
 from .models import Feed, Job
@@ -23,22 +24,38 @@ PURGE_EVERY = timedelta(hours=6)
 
 
 async def run_job(job: Job, semaphore: asyncio.Semaphore) -> None:
-    async with semaphore:
-        handler = get_handler(job.type)
-        async with session_scope() as session:
-            if handler is None:
-                await queue.mark_failed(session, job, f"Aucun handler pour le job '{job.type}'")
-                return
-            try:
-                await handler(session, job)
-                await session.commit()
-                await queue.mark_done(session, job.id)
-                log.info("job %s #%s ok", job.type, job.id)
-            except Exception as exc:  # noqa: BLE001
-                await session.rollback()
-                error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=5)}"
-                log.warning("job %s #%s échoué (tentative %s): %s", job.type, job.id, job.attempts, exc)
-                await queue.mark_failed(session, job, error)
+    async with semaphore, get_engine().connect() as lock_conn:
+        # Verrou partagé tenu pendant tout le job (connexion dédiée : la session du handler commit en
+        # cours de route). Un import de sauvegarde le prend en exclusif : il attend la fin des jobs en
+        # cours, et un job qui attendait l'import constate ensuite que sa ligne a disparu.
+        await lock_conn.execute(select(func.pg_advisory_lock_shared(MAINTENANCE_LOCK_KEY)))
+        await lock_conn.commit()  # verrou de session : il survit au commit, pas de transaction ouverte
+        try:
+            await _run_locked(job)
+        finally:
+            await lock_conn.execute(select(func.pg_advisory_unlock_shared(MAINTENANCE_LOCK_KEY)))
+            await lock_conn.commit()
+
+
+async def _run_locked(job: Job) -> None:
+    handler = get_handler(job.type)
+    async with session_scope() as session:
+        if await session.get(Job, job.id) is None:
+            log.info("job %s #%s abandonné : supprimé par un import de sauvegarde", job.type, job.id)
+            return
+        if handler is None:
+            await queue.mark_failed(session, job, f"Aucun handler pour le job '{job.type}'")
+            return
+        try:
+            await handler(session, job)
+            await session.commit()
+            await queue.mark_done(session, job.id)
+            log.info("job %s #%s ok", job.type, job.id)
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=5)}"
+            log.warning("job %s #%s échoué (tentative %s): %s", job.type, job.id, job.attempts, exc)
+            await queue.mark_failed(session, job, error)
 
 
 async def schedule_due_feeds() -> int:

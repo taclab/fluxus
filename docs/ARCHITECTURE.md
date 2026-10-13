@@ -462,6 +462,36 @@ adaptatif ; sinon `_next_interval` le renvoie tel quel, le recul sur erreur ne d
 et un changement avance `next_fetch_at` sans jamais le reculer), `auto_summary` + `summary_daily_cap`
 (voir ci-dessous) et `view_mode`.
 
+### Sauvegarde complète (`backend/fluxus/backup/`, `features/settings/BackupSection.tsx`)
+
+`GET /api/backup/export` produit en flux un JSON Lines gzip.
+
+- **En-tête** : `format`, `version` (1), révision Alembic, date, comptes par table.
+- **Lignes** : une par enregistrement (`{"t": table, "r": colonnes}`), dans l'ordre des clés étrangères de `EXPORT_TABLES`. Les identifiants sont conservés et `search_vector` est omis.
+- **Lecture** : instantané `REPEATABLE READ`, par lots de 500.
+- **Exclusions** : les réglages exportés se limitent aux clés de `DEFAULTS`, hors `SECRET_KEYS` et hors clés `_…`. Mot de passe, jetons d'appareils, jobs et `llm_usage` ne sont jamais exportés.
+
+`POST /api/backup/import` (multipart `file`, `password`, `confirm=REMPLACER`, limiteur de la
+connexion ; formulaire lu après l'authentification et le contrôle de `Content-Length`, 1 Go au plus) :
+
+1. **Validation complète d'abord**, hors de la boucle asyncio (`asyncio.to_thread`) : format, version, tables et colonnes connues, ordre, comptes, lignes de 64 Mo au plus.
+2. **Rétrocompatibilité** : une sauvegarde plus ancienne (colonnes absentes) prend les défauts ; une plus récente est refusée. Si la base rejette l'import, le message cite les deux révisions de schéma quand elles diffèrent.
+3. **Verrou de maintenance** : `pg_try_advisory_xact_lock(727003)`, jusqu'à 60 s, sinon 503 sans effet. Chaque job du worker tient ce verrou en partagé, sur une connexion dédiée, pendant toute son exécution. L'import attend donc la fin des jobs en cours ; un job qui attendait l'import constate ensuite que sa ligne a disparu et s'arrête.
+4. **Remplacement, en une transaction** :
+   - `DELETE` dans l'ordre des dépendances ;
+   - insertion par lots, lecture du fichier par tranches dans un thread ;
+   - `setval` des séquences ;
+   - `_dashboard_layout_version` + 1 ;
+   - nouveau `_sync_epoch`.
+
+   Le journal `llm_usage` est conservé, pour le budget du jour ; ses liens passent à NULL. Une violation de contrainte provoque un rollback complet et une erreur 400.
+
+**Époque de synchronisation** : `GET /api/sync/epoch`, aussi dans `SyncPull.epoch`. Elle vaut `"0"` tant qu'aucun import n'a eu lieu (lecture seule, sans écriture concurrente).
+
+- `syncNow` lit l'époque **avant** d'envoyer l'outbox et les choix en attente (`adoptEpoch`).
+- Si le cache a été construit pour une autre époque, ou n'en connaît aucune alors que l'instance a déjà été restaurée, la base Dexie est vidée (`clearDatabase`) puis tout est rechargé sans `since`.
+- `POST /api/sync` et `PUT /api/view-mode` reçoivent l'époque du client et répondent 409 si elle est périmée. Un changement fait avant un import n'est jamais appliqué au contenu qui porte désormais le même identifiant.
+
 ### Ordre de la barre latérale (`features/feeds/SubscriptionTree.tsx`, `sidebarOrder.ts`)
 
 Un seul `DndContext` couvre les flux intelligents et les abonnements. Les capteurs souris et

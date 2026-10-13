@@ -413,10 +413,16 @@ class ViewModeUpdate(BaseModel):
     kind: Literal["feed", "category", "smart", "default"]
     id: int | None = None
     view_mode: ViewModeIn
+    # Époque connue du client (choix fait hors ligne) : refusé si la base a été remplacée depuis.
+    epoch: str | None = None
 
 
 @router.put("/view-mode", status_code=204)
 async def set_view_mode(body: ViewModeUpdate, _: Auth, session: Session) -> None:
+    from ..backup.service import sync_epoch
+
+    if body.epoch is not None and body.epoch != await sync_epoch(session):
+        raise HTTPException(status.HTTP_409_CONFLICT, "La base du serveur a été remplacée : choix abandonné")
     if body.kind == "default":
         from ..settings_store import set_setting
 

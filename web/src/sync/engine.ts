@@ -8,7 +8,7 @@
 
 import { api, isOnline, unwrap, type EntryOut, type SyncPull } from '../api/client'
 import { getToken } from '../api/auth'
-import { db, getMeta, setMeta, toLocalEntry, type LocalEntry } from '../db/db'
+import { clearDatabase, db, getMeta, setMeta, toLocalEntry, type LocalEntry } from '../db/db'
 import { flushDashboardLayout } from '../features/dashboard/useDashboardLayout'
 import { flushViewModes, mergeViewModes, migrateLegacyDisplay } from '../features/entries/useViewMode'
 
@@ -24,6 +24,25 @@ export interface SyncState {
 }
 
 const DEFAULT_RETENTION_DAYS = 30
+const EPOCH_KEY = 'sync.epoch'
+/** Époque d'une instance jamais restaurée (valeur du serveur tant qu'aucun import n'a eu lieu). */
+const INITIAL_EPOCH = '0'
+
+/**
+ * Aligne l'époque locale sur celle du serveur. Si la base serveur a été remplacée (import d'une
+ * sauvegarde) depuis que ce cache a été construit, le cache — outbox et choix en attente compris —
+ * est vidé : ses identifiants désignent désormais d'autres contenus. Un appareil sans époque connue
+ * face à une instance déjà restaurée est traité de même. Renvoie vrai si le cache a été vidé.
+ */
+async function adoptEpoch(epoch: string): Promise<boolean> {
+  const known = await getMeta(EPOCH_KEY)
+  if (known === epoch) return false
+  const stale = known !== undefined || epoch !== INITIAL_EPOCH
+  if (stale) await clearDatabase()
+  await setMeta(EPOCH_KEY, epoch)
+  if (stale) await refreshPending()
+  return stale
+}
 let retentionDays = DEFAULT_RETENTION_DAYS
 const listeners = new Set<Listener>()
 let state: SyncState = { status: 'idle', lastSyncAt: null, error: null, pendingChanges: 0 }
@@ -100,7 +119,16 @@ export function pushOutbox(): Promise<void> {
           const batch = await db.outbox.orderBy('id').limit(200).toArray()
           if (batch.length === 0) break
           const changes = batch.map((b) => ({ entry_id: b.entry_id, read: b.read ?? null, starred: b.starred ?? null, at: b.at }))
-          const result = unwrap(await api().POST('/api/sync', { body: { changes } }))
+          const epoch = (await getMeta(EPOCH_KEY)) ?? null
+          const { data, error, response } = await api().POST('/api/sync', { body: { changes, epoch } })
+          if (response.status === 409) {
+            // Base serveur remplacée depuis la dernière synchronisation : ces identifiants désignent
+            // d'autres articles. On oublie l'époque connue ; la passe suivante vide le cache.
+            await db.meta.delete(EPOCH_KEY)
+            window.setTimeout(() => void syncNow(), 0)
+            return
+          }
+          const result = unwrap({ data, error, response })
           await db.transaction('rw', db.entries, db.outbox, async () => {
             await db.outbox.bulkDelete(batch.map((b) => b.id!))
             // Changements refusés (un autre appareil a modifié le même champ plus récemment) : le
@@ -196,10 +224,12 @@ export async function syncNow(): Promise<void> {
     }
     emit({ status: 'syncing', error: null })
     try {
+      // L'époque d'abord : rien de local n'est envoyé à une base qui a été remplacée entre-temps.
+      await adoptEpoch(unwrap(await api().GET('/api/sync/epoch')).epoch)
       await pushOutbox()
       await flushDashboardLayout()
       await flushViewModes()
-      const since = (await getMeta('sync.since')) ?? undefined
+      let since = (await getMeta('sync.since')) ?? undefined
       let cursor: string | undefined
       let runStartedAt: string | undefined
       let hasMore = true
@@ -209,6 +239,11 @@ export async function syncNow(): Promise<void> {
         const page = unwrap(
           await api().GET('/api/sync', { params: { query: cursor ? { cursor, limit: 300 } : { since, limit: 300 } } }),
         )
+        if (pages === 0 && page.epoch && (await adoptEpoch(page.epoch))) {
+          // Import survenu pendant la passe : on redemande la première page sans `since`.
+          since = undefined
+          continue
+        }
         runStartedAt ??= page.server_time
         if (page.retention_days) retentionDays = page.retention_days
         if (pages === 0) await mergeFeeds(page)

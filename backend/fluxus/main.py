@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
 from .auth import router as auth_router
+from .backup.router import router as backup_router
 from .config import get_settings, validate_runtime_config
 from .db import get_engine
 from .entries.router import router as entries_router
@@ -94,6 +95,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(backup_router)
 app.include_router(feeds_router)
 app.include_router(entries_router)
 app.include_router(settings_router)

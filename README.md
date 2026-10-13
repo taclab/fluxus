@@ -226,6 +226,30 @@ Recherche, filtres (dossier, état) et tris (nom, dernière récupération, acti
 cochant plusieurs flux, une barre d'actions groupées applique pause, reprise, déplacement,
 présentation, article complet, intervalle, résumés automatiques, rafraîchissement ou désabonnement.
 
+### Migrer vers une autre instance
+
+**Paramètres → Sauvegarde et migration → Exporter toute la base** télécharge un seul fichier
+(`fluxus-export-….jsonl.gz`, quelques Mo) contenant :
+
+- dossiers, flux et leurs réglages ;
+- articles avec leur état lu et favori ;
+- résumés et transcriptions ;
+- flux intelligents ;
+- présentations, tableau de bord et réglages.
+
+Sur la nouvelle instance, créez le mot de passe, puis **Importer une sauvegarde…**. La fenêtre
+résume le contenu du fichier et demande le mot de passe actuel et le mot « REMPLACER ». L'import
+**remplace tout** le contenu de l'instance, en une opération tout ou rien : un fichier invalide ne
+modifie rien. Chaque appareil connecté recharge ensuite ses données.
+
+Ne sont jamais exportés :
+
+- le mot de passe et les appareils connectés, qui restent ceux de l'instance cible ;
+- les clés API, à saisir à nouveau (elles sont chiffrées avec la clé secrète de l'instance d'origine) ;
+- la file des tâches et le journal de consommation LLM.
+
+Le même fichier sert de sauvegarde : l'importer sur l'instance d'origine la restaure.
+
 ### Organiser la barre latérale
 
 Un **clic long** (souris ou doigt, environ un tiers de seconde) saisit un dossier, un flux ou un flux

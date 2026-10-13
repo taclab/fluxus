@@ -131,6 +131,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backup/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Backup
+         * @description Toute la base en un fichier .jsonl.gz (sans mot de passe, jetons d'appareils ni clés API).
+         */
+        get: operations["export_backup_api_backup_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backup/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Backup
+         * @description Remplace tout le contenu de l'instance par la sauvegarde (multipart `file`, `password`,
+         *     `confirm`) : mot de passe actuel et mot de confirmation exigés ; tout ou rien.
+         *
+         *     Le formulaire est lu ici, après l'authentification et le contrôle de `Content-Length` : un
+         *     envoi trop gros est refusé avant d'être écrit sur disque.
+         */
+        post: operations["import_backup_api_backup_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/categories": {
         parameters: {
             query?: never;
@@ -650,6 +694,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sync/epoch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Epoch
+         * @description Époque seule : vérifiée par le client avant d'envoyer ses changements en attente.
+         */
+        get: operations["epoch_api_sync_epoch_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -864,6 +928,11 @@ export interface components {
             /** Starred */
             starred?: boolean | null;
         };
+        /** EpochOut */
+        EpochOut: {
+            /** Epoch */
+            epoch: string;
+        };
         /** FeedBulkIn */
         FeedBulkIn: {
             /** Feed Ids */
@@ -1029,6 +1098,15 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ImportResult */
+        ImportResult: {
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Exported At */
+            exported_at?: string | null;
         };
         /** MarkReadIn */
         MarkReadIn: {
@@ -1409,6 +1487,11 @@ export interface components {
             /** Retention Days */
             retention_days: number;
             /**
+             * Epoch
+             * @default
+             */
+            epoch: string;
+            /**
              * Default View Mode
              * @default compact
              * @enum {string}
@@ -1442,6 +1525,8 @@ export interface components {
         SyncPush: {
             /** Changes */
             changes: components["schemas"]["StateChange"][];
+            /** Epoch */
+            epoch?: string | null;
         };
         /** SyncPushResult */
         SyncPushResult: {
@@ -1500,6 +1585,8 @@ export interface components {
              * @enum {string}
              */
             view_mode: "compact" | "cards" | "grid" | "magazine" | "list" | "titles" | "inherit";
+            /** Epoch */
+            epoch?: string | null;
         };
     };
     responses: never;
@@ -1727,6 +1814,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_backup_api_backup_export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    import_backup_api_backup_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    password: string;
+                    confirm: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResult"];
                 };
             };
         };
@@ -2939,6 +3073,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    epoch_api_sync_epoch_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpochOut"];
                 };
             };
         };
