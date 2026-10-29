@@ -166,7 +166,8 @@ export interface paths {
          *     `confirm`) : mot de passe actuel et mot de confirmation exigés ; tout ou rien.
          *
          *     Le formulaire est lu ici, après l'authentification et le contrôle de `Content-Length` : un
-         *     envoi trop gros est refusé avant d'être écrit sur disque.
+         *     envoi trop gros est refusé avant d'être écrit sur disque. Sans cet en-tête (envoi « chunked »),
+         *     la taille ne se connaîtrait qu'une fois tout écrit : refusé (un navigateur l'envoie toujours).
          */
         post: operations["import_backup_api_backup_import_post"];
         delete?: never;
@@ -694,26 +695,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/sync/epoch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Epoch
-         * @description Époque seule : vérifiée par le client avant d'envoyer ses changements en attente.
-         */
-        get: operations["epoch_api_sync_epoch_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -927,11 +908,6 @@ export interface components {
             read?: boolean | null;
             /** Starred */
             starred?: boolean | null;
-        };
-        /** EpochOut */
-        EpochOut: {
-            /** Epoch */
-            epoch: string;
         };
         /** FeedBulkIn */
         FeedBulkIn: {
@@ -3073,26 +3049,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    epoch_api_sync_epoch_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EpochOut"];
                 };
             };
         };

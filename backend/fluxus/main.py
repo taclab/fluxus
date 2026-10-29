@@ -15,6 +15,7 @@ from .config import get_settings, validate_runtime_config
 from .db import get_engine
 from .entries.router import router as entries_router
 from .feeds.router import router as feeds_router
+from .maintenance import Busy
 from .settings_router import router as settings_router
 from .smartfeeds.router import router as smartfeeds_router
 from .summarize.router import router as summarize_router
@@ -77,6 +78,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+
+@app.exception_handler(Busy)
+async def busy_handler(_: Request, exc: Busy) -> JSONResponse:
+    # Import de sauvegarde en cours : une mise en file ou une génération viserait un identifiant réattribué.
+    return JSONResponse({"detail": str(exc)}, status_code=503)
 
 # En développement le front Vite tourne sur un autre port.
 app.add_middleware(

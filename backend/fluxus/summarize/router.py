@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from .. import maintenance
 from ..auth import Auth
 from ..db import get_session
 from ..models import Summary
@@ -23,8 +24,14 @@ async def summarize(entry_id: int, _: Auth, session: Session, force: bool = Quer
     """Flux SSE : événements `status`, `delta`, `done`, `error`."""
 
     async def event_stream():
-        async for event in summarize_entry(session, entry_id, force=force):
-            yield {"event": event.type, "data": json.dumps(event.data, ensure_ascii=False)}
+        # Verrou de maintenance pendant toute la génération : un import ne peut pas remplacer l'article
+        # entre sa lecture et l'enregistrement du résumé.
+        try:
+            async with maintenance.shared():
+                async for event in summarize_entry(session, entry_id, force=force):
+                    yield {"event": event.type, "data": json.dumps(event.data, ensure_ascii=False)}
+        except maintenance.Busy as exc:
+            yield {"event": "error", "data": json.dumps({"message": str(exc)}, ensure_ascii=False)}
 
     return EventSourceResponse(event_stream(), ping=15)
 

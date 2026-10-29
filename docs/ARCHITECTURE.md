@@ -472,11 +472,16 @@ et un changement avance `next_fetch_at` sans jamais le reculer), `auto_summary` 
 - **Exclusions** : les réglages exportés se limitent aux clés de `DEFAULTS`, hors `SECRET_KEYS` et hors clés `_…`. Mot de passe, jetons d'appareils, jobs et `llm_usage` ne sont jamais exportés.
 
 `POST /api/backup/import` (multipart `file`, `password`, `confirm=REMPLACER`, limiteur de la
-connexion ; formulaire lu après l'authentification et le contrôle de `Content-Length`, 1 Go au plus) :
+connexion ; formulaire lu après l'authentification et le contrôle de `Content-Length`, 1 Go au plus ;
+sans cet en-tête, envoi « chunked », 411) :
 
 1. **Validation complète d'abord**, hors de la boucle asyncio (`asyncio.to_thread`) : format, version, tables et colonnes connues, ordre, comptes, lignes de 64 Mo au plus.
 2. **Rétrocompatibilité** : une sauvegarde plus ancienne (colonnes absentes) prend les défauts ; une plus récente est refusée. Si la base rejette l'import, le message cite les deux révisions de schéma quand elles diffèrent.
-3. **Verrou de maintenance** : `pg_try_advisory_xact_lock(727003)`, jusqu'à 60 s, sinon 503 sans effet. Chaque job du worker tient ce verrou en partagé, sur une connexion dédiée, pendant toute son exécution. L'import attend donc la fin des jobs en cours ; un job qui attendait l'import constate ensuite que sa ligne a disparu et s'arrête.
+3. **Verrou de maintenance** (`fluxus/maintenance.py`, clé 727004) : `pg_advisory_xact_lock` exclusif, attente bornée à 60 s par `lock_timeout`, sinon 503 sans effet. La demande prend son rang dans la file de Postgres : les nouveaux verrous partagés attendent derrière elle au lieu de l'affamer. Le verrou est tenu en partagé par :
+   - chaque job du worker, sur une connexion dédiée, pendant toute son exécution (`maintenance.shared(wait=True)`) : l'import attend la fin des jobs en cours ; un job qui attendait l'import constate ensuite que sa ligne a disparu et s'arrête ;
+   - toute mise en file hors d'un job (`queue.enqueue` → `maintenance.guard`) et le planificateur, dès le début de sa transaction : 503 (`maintenance.Busy`) pendant un import, le planificateur passe son tour ;
+   - les générations à la demande (résumé SSE, extraction `fetch-content`), pendant toute la génération : refus pendant un import ;
+   - `POST /api/sync` et `PUT /api/view-mode`, en attente bloquante, jusqu'à la fin de leur transaction (contrôle de l'époque).
 4. **Remplacement, en une transaction** :
    - `DELETE` dans l'ordre des dépendances ;
    - insertion par lots, lecture du fichier par tranches dans un thread ;
@@ -486,11 +491,12 @@ connexion ; formulaire lu après l'authentification et le contrôle de `Content-
 
    Le journal `llm_usage` est conservé, pour le budget du jour ; ses liens passent à NULL. Une violation de contrainte provoque un rollback complet et une erreur 400.
 
-**Époque de synchronisation** : `GET /api/sync/epoch`, aussi dans `SyncPull.epoch`. Elle vaut `"0"` tant qu'aucun import n'a eu lieu (lecture seule, sans écriture concurrente).
+**Époque de synchronisation** : `SyncPull.epoch` (première page). Elle vaut `"0"` tant qu'aucun import n'a eu lieu (lecture seule, sans écriture concurrente).
 
-- `syncNow` lit l'époque **avant** d'envoyer l'outbox et les choix en attente (`adoptEpoch`).
+- `syncNow` envoie l'outbox et les choix en attente avec l'époque connue (`knownEpoch()`), puis compare celle de la première page (`adoptEpoch`).
+- Après un 409, l'époque locale est marquée périmée (jamais effacée) : tout envoi suivant est refusé jusqu'à ce que la passe vide le cache.
 - Si le cache a été construit pour une autre époque, ou n'en connaît aucune alors que l'instance a déjà été restaurée, la base Dexie est vidée (`clearDatabase`) puis tout est rechargé sans `since`.
-- `POST /api/sync` et `PUT /api/view-mode` reçoivent l'époque du client et répondent 409 si elle est périmée. Un changement fait avant un import n'est jamais appliqué au contenu qui porte désormais le même identifiant.
+- `POST /api/sync` et `PUT /api/view-mode` reçoivent l'époque du client (`check_epoch`) et répondent 409 si elle est périmée, ou absente sur une instance déjà restaurée (client antérieur). Un changement fait avant un import n'est jamais appliqué au contenu qui porte désormais le même identifiant.
 
 ### Ordre de la barre latérale (`features/feeds/SubscriptionTree.tsx`, `sidebarOrder.ts`)
 

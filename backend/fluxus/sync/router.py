@@ -87,10 +87,6 @@ class SyncPush(BaseModel):
     epoch: str | None = None
 
 
-class EpochOut(BaseModel):
-    epoch: str
-
-
 class SyncConflict(BaseModel):
     """Changement refusé : l'état serveur courant, pour que le client réaligne son cache."""
 
@@ -205,14 +201,6 @@ async def pull(
     )
 
 
-@router.get("/epoch", response_model=EpochOut)
-async def epoch(_: Auth, session: Session) -> EpochOut:
-    """Époque seule : vérifiée par le client avant d'envoyer ses changements en attente."""
-    from ..backup.service import sync_epoch
-
-    return EpochOut(epoch=await sync_epoch(session))
-
-
 @router.post("", response_model=SyncPushResult)
 async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
     """Dernière écriture gagne, **champ par champ** et à l'horloge des actions.
@@ -224,10 +212,9 @@ async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
     actions successives d'un même lot s'appliquent dans l'ordre. Les refus sont renvoyés avec l'état
     serveur courant pour que le client réaligne son cache.
     """
-    from ..backup.service import sync_epoch
+    from ..backup.service import check_epoch
 
-    if body.epoch is not None and body.epoch != await sync_epoch(session):
-        raise HTTPException(status.HTTP_409_CONFLICT, "La base du serveur a été remplacée : resynchronisation complète nécessaire")
+    await check_epoch(session, body.epoch, "La base du serveur a été remplacée : resynchronisation complète nécessaire")
     applied = ignored = 0
     conflicts: list[SyncConflict] = []
     ids = [c.entry_id for c in body.changes]

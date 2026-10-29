@@ -265,9 +265,9 @@ async def test_import_waits_for_running_jobs(client: AsyncClient, monkeypatch):
 
 async def test_stale_epoch_rejects_pending_changes(client: AsyncClient):
     """Après un import, un appareil qui envoie des changements avec l'ancienne époque est refusé."""
-    old_epoch = (await client.get("/api/sync/epoch")).json()["epoch"]
+    old_epoch = (await client.get("/api/sync?limit=1")).json()["epoch"]
     assert (await _import(client, await _export(client))).status_code == 200
-    new_epoch = (await client.get("/api/sync/epoch")).json()["epoch"]
+    new_epoch = (await client.get("/api/sync?limit=1")).json()["epoch"]
     assert new_epoch != old_epoch
     entry = (await client.get("/api/entries?limit=1")).json()["items"][0]
     change = {"entry_id": entry["id"], "read": not entry["read"], "at": datetime.now(UTC).isoformat()}
@@ -277,5 +277,40 @@ async def test_stale_epoch_rejects_pending_changes(client: AsyncClient):
     feed_id = (await client.get("/api/feeds")).json()[0]["id"]
     r = await client.put("/api/view-mode", json={"kind": "feed", "id": feed_id, "view_mode": "titles", "epoch": old_epoch})
     assert r.status_code == 409
+    # Client sans époque (version antérieure) : refusé dès que l'instance a été restaurée.
+    assert (await client.post("/api/sync", json={"changes": [change]})).status_code == 409
     r = await client.post("/api/sync", json={"changes": [change], "epoch": new_epoch})
     assert r.status_code == 200 and r.json()["applied"] == 1
+
+
+async def test_import_running_refuses_enqueue_and_generation(client: AsyncClient):
+    """Pendant un import (verrou exclusif), une mise en file depuis l'API est refusée en 503 au lieu de
+    créer un job qui viserait un identifiant réattribué ; le planificateur passe son tour."""
+    from sqlalchemy import func, select
+
+    from fluxus import maintenance
+    from fluxus.db import get_engine
+    from fluxus.worker import schedule_due_feeds
+
+    feed_id = (await client.get("/api/feeds")).json()[0]["id"]
+    async with get_engine().connect() as conn:
+        await conn.execute(select(func.pg_advisory_lock(maintenance.MAINTENANCE_LOCK_KEY)))
+        try:
+            r = await client.post(f"/api/feeds/{feed_id}/refresh")
+            assert r.status_code == 503 and "Import" in r.json()["detail"]
+            with pytest.raises(maintenance.Busy):
+                await schedule_due_feeds()
+        finally:
+            await conn.execute(select(func.pg_advisory_unlock(maintenance.MAINTENANCE_LOCK_KEY)))
+            await conn.commit()
+    assert (await client.post(f"/api/feeds/{feed_id}/refresh")).status_code == 202
+
+
+async def test_import_requires_content_length(client: AsyncClient):
+    """Envoi « chunked » (sans Content-Length) : refusé avant toute écriture sur disque."""
+
+    async def body():
+        yield b"--x\r\n"
+
+    r = await client.post("/api/backup/import", content=body(), headers={"content-type": "multipart/form-data; boundary=x"})
+    assert r.status_code == 411

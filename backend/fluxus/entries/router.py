@@ -10,6 +10,7 @@ from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from .. import maintenance
 from ..auth import Auth
 from ..db import get_session
 from ..extract.clean import html_to_text
@@ -196,6 +197,11 @@ async def mark_read(body: MarkReadIn, _: Auth, session: Session) -> dict:
 @router.post("/{entry_id}/fetch-content", response_model=EntryOut)
 async def fetch_content(entry_id: int, body: FetchContentIn, _: Auth, session: Session) -> EntryOut:
     """Extraction synchrone de l'article complet (l'utilisateur attend le résultat)."""
+    async with maintenance.shared():
+        return await _fetch_content(entry_id, body, session)
+
+
+async def _fetch_content(entry_id: int, body: FetchContentIn, session: AsyncSession) -> EntryOut:
     result = await session.execute(
         select(Entry).options(selectinload(Entry.feed)).where(Entry.id == entry_id)
     )

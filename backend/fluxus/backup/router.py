@@ -74,11 +74,12 @@ async def import_backup(request: Request, _: Auth, session: Session) -> ImportRe
     `confirm`) : mot de passe actuel et mot de confirmation exigés ; tout ou rien.
 
     Le formulaire est lu ici, après l'authentification et le contrôle de `Content-Length` : un
-    envoi trop gros est refusé avant d'être écrit sur disque."""
+    envoi trop gros est refusé avant d'être écrit sur disque. Sans cet en-tête (envoi « chunked »),
+    la taille ne se connaîtrait qu'une fois tout écrit : refusé (un navigateur l'envoie toujours)."""
     try:
-        length = int(request.headers.get("content-length", "0"))
-    except ValueError:
-        length = 0
+        length = int(request.headers["content-length"])
+    except (KeyError, ValueError):
+        raise HTTPException(status.HTTP_411_LENGTH_REQUIRED, "Taille de l'envoi inconnue (en-tête Content-Length requis)") from None
     if length > MAX_IMPORT_BYTES:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Sauvegarde trop volumineuse (1 Go au plus)")
     form = await request.form(max_files=1, max_fields=5)

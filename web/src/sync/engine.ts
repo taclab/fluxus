@@ -27,6 +27,14 @@ const DEFAULT_RETENTION_DAYS = 30
 const EPOCH_KEY = 'sync.epoch'
 /** Époque d'une instance jamais restaurée (valeur du serveur tant qu'aucun import n'a eu lieu). */
 const INITIAL_EPOCH = '0'
+/** Époque marquée périmée après un 409 : ne correspond à aucune époque serveur, donc toute écriture
+ * envoyée d'ici la prochaine passe est refusée, et la passe vide le cache. */
+const STALE_EPOCH = 'périmée'
+
+/** Époque connue de ce cache, à joindre à toute écriture rejouable (file hors ligne). */
+export async function knownEpoch(): Promise<string | null> {
+  return (await getMeta(EPOCH_KEY)) ?? null
+}
 
 /**
  * Aligne l'époque locale sur celle du serveur. Si la base serveur a été remplacée (import d'une
@@ -119,12 +127,13 @@ export function pushOutbox(): Promise<void> {
           const batch = await db.outbox.orderBy('id').limit(200).toArray()
           if (batch.length === 0) break
           const changes = batch.map((b) => ({ entry_id: b.entry_id, read: b.read ?? null, starred: b.starred ?? null, at: b.at }))
-          const epoch = (await getMeta(EPOCH_KEY)) ?? null
+          const epoch = await knownEpoch()
           const { data, error, response } = await api().POST('/api/sync', { body: { changes, epoch } })
           if (response.status === 409) {
             // Base serveur remplacée depuis la dernière synchronisation : ces identifiants désignent
-            // d'autres articles. On oublie l'époque connue ; la passe suivante vide le cache.
-            await db.meta.delete(EPOCH_KEY)
+            // d'autres articles. L'époque est marquée périmée (pas effacée : une écriture sans époque
+            // passerait sur une instance jamais restaurée) ; la passe suivante vide le cache.
+            await setMeta(EPOCH_KEY, STALE_EPOCH)
             window.setTimeout(() => void syncNow(), 0)
             return
           }
@@ -224,8 +233,8 @@ export async function syncNow(): Promise<void> {
     }
     emit({ status: 'syncing', error: null })
     try {
-      // L'époque d'abord : rien de local n'est envoyé à une base qui a été remplacée entre-temps.
-      await adoptEpoch(unwrap(await api().GET('/api/sync/epoch')).epoch)
+      // Envois d'abord, avec l'époque connue : une base remplacée entre-temps les refuse (409) et la
+      // première page ci-dessous, qui porte l'époque du serveur, vide alors le cache.
       await pushOutbox()
       await flushDashboardLayout()
       await flushViewModes()

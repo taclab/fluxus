@@ -22,9 +22,12 @@ from datetime import UTC, datetime
 from itertools import islice
 from typing import IO, Any
 
+from fastapi import HTTPException, status
 from sqlalchemy import DateTime, Table, func, insert, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..maintenance import MAINTENANCE_LOCK_KEY, Busy
 from ..models import Category, Entry, Feed, Setting, SmartFeed, SmartFeedMatch, Summary, Transcript
 from ..settings_store import DEFAULTS, LAYOUT_VERSION_KEY, SECRET_KEYS, get_layout_version, set_setting
 
@@ -37,9 +40,6 @@ BATCH = 1000
 # Ligne décompressée la plus longue acceptée (un article et ses métadonnées) : borne la mémoire face
 # à un fichier forgé.
 MAX_LINE_CHARS = 64 * 1024 * 1024
-# Verrou consultatif partagé par les jobs du worker, exclusif pendant un import : aucun job ne tourne
-# pendant le remplacement, et un job qui attendait vérifie ensuite qu'il existe encore.
-MAINTENANCE_LOCK_KEY = 727003
 LOCK_WAIT_SECONDS = 60
 
 # Colonnes calculées par la base, jamais exportées.
@@ -74,10 +74,6 @@ SEQUENCED = ("categories", "feeds", "smart_feeds", "entries", "summaries")
 
 class InvalidArchive(ValueError):
     """Fichier illisible ou incompatible ; le message est destiné à l'utilisateur."""
-
-
-class Busy(RuntimeError):
-    """Des tâches de fond sont en cours depuis trop longtemps : l'import est refusé sans rien modifier."""
 
 
 def _table(model: type) -> Table:
@@ -235,12 +231,19 @@ def _convert(model: type, row: dict) -> dict:
 
 
 async def _take_maintenance_lock(session: AsyncSession) -> None:
-    """Verrou exclusif (transaction) : attend la fin des jobs en cours, bloque les suivants jusqu'au commit."""
-    for _ in range(LOCK_WAIT_SECONDS * 2):
-        if (await session.execute(select(func.pg_try_advisory_xact_lock(MAINTENANCE_LOCK_KEY)))).scalar_one():
-            return
-        await asyncio.sleep(0.5)
-    raise Busy("Des tâches de fond (récupération, résumés) sont en cours : réessayez dans une minute")
+    """Verrou exclusif (transaction) : attend la fin des jobs en cours, bloque les suivants jusqu'au commit.
+
+    Attente bloquante bornée par `lock_timeout` plutôt que des essais répétés : la demande prend son
+    rang dans la file de Postgres, les nouveaux verrous partagés attendent derrière elle au lieu de
+    l'affamer."""
+    await session.execute(text(f"SET LOCAL lock_timeout = '{LOCK_WAIT_SECONDS}s'"))
+    try:
+        await session.execute(select(func.pg_advisory_xact_lock(MAINTENANCE_LOCK_KEY)))
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == "55P03":  # lock_not_available
+            raise Busy("Des tâches de fond (récupération, résumés) sont en cours : réessayez dans une minute") from exc
+        raise
+    await session.execute(text("SET LOCAL lock_timeout = DEFAULT"))
 
 
 async def import_replace(session: AsyncSession, fileobj: IO[bytes]) -> tuple[dict, dict[str, int]]:
@@ -303,3 +306,15 @@ async def sync_epoch(session: AsyncSession) -> str:
     valeur aléatoire à chaque import (lecture seule : pas d'écriture concurrente au premier appel)."""
     row = await session.get(Setting, SYNC_EPOCH_KEY)
     return row.value if row is not None else INITIAL_EPOCH
+
+
+async def check_epoch(session: AsyncSession, epoch: str | None, detail: str) -> None:
+    """Garde des écritures client rejouables (file hors ligne) : 409 si la base a été remplacée depuis
+    l'époque connue du client.
+
+    Verrou de maintenance pris en partagé jusqu'à la fin de la transaction : un import ne peut pas
+    s'intercaler entre ce contrôle et les écritures qui suivent. Un client sans époque (version
+    antérieure à la sauvegarde complète) n'est accepté que sur une instance jamais restaurée."""
+    await session.execute(select(func.pg_advisory_xact_lock_shared(MAINTENANCE_LOCK_KEY)))
+    if (epoch or INITIAL_EPOCH) != await sync_epoch(session):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail)

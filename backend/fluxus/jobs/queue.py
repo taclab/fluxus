@@ -13,6 +13,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..maintenance import guard
 from ..models import Job
 
 log = logging.getLogger(__name__)
@@ -30,7 +31,11 @@ async def enqueue(
     dedupe_key: str | None = None,
     max_attempts: int = 3,
 ) -> Job | None:
-    """Ajoute un job. Avec `dedupe_key`, ne crée rien si un job identique est déjà en attente."""
+    """Ajoute un job. Avec `dedupe_key`, ne crée rien si un job identique est déjà en attente.
+
+    Hors d'un job du worker, refusé (`maintenance.Busy`) pendant un import de sauvegarde : le job
+    viserait un identifiant qui désigne désormais un autre contenu."""
+    await guard(session)
     job = Job(
         type=job_type,
         payload=payload or {},

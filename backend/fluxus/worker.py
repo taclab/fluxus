@@ -6,13 +6,15 @@ import signal
 import traceback
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 # L'import enregistre les handlers auprès du registre.
-from . import handlers  # noqa: F401
-from .backup.service import MAINTENANCE_LOCK_KEY
+from . import (
+    handlers,  # noqa: F401
+    maintenance,
+)
 from .config import get_settings, validate_runtime_config
-from .db import get_engine, session_scope
+from .db import session_scope
 from .jobs import queue
 from .jobs.registry import get_handler
 from .models import Feed, Job
@@ -24,17 +26,11 @@ PURGE_EVERY = timedelta(hours=6)
 
 
 async def run_job(job: Job, semaphore: asyncio.Semaphore) -> None:
-    async with semaphore, get_engine().connect() as lock_conn:
-        # Verrou partagé tenu pendant tout le job (connexion dédiée : la session du handler commit en
-        # cours de route). Un import de sauvegarde le prend en exclusif : il attend la fin des jobs en
-        # cours, et un job qui attendait l'import constate ensuite que sa ligne a disparu.
-        await lock_conn.execute(select(func.pg_advisory_lock_shared(MAINTENANCE_LOCK_KEY)))
-        await lock_conn.commit()  # verrou de session : il survit au commit, pas de transaction ouverte
-        try:
-            await _run_locked(job)
-        finally:
-            await lock_conn.execute(select(func.pg_advisory_unlock_shared(MAINTENANCE_LOCK_KEY)))
-            await lock_conn.commit()
+    # Verrou de maintenance partagé tenu pendant tout le job. Un import de sauvegarde le prend en
+    # exclusif : il attend la fin des jobs en cours, et un job qui attendait l'import constate ensuite
+    # que sa ligne a disparu.
+    async with semaphore, maintenance.shared(wait=True):
+        await _run_locked(job)
 
 
 async def _run_locked(job: Job) -> None:
@@ -63,6 +59,8 @@ async def schedule_due_feeds() -> int:
     now = datetime.now(UTC)
     count = 0
     async with session_scope() as session:
+        # Avant de lire les flux : un import ne peut pas s'intercaler entre la lecture et la mise en file.
+        await maintenance.guard(session)
         result = await session.execute(
             select(Feed.id).where(Feed.disabled.is_(False), Feed.next_fetch_at <= now)
         )
@@ -97,7 +95,10 @@ async def main() -> None:
         now = datetime.now(UTC)
         try:
             if now - last_schedule >= SCHEDULE_EVERY:
-                scheduled = await schedule_due_feeds()
+                try:
+                    scheduled = await schedule_due_feeds()
+                except maintenance.Busy:
+                    scheduled = 0  # import en cours : on replanifiera au tour suivant
                 if scheduled:
                     log.info("%s flux planifiés", scheduled)
                 last_schedule = now
