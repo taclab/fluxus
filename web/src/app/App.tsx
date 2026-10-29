@@ -3,7 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
 import { getToken, isCapacitor } from '../api/auth'
 import { ErrorBoundary } from '../components/ErrorBoundary'
-import { ToastProvider } from '../components/ui'
+import { ConfirmProvider, ToastProvider } from '../components/ui'
 import { LoginPage } from '../features/auth/LoginPage'
 import { SubscriptionsPage } from '../features/feeds/SubscriptionsPage'
 import { SettingsPage } from '../features/settings/SettingsPage'
@@ -56,6 +56,7 @@ export function App() {
   return (
     <ErrorBoundary>
     <ToastProvider>
+      <ConfirmProvider>
       <BrowserRouter>
         {authed ? (
           <Routes>
@@ -74,6 +75,7 @@ export function App() {
           <LoginPage />
         )}
       </BrowserRouter>
+      </ConfirmProvider>
     </ToastProvider>
     </ErrorBoundary>
   )

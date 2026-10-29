@@ -106,6 +106,14 @@ def run(page, ctx, errors):
     results["bulk_resume"] = not both[target["id"]]["disabled"] and not both[second["id"]]["disabled"]
     results["bulk_inherit"] = both[target["id"]]["view_mode"] is None and both[second["id"]]["view_mode"] is None
     results["bulk_select_reset"] = page.locator("[data-testid=bulk-view]").input_value() == ""
+    # Désabonnement : confirmation dans l'application (pas `window.confirm`), annulée ici.
+    page.click("[data-testid=bulk-delete]")
+    page.wait_for_selector("[data-testid=confirm-ok]", timeout=5000)
+    results["unsubscribe_confirm"] = page.locator("[role=dialog]").inner_text().split("\n")[0]
+    page.get_by_role("button", name="Annuler").click()
+    page.wait_for_timeout(500)
+    ids = {f["id"] for f in api(page, "GET", "/api/feeds").json()}
+    results["unsubscribe_cancel_keeps"] = target["id"] in ids and second["id"] in ids and page.locator("[role=dialog]").count() == 0
 
     # 5. La vue du flux suit : présentation héritée du dossier (Liste).
     page.goto(BASE + f"/feed/{target['id']}", wait_until="networkidle")

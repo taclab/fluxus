@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type EntryListItem, type Feed, type SmartFeed } from '../../api/client'
 import type { View } from '../../app/view'
-import { Button, EmptyState, IconButton, Spinner, useToast } from '../../components/ui'
+import { Button, EmptyState, IconButton, Spinner, useConfirm, useToast } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
 import { hostname, relativeDate } from '../../lib/format'
 import { recordChange, syncNow } from '../../sync/engine'
@@ -84,6 +84,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   const category = useLiveQuery(() => (view.kind === 'category' ? db.categories.get(view.id!) : undefined), [view.kind, view.id])
   const smartFeed = useLiveQuery(() => (view.kind === 'smart' ? db.smartFeeds.get(view.id!) : undefined), [view.kind, view.id])
   const toast = useToast()
+  const confirm = useConfirm()
   const [batchBusy, setBatchBusy] = useState(false)
 
   useEffect(() => {
@@ -256,7 +257,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     if (view.kind !== 'search') {
       // Le compteur de la barre latérale vaut pour tout le périmètre : on confirme au-delà d'un seuil.
       const scopeCount = unreadCount
-      if (scopeCount > CONFIRM_THRESHOLD && !window.confirm(`Marquer ${scopeCount} articles comme lus ?`)) return
+      if (scopeCount > CONFIRM_THRESHOLD && !(await confirm({ title: `Marquer ${scopeCount} articles comme lus ?`, confirmLabel: 'Tout marquer comme lu' }))) return
     }
     setBatchBusy(true)
     try {
@@ -309,7 +310,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
       return
     }
     const scope = unreadOnly ? 'non lus et non encore résumés' : 'non encore résumés'
-    if (!window.confirm(`Résumer les articles ${scope} de « ${batchTarget} » ?\nLe budget quotidien de tokens limite le nombre de résumés lancés.`)) return
+    if (!(await confirm({ title: 'Résumer les articles', message: `Résumer les articles ${scope} de « ${batchTarget} » ?\nLe budget quotidien de tokens limite le nombre de résumés lancés.`, confirmLabel: 'Résumer' }))) return
     setBatchBusy(true)
     try {
       const res =

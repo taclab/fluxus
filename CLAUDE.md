@@ -17,6 +17,7 @@ npm run gen:api                                # après tout changement de route
 ## Règles du projet
 
 - Langue de l'interface, des messages d'erreur `detail` et des commentaires : français.
+- Confirmation : `useConfirm()` (`components/ui.tsx`), jamais `window.confirm` (le navigateur peut le bloquer en silence et renvoyer faux).
 - Toute modification d'une entrée visible par un client met `entry.updated_at = now` (pivot de la sync). Toute écriture de `read`/`starred` pose aussi `read_changed_at`/`starred_changed_at` (horloges par champ, seule base de la résolution des conflits de sync ; jamais `updated_at`).
 - Renderer (`browser/server.py`) : jamais `route.continue_()` ; les redirections sont suivies à la main dans `route_handler` avec revalidation de chaque saut (`scripts/check-browser-redirect.py` doit passer). `safe_get` : le corps est déjà décodé, les en-têtes de transport sont réécrits.
 - Consommation LLM : toute génération journalise une ligne `LlmUsage` (réservée avant l'appel, soldée après) ; le budget des résumés automatiques se calcule sur ce journal, pas sur `summaries`.

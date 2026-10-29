@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link, useNavigate } from 'react-router-dom'
 
 import { api, isOnline, unwrap, type Category, type Feed, type Schemas } from '../../api/client'
-import { Button, EmptyState, IconButton, Input, Select, useToast } from '../../components/ui'
+import { Button, EmptyState, IconButton, Input, Select, useConfirm, useToast } from '../../components/ui'
 import { db } from '../../db/db'
 import { agoDate, formatTokens, hostname, plural, untilDate } from '../../lib/format'
 import { syncNow } from '../../sync/engine'
@@ -75,6 +75,7 @@ function matchesStatus(f: Feed, s: StatusFilter): boolean {
 export function SubscriptionsPage() {
   const navigate = useNavigate()
   const toast = useToast()
+  const confirm = useConfirm()
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? EMPTY_CATEGORIES
   const defaultMode = useDefaultViewMode()
@@ -223,7 +224,7 @@ export function SubscriptionsPage() {
   }
 
   async function removeSelected() {
-    if (!window.confirm(`Se désabonner de ${selectedIds.length} flux ? Leurs articles seront supprimés.`)) return
+    if (!(await confirm({ title: `Se désabonner de ${selectedIds.length} flux ?`, message: 'Leurs articles seront supprimés.', confirmLabel: 'Se désabonner', danger: true }))) return
     if (await run(() => deleteFeeds(selectedIds), 'Désabonné')) setSelected(new Set())
   }
 

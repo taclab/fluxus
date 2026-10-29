@@ -215,6 +215,59 @@ export function useToast() {
   return useContext(ToastContext)
 }
 
+/* ---------- Confirmation ---------- */
+
+interface ConfirmOptions {
+  title: string
+  message?: ReactNode
+  confirmLabel?: string
+  danger?: boolean
+}
+
+const ConfirmContext = createContext<(options: ConfirmOptions) => Promise<boolean>>(async () => false)
+
+/** Confirmation dans l'application : `window.confirm` peut être bloqué en silence par le navigateur
+ * (« empêcher ce site d'ouvrir des boîtes de dialogue », extensions) et renvoie alors faux. */
+export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [pending, setPending] = useState<(ConfirmOptions & { resolve: (ok: boolean) => void }) | null>(null)
+  const ask = useCallback((options: ConfirmOptions) => new Promise<boolean>((resolve) => setPending({ ...options, resolve })), [])
+  const answer = useCallback(
+    (ok: boolean) =>
+      setPending((p) => {
+        p?.resolve(ok)
+        return null
+      }),
+    [],
+  )
+  const cancel = useCallback(() => answer(false), [answer])
+  return (
+    <ConfirmContext.Provider value={ask}>
+      {children}
+      <Dialog
+        open={pending !== null}
+        onClose={cancel}
+        title={pending?.title ?? ''}
+        footer={
+          <>
+            <Button variant="ghost" onClick={cancel}>
+              Annuler
+            </Button>
+            <Button variant={pending?.danger ? 'danger' : 'primary'} onClick={() => answer(true)} autoFocus data-testid="confirm-ok">
+              {pending?.confirmLabel ?? 'Confirmer'}
+            </Button>
+          </>
+        }
+      >
+        {pending?.message && <p className="text-sm text-muted whitespace-pre-line">{pending.message}</p>}
+      </Dialog>
+    </ConfirmContext.Provider>
+  )
+}
+
+export function useConfirm() {
+  return useContext(ConfirmContext)
+}
+
 /* ---------- Divers ---------- */
 
 export function EmptyState({ icon, title, hint, action }: { icon?: ReactNode; title: string; hint?: string; action?: ReactNode }) {
