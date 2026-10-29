@@ -90,7 +90,7 @@ les 5 minutes ; le bouton ↻ force une synchronisation.
 
 Variables optionnelles, préfixe `FLUXUS_` (voir `backend/fluxus/config.py`) : `ACCESS_TOKEN_HOURS`
 (durée des sessions web, 168 h), `DEFAULT_FETCH_INTERVAL_MIN` (30), `MIN_FETCH_INTERVAL_MIN` (10),
-`MAX_FETCH_INTERVAL_MIN` (1440), `WORKER_CONCURRENCY` (6), `HTTP_TIMEOUT_SECONDS` (20), `LOG_LEVEL`.
+`MAX_FETCH_INTERVAL_MIN` (240), `MAX_ERROR_BACKOFF_MIN` (1440), `WORKER_CONCURRENCY` (6), `HTTP_TIMEOUT_SECONDS` (20), `LOG_LEVEL`.
 
 ### Réglages dans l'interface
 

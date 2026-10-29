@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
@@ -28,22 +28,35 @@ class FetchResult:
         self.not_modified = not_modified
 
 
-def _next_interval(feed: Feed, parsed: ParsedFeed | None, new_entries: int) -> int:
-    """Intervalle adaptatif : dense si le flux publie beaucoup, plus lâche sinon ; l'intervalle fixe
+CADENCE_WINDOW = timedelta(days=14)
+
+
+def _next_interval(feed: Feed, recent_entries: int) -> int:
+    """Intervalle adaptatif fondé sur le rythme de publication observé : deux passages par écart moyen
+    entre les articles des 14 derniers jours, borné (10 min – 4 h par défaut). Un flux muet est relu au
+    plafond, jamais au-delà : un rythme qui reprend est repéré en quelques heures. L'intervalle fixe
     choisi par l'utilisateur prime."""
     if feed.fetch_interval_fixed_min:
         return feed.fetch_interval_fixed_min
     settings = get_settings()
     lo, hi = settings.min_fetch_interval_min, settings.max_fetch_interval_min
-    current = feed.fetch_interval_min or settings.default_fetch_interval_min
-    if parsed is None:
-        # 304 Not Modified : rien de neuf, on espace progressivement.
-        return min(hi, int(current * 1.5))
-    if new_entries >= 5:
-        return max(lo, current // 2)
-    if new_entries == 0:
-        return min(hi, int(current * 1.5))
-    return current
+    if recent_entries <= 0:
+        return hi
+    gap_min = CADENCE_WINDOW.total_seconds() / 60 / recent_entries
+    return max(lo, min(hi, int(gap_min / 2)))
+
+
+async def _recent_entry_count(session: AsyncSession, feed: Feed, now: datetime) -> int:
+    """Articles publiés dans la fenêtre d'observation (les dates futures sont ignorées)."""
+    return (
+        await session.scalar(
+            select(func.count()).where(
+                Entry.feed_id == feed.id,
+                Entry.published_at > now - CADENCE_WINDOW,
+                Entry.published_at <= now,
+            )
+        )
+    ) or 0
 
 
 def _favicon_fallback(site_url: str | None) -> str | None:
@@ -76,7 +89,7 @@ async def refresh_feed(session: AsyncSession, feed: Feed) -> FetchResult:
         feed.last_fetched_at = now
         feed.error_count = 0
         feed.last_error = None
-        feed.fetch_interval_min = _next_interval(feed, None, 0)
+        feed.fetch_interval_min = _next_interval(feed, await _recent_entry_count(session, feed, now))
         feed.next_fetch_at = now + timedelta(minutes=feed.fetch_interval_min)
         return FetchResult(not_modified=True)
 
@@ -107,7 +120,7 @@ async def refresh_feed(session: AsyncSession, feed: Feed) -> FetchResult:
     feed.last_fetched_at = now
     feed.error_count = 0
     feed.last_error = None
-    feed.fetch_interval_min = _next_interval(feed, parsed, new_count)
+    feed.fetch_interval_min = _next_interval(feed, await _recent_entry_count(session, feed, now))
     feed.next_fetch_at = now + timedelta(minutes=feed.fetch_interval_min)
     return FetchResult(new_entries=new_count)
 
@@ -182,11 +195,11 @@ async def _record_error(session: AsyncSession, feed: Feed, message: str, now: da
     feed.error_count += 1
     feed.last_error = message[:2000]
     feed.last_fetched_at = now
-    # Recul exponentiel plafonné : 2^n × intervalle courant (jamais moins que l'intervalle fixe).
+    # Recul exponentiel plafonné à 24 h : 2^n × intervalle courant (jamais moins que l'intervalle fixe).
     backoff = max(
         feed.fetch_interval_fixed_min or 0,
         min(
-            settings.max_fetch_interval_min,
+            settings.max_error_backoff_min,
             (feed.fetch_interval_min or settings.default_fetch_interval_min) * (2 ** min(feed.error_count, 6)),
         ),
     )

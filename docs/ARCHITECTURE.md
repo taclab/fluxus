@@ -162,7 +162,8 @@ worker.schedule_due_feeds ─► jobs(fetch_feed, dedupe "fetch_feed:<id>")
          4. _insert_new_entries : ignore ce qui existe déjà par guid OU hash (aussi au sein du lot) ;
             si le flux est en mode `http` ou `browser`, met en file un `extract_entry` par nouveauté
          5. met à jour titre/site/icône si manquants, etag, last_modified,
-            fetch_interval_min (÷2 si ≥5 nouveautés, ×1.5 si aucune, bornes 10 min – 24 h)
+            fetch_interval_min = moitié de l'écart moyen entre les articles publiés sur 14 jours
+            (bornes 10 min – 4 h ; flux muet relu toutes les 4 h)
          Toute exception inattendue (contrainte SQL…) applique quand même le recul exponentiel,
          dans une transaction séparée : un flux ne peut pas être re-planifié toutes les 30 s.
 ```

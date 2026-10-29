@@ -117,8 +117,8 @@ async def test_fixed_interval(client: AsyncClient):
     assert datetime.fromisoformat(body["next_fetch_at"]) <= datetime.now(UTC) + timedelta(minutes=181)
     async with session_scope() as session:
         feed = await session.get(Feed, solo["id"])
-        assert _next_interval(feed, None, 0) == 180
-        assert _next_interval(feed, object(), 10) == 180  # type: ignore[arg-type]
+        assert _next_interval(feed, 0) == 180
+        assert _next_interval(feed, 500) == 180
 
     # Retour à l'adaptatif depuis un intervalle long : l'intervalle repart du défaut et la prochaine
     # récupération est ramenée d'autant.
@@ -133,6 +133,17 @@ async def test_fixed_interval(client: AsyncClient):
     assert datetime.fromisoformat(body["next_fetch_at"]) <= datetime.now(UTC) + timedelta(minutes=31)
     r = await client.put(f"/api/feeds/{solo['id']}", json={"fetch_interval_fixed_min": 2})
     assert r.status_code == 422
+
+
+async def test_adaptive_interval_follows_cadence():
+    from fluxus.fetcher.service import _next_interval
+    from fluxus.models import Feed
+
+    feed = Feed(url="https://cadence.example/rss", fetch_interval_min=1440)
+    assert _next_interval(feed, 0) == 240  # muet : relu au plafond, plus jamais une fois par jour
+    assert _next_interval(feed, 14) == 240  # un article par jour : plafond de 4 h
+    assert _next_interval(feed, 14 * 24) == 30  # un par heure : deux passages par heure
+    assert _next_interval(feed, 100_000) == 10  # plancher
 
 
 async def test_bulk_update_and_stats(client: AsyncClient):

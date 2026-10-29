@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     access_token_hours: int = 24 * 7
     default_fetch_interval_min: int = 30
     min_fetch_interval_min: int = 10
-    max_fetch_interval_min: int = 24 * 60
+    max_fetch_interval_min: int = 4 * 60
+    max_error_backoff_min: int = 24 * 60
     worker_poll_seconds: float = 2.0
     worker_concurrency: int = 6
     http_timeout_seconds: float = 20.0
