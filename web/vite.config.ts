@@ -9,8 +9,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      // Mise à jour sur demande : un bandeau propose de recharger (UpdateBanner) plutôt qu'un rechargement
+      // en pleine lecture. L'enregistrement se fait depuis le code (virtual:pwa-register/react).
+      registerType: 'prompt',
+      injectRegister: false,
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Fluxus',
         short_name: 'Fluxus',
@@ -23,8 +26,21 @@ export default defineConfig({
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          // Motif réduit dans la zone sûre (cercle de 80 %) : Android applique son propre masque.
+          { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
+        // Appui long sur l'icône de l'application installée.
+        shortcuts: [
+          { name: 'Non lus', url: '/unread', icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }] },
+          { name: 'Favoris', url: '/starred', icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }] },
+        ],
+        // « Partager → Fluxus » : ouvre l'ajout de flux prérempli (Layout, route /partage).
+        // Android place souvent l'adresse dans `text` : le front cherche une URL dans les trois champs.
+        share_target: {
+          action: '/partage',
+          method: 'GET',
+          params: { title: 'title', text: 'text', url: 'url' },
+        },
       },
       workbox: {
         // L'application est "offline-first" via Dexie ; le service worker ne gère que la coquille

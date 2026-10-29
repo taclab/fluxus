@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import type { Category, Feed, SmartFeed } from '../api/client'
 import { db } from '../db/db'
@@ -9,6 +10,7 @@ import { Dashboard } from '../features/dashboard/Dashboard'
 import { EntryList } from '../features/entries/EntryList'
 import { useViewMode } from '../features/entries/useViewMode'
 import { DEFAULT_VIEW_MODE, layoutOf } from '../features/entries/viewMode'
+import { AddFeedDialog, sharedUrl } from '../features/feeds/AddFeedDialog'
 import { CategoryDialog, FeedDialog } from '../features/feeds/FeedDialog'
 import { Sidebar } from '../features/feeds/Sidebar'
 import { SmartFeedDialog } from '../features/smartfeeds/SmartFeedDialog'
@@ -30,6 +32,11 @@ function useMediaQuery(query: string): boolean {
 
 export function Layout() {
   const { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly, openEntryIn } = useView()
+  const location = useLocation()
+  const navigate = useNavigate()
+  // « Partager → Fluxus » (share_target du manifeste) : tableau de bord en fond, ajout de flux prérempli.
+  const sharing = location.pathname === '/partage'
+  const shared = useMemo(() => (sharing ? sharedUrl(new URLSearchParams(location.search)) : ''), [sharing, location.search])
   const isDashboard = view.kind === 'dashboard'
   // Présentation propre à la vue (flux → dossier → défaut) ; elle fixe aussi la disposition :
   // « pleine largeur », la liste occupe tout et l'article s'ouvre dans une fenêtre.
@@ -182,6 +189,7 @@ export function Layout() {
         </ReaderModal>
       )}
 
+      {sharing && <AddFeedDialog open initialUrl={shared} categories={categories} onClose={() => navigate('/', { replace: true })} />}
       <FeedDialog feed={editFeed} categories={categories} onClose={() => setEditFeed(null)} />
       <CategoryDialog open={editCategory.open} category={editCategory.category} onClose={() => setEditCategory({ open: false, category: null })} />
       <SmartFeedDialog

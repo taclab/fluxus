@@ -23,10 +23,11 @@ Pour comprendre comment c'est construit : [docs/ARCHITECTURE.md](docs/ARCHITECTU
 2. [Premiers pas](#premiers-pas)
 3. [Configuration](#configuration)
 4. [Utilisation](#utilisation)
-5. [Application Android](#application-android)
-6. [Exploitation](#exploitation)
-7. [Développement](#développement)
-8. [Dépannage](#dépannage)
+5. [Application installable (PWA)](#application-installable-pwa)
+6. [Application Android](#application-android)
+7. [Exploitation](#exploitation)
+8. [Développement](#développement)
+9. [Dépannage](#dépannage)
 
 ---
 
@@ -309,6 +310,21 @@ d'articles (30 par défaut, réglable dans *Paramètres → Hors-ligne*) et tous
 contenu complet, sont conservés sur chaque appareil. Marquer lu ou favori
 hors-ligne est mis en file et rejoué au retour du réseau ; en cas de conflit la modification la plus
 récente gagne. Ajouter un flux, récupérer un article complet ou résumer nécessite le réseau.
+
+## Application installable (PWA)
+
+Servie en HTTPS, l'interface web s'installe comme une application : *Installer l'application* dans
+Chrome ou Edge (ordinateur, Android), *Partager → Sur l'écran d'accueil* dans Safari (iOS). Elle
+s'ouvre alors en plein écran, avec le même mode hors-ligne que dans le navigateur.
+
+- **Partager → Fluxus** (Android, Chrome ou Edge sur ordinateur) : depuis une page ouverte
+  ailleurs, ouvre l'ajout de flux avec l'adresse préremplie.
+- **Raccourcis** : un appui long sur l'icône propose *Non lus* et *Favoris*.
+- **Mises à jour** : quand une nouvelle version est déployée, un bandeau propose de recharger ;
+  rien ne se recharge en pleine lecture.
+- **Stockage persistant** : après connexion, Fluxus demande au navigateur de ne pas purger la base
+  locale quand l'espace manque. Chrome l'accorde sans demander à une appli installée ; Firefox pose
+  la question une fois.
 
 ## Application Android
 

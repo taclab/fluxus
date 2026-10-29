@@ -10,6 +10,7 @@ import { SettingsPage } from '../features/settings/SettingsPage'
 import { startAutoSync } from '../sync/engine'
 import { Layout } from './Layout'
 import { applyTheme, getTheme, watchSystemTheme } from './theme'
+import { UpdateBanner } from './UpdateBanner'
 
 function useAuthed(): boolean {
   const [authed, setAuthed] = useState(Boolean(getToken()))
@@ -36,6 +37,14 @@ export function App() {
   useEffect(() => {
     if (!authed) return
     return startAutoSync()
+  }, [authed])
+
+  // Stockage persistant : sans lui, le navigateur peut purger IndexedDB (articles hors ligne, file de
+  // modifications) quand l'espace manque. Chrome l'accorde sans demander à une appli installée ;
+  // Firefox pose la question une fois. Demandé après connexion, pas sur l'écran d'accueil.
+  useEffect(() => {
+    if (!authed || isCapacitor() || !navigator.storage?.persist) return
+    void navigator.storage.persisted().then((done) => (done ? undefined : navigator.storage.persist()))
   }, [authed])
 
   // Android : le bouton retour matériel remonte l'historique au lieu de quitter l'appli.
@@ -75,6 +84,7 @@ export function App() {
           <LoginPage />
         )}
       </BrowserRouter>
+      <UpdateBanner />
       </ConfirmProvider>
     </ToastProvider>
     </ErrorBoundary>

@@ -124,6 +124,11 @@ if static_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     static_root = static_dir.resolve()
+    # Coquille de la PWA : jamais servie depuis un cache HTTP sans revalidation, sinon un navigateur ou un
+    # reverse proxy peut figer une ancienne version (le service worker ne verrait pas la mise à jour).
+    # Les fichiers de /assets portent une empreinte dans leur nom et restent cachables.
+    no_cache = {"Cache-Control": "no-cache"}
+    shell_files = {"index.html", "sw.js", "registerSW.js", "manifest.webmanifest"}
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str, request: Request):
@@ -133,5 +138,6 @@ if static_dir.is_dir():
             # Résolution complète puis vérification d'appartenance : refuse toute traversée (`..`, encodée ou non).
             candidate = (static_root / full_path).resolve()
             if candidate.is_relative_to(static_root) and candidate.is_file():
-                return FileResponse(candidate)
-        return FileResponse(static_root / "index.html")
+                headers = no_cache if candidate.parent == static_root and candidate.name in shell_files else None
+                return FileResponse(candidate, headers=headers)
+        return FileResponse(static_root / "index.html", headers=no_cache)

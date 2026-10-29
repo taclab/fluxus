@@ -106,6 +106,11 @@ et indexée GIN.
 React 19 + TypeScript + Vite 8 + Tailwind 4. État local dans IndexedDB via Dexie ; l'interface se
 met à jour par `useLiveQuery`. Le service worker (vite-plugin-pwa) ne met en cache que la coquille
 et les images : les appels `/api/*` ne sont jamais cachés, l'offline est assuré par Dexie.
+Il est enregistré depuis le code (`app/UpdateBanner.tsx`, `registerType: 'prompt'`) : une nouvelle
+version attend que l'utilisateur recharge (appliquée d'office dans l'APK). Le serveur sert la
+coquille (`index.html`, `sw.js`, `registerSW.js`, `manifest.webmanifest`) en `Cache-Control: no-cache`.
+Le manifeste déclare des raccourcis et un `share_target` vers `/partage`, que `Layout` traduit en
+ajout de flux prérempli (`sharedUrl`, `features/feeds/AddFeedDialog.tsx`).
 
 ## 4. Modèle de données
 

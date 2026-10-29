@@ -273,6 +273,7 @@ async def test_spa_path_traversal_is_blocked(client: AsyncClient, tmp_path, monk
     static.mkdir()
     (static / "index.html").write_text("<html>ok</html>")
     (static / "app.js").write_text("js")
+    (static / "sw.js").write_text("sw")
     (tmp_path / "secret.txt").write_text("SECRET")
     monkeypatch.setenv("FLUXUS_STATIC_DIR", str(static))
     from fluxus import config, main
@@ -282,6 +283,10 @@ async def test_spa_path_traversal_is_blocked(client: AsyncClient, tmp_path, monk
     async with AsyncClient(transport=ASGITransport(app=module.app), base_url="http://test") as c:
         assert (await c.get("/app.js")).text == "js"
         assert (await c.get("/n-importe-quoi")).text == "<html>ok</html>"
+        # Coquille de la PWA revalidée à chaque fois ; les autres fichiers gardent le cache par défaut.
+        assert (await c.get("/n-importe-quoi")).headers.get("cache-control") == "no-cache"
+        assert (await c.get("/sw.js")).headers.get("cache-control") == "no-cache"
+        assert "cache-control" not in (await c.get("/app.js")).headers
         for path in ("/..%2Fsecret.txt", "/%2e%2e/secret.txt", "/a/../../secret.txt"):
             r = await c.get(path)
             assert "SECRET" not in r.text, path
