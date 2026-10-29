@@ -12,8 +12,16 @@ export function saveBlob(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(a.href), 60_000)
 }
 
-/** Nom proposé par le serveur (`Content-Disposition`), sinon `fallback`. */
-export function filenameFrom(res: Response, fallback: string): string {
-  const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')
-  return m?.[1] ?? fallback
+/**
+ * Téléchargement direct d'une URL (lien à usage unique, sans jeton dans les en-têtes) : le navigateur
+ * écrit sur le disque au fil de la réception, sans copie en mémoire dans l'onglet, avec sa propre
+ * progression. Le serveur doit répondre en `Content-Disposition: attachment`.
+ */
+export function downloadUrl(url: string): void {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }

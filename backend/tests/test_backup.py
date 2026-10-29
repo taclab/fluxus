@@ -90,7 +90,9 @@ async def client():
 
 
 async def _export(client: AsyncClient) -> bytes:
-    r = await client.get("/api/backup/export")
+    link = await client.post("/api/backup/export-link")
+    assert link.status_code == 200, link.text
+    r = await client.get(link.json()["url"], headers={"Authorization": ""})
     assert r.status_code == 200, r.text
     assert r.headers["content-type"] == "application/gzip"
     assert "fluxus-export-" in r.headers["content-disposition"]
@@ -314,3 +316,25 @@ async def test_import_requires_content_length(client: AsyncClient):
 
     r = await client.post("/api/backup/import", content=body(), headers={"content-type": "multipart/form-data; boundary=x"})
     assert r.status_code == 411
+
+
+async def test_export_link_is_single_use_and_expires(client: AsyncClient, monkeypatch):
+    """Le lien d'export ne sert qu'une fois, expire, et un ticket faux n'invalide pas le lien en cours."""
+    from datetime import timedelta
+
+    from fluxus.backup import router as backup_router
+
+    assert (await client.get("/api/backup/export", params={"ticket": "faux"})).status_code == 403
+    url = (await client.post("/api/backup/export-link")).json()["url"]
+    assert (await client.get("/api/backup/export", params={"ticket": "faux"})).status_code == 403
+    assert (await client.get(url, headers={"Authorization": ""})).status_code == 200
+    assert (await client.get(url, headers={"Authorization": ""})).status_code == 403
+    # Un nouveau lien remplace le précédent.
+    first = (await client.post("/api/backup/export-link")).json()["url"]
+    second = (await client.post("/api/backup/export-link")).json()["url"]
+    assert (await client.get(first)).status_code == 403
+    assert (await client.get(second)).status_code == 200
+    monkeypatch.setattr(backup_router, "EXPORT_TICKET_TTL", timedelta(seconds=-1))
+    expired = (await client.post("/api/backup/export-link")).json()["url"]
+    assert (await client.get(expired)).status_code == 403
+    assert (await client.post("/api/backup/export-link", headers={"Authorization": ""})).status_code == 401

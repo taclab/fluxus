@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+import hmac
+import json
+import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
 from ..auth import Auth
 from ..auth.router import _client_key, login_limiter
-from ..auth.security import verify_password
+from ..auth.security import hash_device_token, verify_password
 from ..db import get_session, session_factory
-from ..settings_store import get_setting
+from ..models import Setting
+from ..settings_store import get_setting, set_setting
 from . import service
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
@@ -23,6 +28,15 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 
 MAX_IMPORT_BYTES = 1024 * 1024 * 1024
 CONFIRM_WORD = "REMPLACER"
+# Lien d'export à usage unique : le navigateur télécharge directement sur le disque (pas de copie en
+# mémoire dans l'onglet). Un seul lien valide à la fois ; seule son empreinte est stockée.
+EXPORT_TICKET_KEY = "_backup_export_ticket"
+EXPORT_TICKET_TTL = timedelta(seconds=60)
+
+
+class ExportLink(BaseModel):
+    # Chemin relatif à l'URL du serveur, valable une fois et pendant une minute.
+    url: str
 
 
 class ImportResult(BaseModel):
@@ -37,9 +51,39 @@ def _header_or_none(file: UploadFile) -> dict | None:
         return None
 
 
+@router.post("/export-link", response_model=ExportLink)
+async def export_link(_: Auth, session: Session) -> ExportLink:
+    """Lien de téléchargement de la sauvegarde, à usage unique (remplace tout lien précédent)."""
+    ticket = secrets.token_urlsafe(32)
+    expires = datetime.now(UTC) + EXPORT_TICKET_TTL
+    await set_setting(session, EXPORT_TICKET_KEY, json.dumps({"hash": hash_device_token(ticket), "expires": expires.isoformat()}))
+    await session.commit()
+    return ExportLink(url=f"/api/backup/export?ticket={ticket}")
+
+
+async def _consume_ticket(session: AsyncSession, ticket: str) -> bool:
+    """Vrai si `ticket` est le lien en cours et n'a pas expiré ; il est alors effacé (usage unique).
+    Un ticket faux n'efface rien : un tiers ne peut pas invalider le lien de l'utilisateur."""
+    row = (await session.execute(select(Setting).where(Setting.key == EXPORT_TICKET_KEY).with_for_update())).scalar_one_or_none()
+    try:
+        stored = json.loads(row.value) if row is not None else None
+    except ValueError:
+        stored = None
+    if stored is None or not hmac.compare_digest(stored.get("hash", ""), hash_device_token(ticket)):
+        await session.rollback()
+        return False
+    await session.delete(row)
+    await session.commit()
+    return datetime.fromisoformat(stored["expires"]) > datetime.now(UTC)
+
+
 @router.get("/export", response_class=StreamingResponse)
-async def export_backup(_: Auth) -> StreamingResponse:
-    """Toute la base en un fichier .jsonl.gz (sans mot de passe, jetons d'appareils ni clés API)."""
+async def export_backup(session: Session, ticket: str = Query(..., max_length=128)) -> StreamingResponse:
+    """Toute la base en un fichier .jsonl.gz (sans mot de passe, jetons d'appareils ni clés API).
+
+    Sans en-tête d'authentification : le ticket vient de `POST /api/backup/export-link`."""
+    if not await _consume_ticket(session, ticket):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Lien de sauvegarde invalide ou expiré : relancez l'export")
 
     async def body():
         # Session propre au flux : celle de la requête est fermée avant la fin de l'envoi.

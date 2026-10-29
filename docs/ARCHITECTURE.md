@@ -464,7 +464,11 @@ et un changement avance `next_fetch_at` sans jamais le reculer), `auto_summary` 
 
 ### Sauvegarde complète (`backend/fluxus/backup/`, `features/settings/BackupSection.tsx`)
 
-`GET /api/backup/export` produit en flux un JSON Lines gzip.
+`GET /api/backup/export?ticket=…` produit en flux un JSON Lines gzip. Le lien vient de
+`POST /api/backup/export-link` (authentifié) : ticket à usage unique, valable 60 s, un seul à la fois,
+seule son empreinte est stockée (`_backup_export_ticket`). Le navigateur télécharge directement sur le
+disque (`lib/download.downloadUrl`), sans copie en mémoire dans l'onglet ; un ticket faux n'invalide pas
+le lien en cours.
 
 - **En-tête** : `format`, `version` (1), révision Alembic, date, comptes par table.
 - **Lignes** : une par enregistrement (`{"t": table, "r": colonnes}`), dans l'ordre des clés étrangères de `EXPORT_TABLES`. Les identifiants sont conservés et `search_vector` est omis.

@@ -10,9 +10,9 @@ import { AlertTriangle, DatabaseBackup, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { isCapacitor } from '../../api/auth'
-import { apiUrl, authHeaders, type Schemas } from '../../api/client'
+import { api, apiUrl, authHeaders, unwrap, type Schemas } from '../../api/client'
 import { Button, Dialog, Field, Input, useToast } from '../../components/ui'
-import { filenameFrom, saveBlob } from '../../lib/download'
+import { downloadUrl } from '../../lib/download'
 import { fullDate, plural } from '../../lib/format'
 import { syncNow } from '../../sync/engine'
 
@@ -72,11 +72,11 @@ export function BackupSection({ onImported }: { onImported?: () => void }) {
   async function exportAll() {
     setExporting(true)
     try {
-      const res = await fetch(apiUrl('/api/backup/export'), { headers: authHeaders() })
-      if (!res.ok) throw new Error('Export impossible')
-      const blob = await res.blob()
-      saveBlob(blob, filenameFrom(res, 'fluxus-export.jsonl.gz'))
-      toast(`Sauvegarde téléchargée (${(blob.size / 1024 / 1024).toFixed(1)} Mo)`, 'success')
+      // Lien à usage unique : le fichier peut peser des centaines de Mo, le navigateur le télécharge
+      // directement plutôt que de le garder en mémoire dans l'onglet.
+      const { url } = unwrap(await api().POST('/api/backup/export-link'))
+      downloadUrl(apiUrl(url))
+      toast('Téléchargement de la sauvegarde lancé', 'success')
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Export impossible', 'error')
     } finally {

@@ -131,6 +131,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backup/export-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Link
+         * @description Lien de téléchargement de la sauvegarde, à usage unique (remplace tout lien précédent).
+         */
+        post: operations["export_link_api_backup_export_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backup/export": {
         parameters: {
             query?: never;
@@ -141,6 +161,8 @@ export interface paths {
         /**
          * Export Backup
          * @description Toute la base en un fichier .jsonl.gz (sans mot de passe, jetons d'appareils ni clés API).
+         *
+         *     Sans en-tête d'authentification : le ticket vient de `POST /api/backup/export-link`.
          */
         get: operations["export_backup_api_backup_export_get"];
         put?: never;
@@ -908,6 +930,11 @@ export interface components {
             read?: boolean | null;
             /** Starred */
             starred?: boolean | null;
+        };
+        /** ExportLink */
+        ExportLink: {
+            /** Url */
+            url: string;
         };
         /** FeedBulkIn */
         FeedBulkIn: {
@@ -1794,7 +1821,7 @@ export interface operations {
             };
         };
     };
-    export_backup_api_backup_export_get: {
+    export_link_api_backup_export_link_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1808,7 +1835,38 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ExportLink"];
+                };
+            };
+        };
+    };
+    export_backup_api_backup_export_get: {
+        parameters: {
+            query: {
+                ticket: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
