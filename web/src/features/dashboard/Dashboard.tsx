@@ -1,6 +1,4 @@
 import clsx from 'clsx'
-import { format } from 'date-fns'
-import { fr } from 'date-fns/locale'
 import { Check, Menu, Plus, RefreshCw, Search, SlidersHorizontal } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
@@ -8,6 +6,7 @@ import type { View } from '../../app/view'
 import { useView } from '../../app/view'
 import { Button, IconButton, useToast } from '../../components/ui'
 import { syncNow } from '../../sync/engine'
+import { longDay } from '../../lib/format'
 import { useSyncState } from '../../sync/useSync'
 import { DashboardDataProvider, useDashboardData } from './DashboardData'
 import { DashboardGrid } from './DashboardGrid'
@@ -58,7 +57,7 @@ function DashboardInner({ onOpenSidebar, onOpenEntry, onSearch }: Props) {
     setConfig({ open: false, widget: null })
   }
 
-  const today = format(new Date(), 'EEEE d MMMM', { locale: fr })
+  const today = longDay()
 
   return (
     <section className="flex h-full flex-col bg-app">

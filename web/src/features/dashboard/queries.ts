@@ -1,44 +1,16 @@
-/** Requêtes Dexie des widgets : tout passe par les index, le tri en mémoire est borné à feeds × limit. */
+/** Requêtes Dexie des widgets : tout passe par les index ; listes multi-flux et flux intelligents dans
+ * `db/entryQueries.ts` (partagées avec la liste d'articles). */
 
 import type { Feed, StatsOut, SummaryOut } from '../../api/client'
 import { api, isOnline, unwrap } from '../../api/client'
 import { db, getMeta, setMeta, type LocalEntry } from '../../db/db'
+import type { LatestOptions } from '../../db/entryQueries'
 
-export interface LatestOptions {
-  unreadOnly: boolean
-  limit: number
-}
-
-function latestForFeed(feedId: number, { unreadOnly, limit }: LatestOptions): Promise<LocalEntry[]> {
-  const coll = unreadOnly
-    ? db.entries.where('[feed_id+readFlag+publishedTs]').between([feedId, 0, -Infinity], [feedId, 0, Infinity])
-    : db.entries.where('[feed_id+publishedTs]').between([feedId, -Infinity], [feedId, Infinity])
-  return coll.reverse().limit(limit).toArray()
-}
-
-/** Derniers articles de plusieurs flux : une requête indexée par flux, fusion bornée. */
-export async function latestForFeeds(feedIds: number[], opts: LatestOptions): Promise<LocalEntry[]> {
-  if (feedIds.length === 0) return []
-  if (feedIds.length === 1) return latestForFeed(feedIds[0], opts)
-  const perFeed = await Promise.all(feedIds.map((id) => latestForFeed(id, opts)))
-  return perFeed
-    .flat()
-    .sort((a, b) => b.publishedTs - a.publishedTs)
-    .slice(0, opts.limit)
-}
+export { latestForFeeds, latestForSmartFeed, type LatestOptions } from '../../db/entryQueries'
 
 export function latestAll({ unreadOnly, limit }: LatestOptions): Promise<LocalEntry[]> {
   const coll = unreadOnly ? db.entries.where('[readFlag+publishedTs]').between([0, -Infinity], [0, Infinity]) : db.entries.orderBy('publishedTs')
   return coll.reverse().limit(limit).toArray()
-}
-
-/** Derniers articles d'un flux intelligent (index multiEntry, tri mémoire borné par les correspondances). */
-export async function latestForSmartFeed(smartFeedId: number, { unreadOnly, limit }: LatestOptions): Promise<LocalEntry[]> {
-  let coll = db.entries.where('smart_feed_ids').equals(smartFeedId)
-  if (unreadOnly) coll = coll.and((e) => e.readFlag === 0)
-  const arr = await coll.toArray()
-  arr.sort((a, b) => b.publishedTs - a.publishedTs)
-  return arr.slice(0, limit)
 }
 
 export function latestStarred(limit: number): Promise<LocalEntry[]> {

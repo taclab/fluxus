@@ -1,33 +1,44 @@
-import { useLiveQuery } from 'dexie-react-hooks'
+import { liveQuery, type Subscription } from 'dexie'
+import { useSyncExternalStore } from 'react'
 
-import { db } from '../../db/db'
+import { EMPTY_UNREAD, sameUnreadCounts, unreadCounts, type UnreadCounts } from '../../db/entryQueries'
 
-export interface UnreadCounts {
-  byFeed: Map<number, number>
-  bySmartFeed: Map<number, number>
+export type { UnreadCounts }
+
+/** Une seule requête vivante pour toute l'application (barre latérale, tableau de bord, en-tête de
+ * liste) : ouverte au premier abonné, fermée au dernier, dernier résultat gardé entre-temps. */
+let current: UnreadCounts = EMPTY_UNREAD
+let subscription: Subscription | null = null
+const listeners = new Set<() => void>()
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  if (!subscription) {
+    subscription = liveQuery(unreadCounts).subscribe({
+      next: (value) => {
+        if (sameUnreadCounts(current, value)) return
+        current = value
+        listeners.forEach((l) => l())
+      },
+      error: (err) => console.error('Compteurs de non lus', err),
+    })
+  }
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size === 0) {
+      subscription?.unsubscribe()
+      subscription = null
+    }
+  }
 }
 
-const EMPTY: UnreadCounts = { byFeed: new Map(), bySmartFeed: new Map() }
-
-/** Non lus par flux et par flux intelligent : un seul parcours de l'index readFlag = 0. */
+/** Non lus par flux, par flux intelligent, favoris et total : clés d'index seulement. */
 export function useUnreadCountsFull(): UnreadCounts {
-  return (
-    useLiveQuery(async (): Promise<UnreadCounts> => {
-      const byFeed = new Map<number, number>()
-      const bySmartFeed = new Map<number, number>()
-      await db.entries
-        .where('readFlag')
-        .equals(0)
-        .each((e) => {
-          byFeed.set(e.feed_id, (byFeed.get(e.feed_id) ?? 0) + 1)
-          for (const id of e.smart_feed_ids ?? []) bySmartFeed.set(id, (bySmartFeed.get(id) ?? 0) + 1)
-        })
-      return { byFeed, bySmartFeed }
-    }, []) ?? EMPTY
-  )
+  return useSyncExternalStore(subscribe, () => current)
 }
 
-/** Compatibilité : non lus par flux seulement. */
-export function useUnreadCounts(): Map<number, number> {
-  return useUnreadCountsFull().byFeed
+/** Un seul nombre tiré des compteurs : le composant ne se redessine que si ce nombre change
+ * (la liste d'articles n'a pas à suivre chaque recalcul des compteurs de la barre latérale). */
+export function useUnreadCount(select: (counts: UnreadCounts) => number | null): number | null {
+  return useSyncExternalStore(subscribe, () => select(current))
 }

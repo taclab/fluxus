@@ -7,9 +7,11 @@ import { api, isOnline, unwrap, type EntryListItem, type Feed, type SmartFeed } 
 import type { View } from '../../app/view'
 import { Button, EmptyState, IconButton, Spinner, useConfirm, useToast } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
+import { latestForFeeds, latestForSmartFeed } from '../../db/entryQueries'
 import { hostname, relativeDate } from '../../lib/format'
 import { recordChange, syncNow } from '../../sync/engine'
 import { FeedIcon } from '../feeds/Sidebar'
+import { useUnreadCount } from '../feeds/useUnreadCounts'
 import { CONFIRM_THRESHOLD, markViewRead } from './markRead'
 import { setViewMode } from './useViewMode'
 import { DEFAULT_VIEW_MODE, LAYOUT_GROUPS, VIEW_MODE_SPECS, layoutOf, modesFor, sourceLabel, type ResolvedViewMode, type ViewMode } from './viewMode'
@@ -152,6 +154,12 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     return new Map(rows.filter((r): r is LocalEntry => Boolean(r)).map((r) => [r.id, r]))
   }, [remoteIdsKey])
 
+  // Flux du dossier affiché : la requête ne repart que si l'appartenance change, pas à chaque écriture sur un flux.
+  const categoryFeedKey = view.kind === 'category' ? feeds.filter((f) => f.category_id === view.id).map((f) => f.id).join(',') : ''
+  // Recherche en ligne : les résultats viennent du serveur ; le filtre local (parcours complet de la table)
+  // ne sert que hors ligne ou en repli si le serveur répond en erreur.
+  const localSearch = view.kind === 'search' && (remote === null || Boolean(remote.error))
+
   const entries = useLiveQuery(async (): Promise<LocalEntry[]> => {
     const wantUnread = unreadOnly || view.kind === 'unread'
     let coll
@@ -159,27 +167,16 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
       case 'feed':
         coll = wantUnread ? db.entries.where('[feed_id+readFlag+publishedTs]').between([view.id, 0, -Infinity], [view.id, 0, Infinity]) : db.entries.where('[feed_id+publishedTs]').between([view.id, -Infinity], [view.id, Infinity])
         break
-      case 'category': {
-        const ids = feeds.filter((f) => f.category_id === view.id).map((f) => f.id)
-        coll = db.entries.where('feed_id').anyOf(ids)
-        if (wantUnread) coll = coll.and((e) => e.readFlag === 0)
-        const arr = await coll.toArray()
-        arr.sort((a, b) => b.publishedTs - a.publishedTs)
-        return arr.slice(0, limit)
-      }
-      case 'smart': {
-        // Index multiEntry : pas de composé possible, tri mémoire borné par le nombre de correspondances.
-        let c = db.entries.where('smart_feed_ids').equals(view.id!)
-        if (wantUnread) c = c.and((e) => e.readFlag === 0)
-        const arr = await c.toArray()
-        arr.sort((a, b) => b.publishedTs - a.publishedTs)
-        return arr.slice(0, limit)
-      }
+      case 'category':
+        return latestForFeeds(categoryFeedKey ? categoryFeedKey.split(',').map(Number) : [], { unreadOnly: wantUnread, limit })
+      case 'smart':
+        return latestForSmartFeed(view.id!, { unreadOnly: wantUnread, limit })
       case 'starred':
         coll = db.entries.where('[starredFlag+publishedTs]').between([1, -Infinity], [1, Infinity])
         if (unreadOnly) coll = coll.and((e) => e.readFlag === 0)
         break
       case 'search': {
+        if (!localSearch) return []
         const q = (view.query ?? '').toLowerCase()
         coll = db.entries.orderBy('publishedTs').filter((e) => e.title.toLowerCase().includes(q) || (e.excerpt ?? '').toLowerCase().includes(q))
         if (wantUnread) coll = coll.and((e) => e.readFlag === 0)
@@ -189,7 +186,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         coll = wantUnread ? db.entries.where('[readFlag+publishedTs]').between([0, -Infinity], [0, Infinity]) : db.entries.orderBy('publishedTs')
     }
     return coll.reverse().limit(limit).toArray()
-  }, [view.kind, view.id, view.query, unreadOnly, limit, feeds])
+  }, [view.kind, view.id, view.query, unreadOnly, limit, categoryFeedKey, localSearch])
 
   const items: Array<LocalEntry | EntryListItem> = useMemo(() => {
     if (remote && !remote.loading && !remote.error) {
@@ -277,26 +274,25 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
 
   const heading = titleFor(view, feedMap, category?.title, smartFeed?.name)
   // Non lus de tout le périmètre de la vue (pas seulement la page chargée) ; recherche : l'affiché.
-  const scopeUnread = useLiveQuery(async () => {
+  // Compteurs partagés avec la barre latérale : aucune requête de plus, et un nouveau rendu seulement si
+  // le nombre de la vue change.
+  const scopeUnread = useUnreadCount((unread) => {
     switch (view.kind) {
       case 'feed':
-        return db.entries.where('[feed_id+readFlag+publishedTs]').between([view.id, 0, -Infinity], [view.id, 0, Infinity]).count()
-      case 'category': {
-        const ids = feeds.filter((f) => f.category_id === view.id).map((f) => f.id)
-        const counts = await Promise.all(ids.map((id) => db.entries.where('[feed_id+readFlag+publishedTs]').between([id, 0, -Infinity], [id, 0, Infinity]).count()))
-        return counts.reduce((a, b) => a + b, 0)
-      }
+        return unread.byFeed.get(view.id!) ?? 0
+      case 'category':
+        return categoryFeedKey ? categoryFeedKey.split(',').reduce((sum, id) => sum + (unread.byFeed.get(Number(id)) ?? 0), 0) : 0
       case 'smart':
-        return db.entries.where('smart_feed_ids').equals(view.id!).and((e) => e.readFlag === 0).count()
+        return unread.bySmartFeed.get(view.id!) ?? 0
       case 'starred':
-        return db.entries.where('[starredFlag+publishedTs]').between([1, -Infinity], [1, Infinity]).and((e) => e.readFlag === 0).count()
+        return unread.starred
       case 'all':
       case 'unread':
-        return db.entries.where('readFlag').equals(0).count()
+        return unread.total
       default:
         return null
     }
-  }, [view.kind, view.id, feeds])
+  })
   const unreadCount = view.kind === 'search' || scopeUnread == null ? items.filter((e) => !e.read).length : scopeUnread
   const currentFeed = view.kind === 'feed' ? feedMap.get(view.id!) : undefined
   const batchTarget = view.kind === 'smart' ? smartFeed?.name : currentFeed ? currentFeed.title || hostname(currentFeed.url) : undefined

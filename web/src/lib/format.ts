@@ -1,5 +1,24 @@
-import { format, isToday, isYesterday } from 'date-fns'
-import { fr } from 'date-fns/locale'
+// Intl plutôt qu'une bibliothèque de dates : mêmes libellés français (« 3 oct. », « jeudi 29 octobre »).
+const DAY_MONTH = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' })
+const DAY_MONTH_YEAR = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
+const LONG_DATE = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+const LONG_DAY = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+const TIME = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' })
+
+function sameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+function isYesterday(d: Date): boolean {
+  const y = new Date()
+  y.setDate(y.getDate() - 1)
+  return sameDay(d, y)
+}
+
+/** « jeudi 29 octobre » (en-tête du tableau de bord). */
+export function longDay(d: Date = new Date()): string {
+  return LONG_DAY.format(d)
+}
 
 export function relativeDate(iso: string): string {
   const d = new Date(iso)
@@ -8,8 +27,8 @@ export function relativeDate(iso: string): string {
   if (diffMs < 3600_000) return `${Math.floor(diffMs / 60_000)} min`
   if (diffMs < 24 * 3600_000) return `${Math.floor(diffMs / 3600_000)} h`
   if (isYesterday(d)) return 'hier'
-  if (d.getFullYear() === new Date().getFullYear()) return format(d, 'd MMM', { locale: fr })
-  return format(d, 'd MMM yyyy', { locale: fr })
+  if (d.getFullYear() === new Date().getFullYear()) return DAY_MONTH.format(d)
+  return DAY_MONTH_YEAR.format(d)
 }
 
 /** Date passée précédée de « il y a » quand c'est une durée : « il y a 5 min », « à l'instant », « hier ». */
@@ -29,8 +48,8 @@ export function untilDate(iso: string): string {
 
 export function fullDate(iso: string): string {
   const d = new Date(iso)
-  if (isToday(d)) return `aujourd'hui à ${format(d, 'HH:mm')}`
-  return format(d, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr })
+  if (sameDay(d, new Date())) return `aujourd'hui à ${TIME.format(d)}`
+  return `${LONG_DATE.format(d)} à ${TIME.format(d)}`
 }
 
 export function hostname(url: string | null | undefined): string {

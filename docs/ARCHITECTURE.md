@@ -365,6 +365,11 @@ correspondante ; la déconnexion explicite efface la base courante.
 - **Lecture** : `EntryList`, `Sidebar`, `Reader` interrogent Dexie. Les index composites
   (`[feed_id+readFlag+publishedTs]`, `[readFlag+publishedTs]`, `[starredFlag+publishedTs]`) évitent
   de trier en mémoire ; les booléens sont stockés en `0/1` car IndexedDB ne les indexe pas.
+  Un article local porte tout son HTML : les listes multi-flux, les flux intelligents et les
+  compteurs (`db/entryQueries.ts`) travaillent sur les clés d'index (comptes natifs, `primaryKeys`,
+  curseurs de clés) et ne chargent que les articles affichés, dans une seule transaction (hors
+  transaction, Dexie en ouvre une par requête). Les compteurs de non lus sont une seule requête
+  vivante partagée (`useUnreadCountsFull` / `useUnreadCount`), qui ne notifie que s'ils changent.
 - **Écriture d'état** : `recordChange` / `recordBulkRead` modifient Dexie et ajoutent une ligne à
   `outbox`, puis tentent un push immédiat. L'interface réagit avant tout aller-retour réseau.
 - **Actions réseau** (ajouter un flux, extraire, résumer, réglages) : appel direct de l'API via

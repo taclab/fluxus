@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Inbox, LayoutDashboard, ListChecks, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { Category, Feed, SmartFeed } from '../../api/client'
@@ -32,7 +32,7 @@ const COLLAPSED_KEY = 'fluxus.collapsed'
 export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmartFeed }: Props) {
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? EMPTY_CATEGORIES
-  const { byFeed: unreadByFeed, bySmartFeed } = useUnreadCountsFull()
+  const { byFeed: unreadByFeed, bySmartFeed, total: totalUnread } = useUnreadCountsFull()
   const smartFeeds = useLiveQuery(() => db.smartFeeds.orderBy('position').toArray(), []) ?? EMPTY_SMART
   const starredCount = useLiveQuery(() => db.entries.where('starredFlag').equals(1).count(), []) ?? 0
   const sync = useSyncState()
@@ -44,8 +44,6 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
       return new Set()
     }
   })
-
-  const totalUnread = useMemo(() => [...unreadByFeed.values()].reduce((a, b) => a + b, 0), [unreadByFeed])
 
   const updateCollapsed = useCallback((fn: (next: Set<number>) => void) => {
     setCollapsed((cur) => {

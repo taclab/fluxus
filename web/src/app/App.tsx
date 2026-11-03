@@ -1,16 +1,27 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
 import { getToken, isCapacitor } from '../api/auth'
 import { ErrorBoundary } from '../components/ErrorBoundary'
-import { ConfirmProvider, ToastProvider } from '../components/ui'
+import { ConfirmProvider, Spinner, ToastProvider } from '../components/ui'
 import { LoginPage } from '../features/auth/LoginPage'
-import { SubscriptionsPage } from '../features/feeds/SubscriptionsPage'
-import { SettingsPage } from '../features/settings/SettingsPage'
 import { startAutoSync } from '../sync/engine'
 import { Layout } from './Layout'
 import { applyTheme, getTheme, watchSystemTheme } from './theme'
 import { UpdateBanner } from './UpdateBanner'
+
+// Pages secondaires chargées à la demande : hors du chemin de démarrage (tableau de bord, liste, lecteur).
+// Le service worker les met en cache d'avance, elles restent disponibles hors ligne.
+const SettingsPage = lazy(() => import('../features/settings/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const SubscriptionsPage = lazy(() => import('../features/feeds/SubscriptionsPage').then((m) => ({ default: m.SubscriptionsPage })))
+
+function PageFallback() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Spinner className="size-6" />
+    </div>
+  )
+}
 
 function useAuthed(): boolean {
   const [authed, setAuthed] = useState(Boolean(getToken()))
@@ -69,8 +80,8 @@ export function App() {
       <BrowserRouter>
         {authed ? (
           <Routes>
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/abonnements" element={<SubscriptionsPage />} />
+            <Route path="/settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>} />
+            <Route path="/abonnements" element={<Suspense fallback={<PageFallback />}><SubscriptionsPage /></Suspense>} />
             <Route path="/all" element={<Layout />} />
             <Route path="/feed/:id" element={<Layout />} />
             <Route path="/category/:id" element={<Layout />} />

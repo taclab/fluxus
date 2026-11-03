@@ -26,7 +26,7 @@ npm run gen:api                                # après tout changement de route
 - Nouveau réglage : `settings_store.DEFAULTS` (+ `SECRET_KEYS` si secret) puis `SettingsPage`.
 - Nouveau job : handler `@job_handler`, importé dans `handlers.py`, idempotent.
 - Nouveau widget de tableau de bord : `features/dashboard/layout.ts` (type, normalisation, titre) → `queries.ts` → `widgets/` → `DashboardGrid.WidgetSwitch` + `WidgetConfigDialog`.
-- Toute requête Dexie d'un widget doit passer par un index de `db.ts` ; pas de scan de table dans un widget.
+- Toute requête Dexie d'un widget doit passer par un index de `db.ts` ; pas de scan de table dans un widget. Pour lister ou compter au-delà d'une page, clés d'abord, articles ensuite (`db/entryQueries.ts`) : un article local porte tout son HTML. Compteurs de non lus : `useUnreadCountsFull` / `useUnreadCount`, jamais une nouvelle requête.
 - Tout accès HTTP sortant passe par `fetcher/http.safe_get` (anti-SSRF après redirection, taille et délai bornés) ; jamais `client.get` directement.
 - Tests E2E : `docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/out fluxus-browser python /scripts/e2e-<nom>.py` ; tout script passe par `scripts/e2e_common.py` (connexion, `api()`, contexte avec `bypass_csp`, collecte des erreurs, `main(run, results, …)`), jamais de harnais recopié.
 - Flux intelligents : toute condition passe par `smartfeeds/rules.build_condition` (SQL, `coalesce` systématique) ; jamais de filtrage en JavaScript. Toute écriture sur `smart_feed_matches` bump `entries.updated_at` (horloge Python).
