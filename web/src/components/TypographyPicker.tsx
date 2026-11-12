@@ -1,18 +1,6 @@
 import clsx from 'clsx'
-import { useEffect, useState } from 'react'
-
-import { applyReadingPrefs, getReadingPrefs, READING_FONTS, READING_SIZES, READING_WIDTHS, type ReadingPrefs } from '../app/reading'
-
-export function useReadingPrefs(): [ReadingPrefs, (p: Partial<ReadingPrefs>) => void] {
-  const [prefs, setPrefs] = useState<ReadingPrefs>(getReadingPrefs())
-  useEffect(() => {
-    const handler = () => setPrefs(getReadingPrefs())
-    window.addEventListener('fluxus:reading', handler)
-    return () => window.removeEventListener('fluxus:reading', handler)
-  }, [])
-  const update = (p: Partial<ReadingPrefs>) => applyReadingPrefs({ ...getReadingPrefs(), ...p })
-  return [prefs, update]
-}
+import { READING_FONTS, READING_SIZES, READING_WIDTHS, type ReadingPrefs } from '../app/reading'
+import { useReadingPrefs } from '../app/useReadingPrefs'
 
 /** Choix de la combinaison de polices, de la taille et de la largeur de colonne. `compact` pour le popover du lecteur. */
 export function TypographyPicker({ compact }: { compact?: boolean }) {

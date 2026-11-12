@@ -1,6 +1,7 @@
 /** Modèle du tableau de bord : types, validation, disposition par défaut. Aucune dépendance React. */
 
 import type { Category, Feed, SmartFeed } from '../../api/client'
+import type { View } from '../../app/view'
 
 export const LAYOUT_VERSION = 1
 
@@ -221,4 +222,12 @@ export function blankWidget(type: WidgetType): Widget {
     case 'stats':
       return { ...base, type, width: 6, show: { unreadByCategory: true, readToday: true, feedErrors: true, tokens: true } }
   }
+}
+
+/** Vue de liste qui correspond à la source d'un widget d'actualités. */
+export function viewForSource(source: NewsWidget['source']): View {
+  if (source.kind === 'category') return { kind: 'category', id: source.id }
+  if (source.kind === 'feed') return { kind: 'feed', id: source.id }
+  if (source.kind === 'smart') return { kind: 'smart', id: source.id }
+  return { kind: 'all' }
 }

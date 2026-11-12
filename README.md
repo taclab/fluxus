@@ -360,12 +360,28 @@ docker compose pull && docker compose up -d --build   # mise à jour
 Les migrations de schéma s'appliquent automatiquement au démarrage du conteneur `api`
 (`alembic upgrade head`).
 
-Sauvegarde : la base contient tout (flux, articles, résumés, réglages, mot de passe).
+Sauvegarde : la base contient tout (flux, articles, résumés, réglages, mot de passe). Le service
+`backup` écrit une archive `pg_dump` par jour dans `./backups` (`fluxus-AAAAMMJJ-HHMMSS.sql.gz`,
+lisible par root seulement) et garde les sept dernières. Dossier, nombre et intervalle se règlent
+dans `.env` (`FLUXUS_BACKUP_DIR`, `FLUXUS_BACKUP_KEEP`, `FLUXUS_BACKUP_INTERVAL_HOURS`). Par défaut
+les archives sont sur le même disque que la base : pointez `FLUXUS_BACKUP_DIR` vers un autre disque
+pour survivre à sa perte. Une sauvegarde est refusée s'il reste moins de 1 Go libre.
 
 ```bash
-docker compose exec -T postgres pg_dump -U fluxus fluxus | gzip > fluxus-$(date +%F).sql.gz
-gunzip -c fluxus-2026-09-14.sql.gz | docker compose exec -T postgres psql -U fluxus fluxus   # restauration
+docker compose logs backup                                         # dernière archive, erreurs
+docker compose run --rm backup now                                 # sauvegarde immédiate
+
+# Restauration : dans une base vide, services arrêtés
+docker compose stop api worker backup
+docker compose exec -T postgres dropdb -U fluxus fluxus
+docker compose exec -T postgres createdb -U fluxus fluxus
+gunzip -c backups/fluxus-20261112-030000.sql.gz | docker compose exec -T postgres psql -q -U fluxus -d fluxus
+docker compose up -d
 ```
+
+Espace disque : Postgres s'arrête quand le disque est plein. L'espace libre du serveur s'affiche dans
+**Paramètres** ; sous 2 Go ou 5 %, une alerte apparaît aussi sur le widget « Vue d'ensemble » du
+tableau de bord.
 
 Remise à zéro complète : `docker compose down -v` (supprime le volume Postgres).
 
@@ -401,10 +417,16 @@ Qualité :
 ```bash
 cd backend
 uv run ruff check fluxus tests
-uv run pytest tests/ --ignore=tests/test_api.py                    # unitaires, sans base
-DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus_test uv run pytest tests/test_api.py   # intégration
-cd ../web && npm run typecheck && npm run lint
+DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus_test uv run pytest   # suite complète
+uv run pytest                                                      # sans base : plus de la moitié des tests est ignorée
+cd ../web && npm run typecheck && npm run lint && npm test && npm run build
 ```
+
+Le lint est bloquant (aucun avertissement toléré) et `npm test` couvre les règles pures du front
+(ordre de la barre latérale, présentations, disposition du tableau de bord, fusion et purge de la
+synchronisation). L'intégration continue (`.github/workflows/ci.yml`) rejoue le tout à chaque
+poussée, avec la construction des images et le contrôle du cloisonnement du renderer. Les versions
+sont décrites dans [CHANGELOG.md](CHANGELOG.md).
 
 Tests de bout en bout de l'interface (Playwright dans l'image `fluxus-browser`, contre une pile qui
 tourne sur :8000) :

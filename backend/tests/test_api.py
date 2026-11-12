@@ -192,6 +192,19 @@ async def test_settings_secrets_masked(client: AsyncClient):
     assert r.status_code == 400
 
 
+async def test_stats_report_disk_space(client: AsyncClient):
+    """Audit du 12/11, constat 18 : l'espace disque du serveur est exposé, avec un seuil d'alerte."""
+    from fluxus.settings_router import disk_is_low
+
+    body = (await client.get("/api/settings/stats")).json()
+    assert isinstance(body["disk_free_bytes"], int) and body["disk_free_bytes"] > 0
+    assert isinstance(body["disk_low"], bool)
+    gib = 1024**3
+    assert disk_is_low(1 * gib, 60 * gib)  # moins de 2 Gio
+    assert disk_is_low(20 * gib, 500 * gib)  # moins de 5 %
+    assert not disk_is_low(13 * gib, 63 * gib)
+
+
 async def test_dashboard_layout_setting(client: AsyncClient):
     layout = '{"version": 1, "updatedAt": "2026-09-14T15:00:00Z", "widgets": [{"id": "a", "type": "stats", "width": 6}]}'
     base = (await client.get("/api/settings")).json()["dashboard_layout_version"]

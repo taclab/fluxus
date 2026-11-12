@@ -8,3 +8,4 @@ web/android
 .git
 .env
 dist
+backups

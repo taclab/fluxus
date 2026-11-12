@@ -4,7 +4,8 @@ import { Sparkles, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 
 import { api, ApiError, isOnline, unwrap, type SmartFeed, type SmartFeedDefinitionIn, type SmartFeedIn } from '../../api/client'
-import { Button, Dialog, Field, Input, Select, useToast } from '../../components/ui'
+import { useToast } from '../../components/feedback'
+import { Button, Dialog, Field, Input, Select } from '../../components/ui'
 import { db } from '../../db/db'
 import { relativeDate } from '../../lib/format'
 import { syncNow } from '../../sync/engine'
@@ -91,9 +92,9 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
   const [preview, setPreview] = useState<{ state: 'idle' | 'loading' | 'ok' | 'error' | 'offline'; count?: number; samples?: { id: number; title: string; feed_id: number; published_at: string }[]; message?: string }>({ state: 'idle' })
   const toast = useToast()
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? []
-  const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? []
-  const feedMap = useMemo(() => new Map(feeds.map((f) => [f.id, f])), [feeds])
-  const feedsSorted = useMemo(() => [...feeds].sort((a, b) => a.title.localeCompare(b.title, 'fr')), [feeds])
+  const feeds = useLiveQuery(() => db.feeds.toArray(), [])
+  const feedMap = useMemo(() => new Map((feeds ?? []).map((f) => [f.id, f])), [feeds])
+  const feedsSorted = useMemo(() => [...(feeds ?? [])].sort((a, b) => a.title.localeCompare(b.title, 'fr')), [feeds])
 
   useEffect(() => {
     if (open) {

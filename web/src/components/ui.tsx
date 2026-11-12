@@ -1,9 +1,7 @@
 import clsx from 'clsx'
 import { Loader2, X } from 'lucide-react'
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -14,6 +12,8 @@ import {
   type SelectHTMLAttributes,
 } from 'react'
 import { createPortal } from 'react-dom'
+
+import { ConfirmContext, ToastContext, type ConfirmOptions, type ToastKind } from './feedback'
 
 /* ---------- Boutons ---------- */
 
@@ -175,15 +175,13 @@ export function Dialog({
 interface Toast {
   id: number
   message: string
-  kind: 'info' | 'error' | 'success'
+  kind: ToastKind
 }
-
-const ToastContext = createContext<(message: string, kind?: Toast['kind']) => void>(() => {})
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const counter = useRef(0)
-  const push = useCallback((message: string, kind: Toast['kind'] = 'info') => {
+  const push = useCallback((message: string, kind: ToastKind = 'info') => {
     const id = ++counter.current
     setToasts((t) => [...t, { id, message, kind }])
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 6000 : 3500)
@@ -211,20 +209,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function useToast() {
-  return useContext(ToastContext)
-}
-
 /* ---------- Confirmation ---------- */
-
-interface ConfirmOptions {
-  title: string
-  message?: ReactNode
-  confirmLabel?: string
-  danger?: boolean
-}
-
-const ConfirmContext = createContext<(options: ConfirmOptions) => Promise<boolean>>(async () => false)
 
 /** Confirmation dans l'application : `window.confirm` peut être bloqué en silence par le navigateur
  * (« empêcher ce site d'ouvrir des boîtes de dialogue », extensions) et renvoie alors faux. */
@@ -262,10 +247,6 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       </Dialog>
     </ConfirmContext.Provider>
   )
-}
-
-export function useConfirm() {
-  return useContext(ConfirmContext)
 }
 
 /* ---------- Divers ---------- */

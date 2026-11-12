@@ -1,12 +1,11 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useRef } from 'react'
 
 import type { View } from '../../../app/view'
 import type { LocalEntry } from '../../../db/db'
 import { relativeDate } from '../../../lib/format'
 import { recordBulkRead } from '../../../sync/engine'
-import { useDashboardData } from '../DashboardData'
+import { useDashboardData } from '../dashboardContext'
 import { widgetTitle, type WidgetWidth, type YoutubeWidget as YoutubeWidgetModel } from '../layout'
 import { latestForFeeds, youtubeFeedIds } from '../queries'
 import { WidgetFrame, type WidgetActions } from '../WidgetFrame'
@@ -29,9 +28,7 @@ export function YoutubeWidget({ widget, editing, actions, onOpenEntry, onOpenVie
   const feedKey = feedIds.join(',')
 
   const entries = useLiveQuery(() => latestForFeeds(feedIds, { unreadOnly: widget.unreadOnly, limit: widget.limit }), [feedKey, widget.unreadOnly, widget.limit])
-  const last = useRef<LocalEntry[]>([])
-  if (entries) last.current = entries
-  const items = (entries ?? last.current).filter((e) => e.youtube_id)
+  const items = (entries ?? []).filter((e) => e.youtube_id)
 
   // Vue de contexte : la catégorie si ciblée, sinon le flux de la vidéo cliquée.
   const viewFor = (e: LocalEntry): View => (categoryId != null ? { kind: 'category', id: categoryId } : { kind: 'feed', id: e.feed_id })
@@ -46,7 +43,7 @@ export function YoutubeWidget({ widget, editing, actions, onOpenEntry, onOpenVie
       editing={editing}
       width={widget.width as WidgetWidth}
       orphan={orphan}
-      loading={entries === undefined && last.current.length === 0 && !data.ready}
+      loading={entries === undefined && !data.ready}
       empty={data.ready && items.length === 0}
       emptyLabel={feedIds.length === 0 ? 'Aucun flux YouTube' : 'Aucune vidéo non vue'}
       onOpen={openView ? () => onOpenView(openView) : undefined}

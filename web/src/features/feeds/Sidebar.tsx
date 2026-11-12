@@ -10,9 +10,9 @@ import { IconButton } from '../../components/ui'
 import { db } from '../../db/db'
 import { syncNow } from '../../sync/engine'
 import { useSyncState } from '../../sync/useSync'
-import { viewPath, type View } from '../../app/view'
+import type { View } from '../../app/view'
 import { AddFeedDialog } from './AddFeedDialog'
-import { Count, FeedIcon } from './FeedIcon'
+import { Count } from './FeedIcon'
 import { SubscriptionTree } from './SubscriptionTree'
 import { useUnreadCountsFull } from './useUnreadCounts'
 
@@ -137,5 +137,3 @@ function SyncBadge() {
     </span>
   )
 }
-
-export { FeedIcon, viewPath }

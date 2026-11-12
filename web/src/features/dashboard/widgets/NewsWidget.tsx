@@ -8,9 +8,9 @@ import type { View } from '../../../app/view'
 import type { LocalEntry } from '../../../db/db'
 import { hostname, relativeDate } from '../../../lib/format'
 import { recordBulkRead, recordChange } from '../../../sync/engine'
-import { FeedIcon } from '../../feeds/Sidebar'
-import { useDashboardData } from '../DashboardData'
-import { widgetTitle, type NewsWidget as NewsWidgetModel, type WidgetWidth } from '../layout'
+import { FeedIcon } from '../../feeds/FeedIcon'
+import { useDashboardData } from '../dashboardContext'
+import { viewForSource, widgetTitle, type NewsWidget as NewsWidgetModel, type WidgetWidth } from '../layout'
 import { categoryFeedIds, latestAll, latestForFeeds, latestForSmartFeed } from '../queries'
 import { WidgetFrame, type WidgetActions } from '../WidgetFrame'
 
@@ -22,13 +22,6 @@ interface Props {
   onOpenView: (view: View) => void
   handleProps?: React.ComponentProps<typeof WidgetFrame>['handleProps']
   dragging?: boolean
-}
-
-export function viewForSource(source: NewsWidgetModel['source']): View {
-  if (source.kind === 'category') return { kind: 'category', id: source.id }
-  if (source.kind === 'feed') return { kind: 'feed', id: source.id }
-  if (source.kind === 'smart') return { kind: 'smart', id: source.id }
-  return { kind: 'all' }
 }
 
 export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, handleProps, dragging }: Props) {
@@ -49,10 +42,8 @@ export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, 
           : latestAll({ unreadOnly: widget.unreadOnly, limit: widget.limit }),
     [feedKey, widget.unreadOnly, widget.limit],
   )
-  // Garde les dernières données pendant les rejeux Dexie pour éviter le clignotement.
-  const last = useRef<LocalEntry[]>([])
-  if (entries) last.current = entries
-  const items = entries ?? last.current
+  // useLiveQuery garde le dernier résultat quand ses dépendances changent : pas de clignotement.
+  const items = entries ?? []
 
   const unreadCount =
     smartId != null
@@ -72,7 +63,7 @@ export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, 
       editing={editing}
       width={widget.width as WidgetWidth}
       orphan={orphan}
-      loading={entries === undefined && last.current.length === 0 && !data.ready}
+      loading={entries === undefined && !data.ready}
       empty={data.ready && items.length === 0}
       emptyLabel={widget.unreadOnly ? 'Tout est lu' : 'Aucun article'}
       onOpen={() => onOpenView(view)}

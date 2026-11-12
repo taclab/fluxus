@@ -73,6 +73,29 @@ services:
       api:
         condition: service_healthy
 
+  # Sauvegarde planifiée : une archive pg_dump par jour dans FLUXUS_BACKUP_DIR (voir README, « Exploitation »).
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [internal]
+    mem_limit: 256m
+    pids_limit: 64
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-fluxus}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Définir POSTGRES_PASSWORD dans .env}
+      PGDATABASE: ${POSTGRES_DB:-fluxus}
+      BACKUP_KEEP: ${FLUXUS_BACKUP_KEEP:-7}
+      BACKUP_INTERVAL_HOURS: ${FLUXUS_BACKUP_INTERVAL_HOURS:-24}
+    volumes:
+      - ${FLUXUS_BACKUP_DIR:-./backups}:/backups
+      - ./scripts/backup.sh:/usr/local/bin/fluxus-backup:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/fluxus-backup"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   browser:
     build: ./browser
     image: fluxus-browser

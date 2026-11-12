@@ -1,18 +1,9 @@
 import { useState, type FormEvent } from 'react'
 
 import { api, ApiError, unwrap, type Category } from '../../api/client'
-import { Button, Dialog, Field, Input, Select, useToast } from '../../components/ui'
+import { useToast } from '../../components/feedback'
+import { Button, Dialog, Field, Input, Select } from '../../components/ui'
 import { syncNow } from '../../sync/engine'
-
-/** Adresse reçue par le partage système (`share_target` du manifeste, route /partage). Android met
- * souvent l'adresse dans `text`, parfois précédée du titre de la page : on prend la première URL trouvée. */
-export function sharedUrl(params: URLSearchParams): string {
-  for (const key of ['url', 'text', 'title']) {
-    const match = params.get(key)?.match(/https?:\/\/[^\s<>"]+/)
-    if (match) return match[0].replace(/[).,;:!?»]+$/, '')
-  }
-  return ''
-}
 
 interface Choice {
   url: string

@@ -67,6 +67,13 @@ export function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)} M`
 }
 
+/** Taille en Go ou en Mo (unités binaires, comme `df -h`). */
+export function formatBytes(n: number): string {
+  const gib = n / 1024 ** 3
+  if (gib >= 1) return `${gib.toFixed(gib >= 10 ? 0 : 1).replace('.', ',')} Go`
+  return `${Math.round(n / 1024 ** 2)} Mo`
+}
+
 export function plural(n: number, singular: string, pluralForm?: string): string {
   return n <= 1 ? singular : pluralForm ?? `${singular}s`
 }

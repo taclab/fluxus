@@ -10,5 +10,7 @@
     d.readingFont = r.font || 'editorial'
     d.readingSize = r.size || 'm'
     d.readingWidth = r.width || 'normal'
-  } catch (e) {}
+  } catch {
+    // Stockage local indisponible ou corrompu : thème et typographie par défaut.
+  }
 })()

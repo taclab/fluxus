@@ -5,12 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type EntryListItem, type Feed, type SmartFeed } from '../../api/client'
 import type { View } from '../../app/view'
-import { Button, EmptyState, IconButton, Spinner, useConfirm, useToast } from '../../components/ui'
+import { useConfirm, useToast } from '../../components/feedback'
+import { Button, EmptyState, IconButton, Spinner } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
 import { latestForFeeds, latestForSmartFeed } from '../../db/entryQueries'
 import { hostname, relativeDate } from '../../lib/format'
 import { recordChange, syncNow } from '../../sync/engine'
-import { FeedIcon } from '../feeds/Sidebar'
+import { FeedIcon } from '../feeds/FeedIcon'
 import { useUnreadCount } from '../feeds/useUnreadCounts'
 import { CONFIRM_THRESHOLD, markViewRead } from './markRead'
 import { setViewMode } from './useViewMode'
@@ -352,7 +353,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
                   e.preventDefault()
                   setSearchOpen(false)
                   setSearchText('')
-                  if (view.kind === 'search') onBack ? onBack() : onSearch('')
+                  if (view.kind === 'search') (onBack ?? (() => onSearch('')))()
                 }
               }}
               className="h-9 flex-1 rounded-lg bg-muted px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent-400"
@@ -364,7 +365,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
               onClick={() => {
                 setSearchOpen(false)
                 setSearchText('')
-                if (view.kind === 'search') onBack ? onBack() : onSearch('')
+                if (view.kind === 'search') (onBack ?? (() => onSearch('')))()
               }}
             >
               <X className="size-4" />

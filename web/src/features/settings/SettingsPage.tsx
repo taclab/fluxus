@@ -5,16 +5,17 @@ import { useNavigate } from 'react-router-dom'
 import { getServerUrl, isDeviceToken, getToken, setToken } from '../../api/auth'
 import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, type StatsOut } from '../../api/client'
 import type { Theme } from '../../app/theme'
-import { useTheme } from '../../components/ThemeToggle'
+import { useTheme } from '../../app/useTheme'
 import { TypographyPicker } from '../../components/TypographyPicker'
-import { Button, Field, IconButton, Input, Select, Spinner, useToast } from '../../components/ui'
+import { useToast } from '../../components/feedback'
+import { Button, Field, IconButton, Input, Select, Spinner } from '../../components/ui'
 import { clearDatabase } from '../../db/db'
 import { resetDashboardLayout } from '../dashboard/useDashboardLayout'
 import { BackupSection } from './BackupSection'
 import { setViewMode, useDefaultViewMode } from '../entries/useViewMode'
 import { LAYOUT_GROUPS, VIEW_MODE_SPECS, modesFor, type ListLayout } from '../entries/viewMode'
 import { saveBlob } from '../../lib/download'
-import { formatTokens, relativeDate } from '../../lib/format'
+import { formatBytes, formatTokens, relativeDate } from '../../lib/format'
 import { resetAndSync, syncNow } from '../../sync/engine'
 
 const ANTHROPIC_MODELS = [
@@ -314,6 +315,12 @@ export function SettingsPage() {
               <p className="text-xs text-muted">
                 {stats.feeds} flux · {stats.entries} articles · {stats.unread} non lus · {stats.starred} favoris
                 {stats.jobs_failed > 0 && ` · ${stats.jobs_failed} tâches en échec`}
+                {stats.disk_free_bytes != null && ` · ${formatBytes(stats.disk_free_bytes)} libres sur le disque du serveur`}
+              </p>
+            )}
+            {stats?.disk_low && (
+              <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
+                Espace disque presque épuisé : la base s’arrête quand le disque est plein. Libérez de la place sur le serveur.
               </p>
             )}
           </Section>

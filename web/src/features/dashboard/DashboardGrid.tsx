@@ -17,7 +17,7 @@ import { GripVertical } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { View } from '../../app/view'
-import { useDashboardData } from './DashboardData'
+import { useDashboardData } from './dashboardContext'
 import { isKnownWidget, WIDTH_CLASS, widgetTitle, type AnyWidget, type Widget, type WidgetWidth } from './layout'
 import { WidgetFrame, type WidgetActions } from './WidgetFrame'
 import { NewsWidget } from './widgets/NewsWidget'

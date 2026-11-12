@@ -1,24 +1,9 @@
 import { Monitor, Moon, Sun } from 'lucide-react'
-import { useEffect, useState } from 'react'
-
-import { applyTheme, getTheme, type Theme } from '../app/theme'
+import type { Theme } from '../app/theme'
+import { useTheme } from '../app/useTheme'
 import { IconButton } from './ui'
 
 const LABELS: Record<Theme, string> = { light: 'Thème clair', dark: 'Thème sombre', system: 'Thème automatique (système)' }
-
-export function useTheme(): [Theme, (t: Theme) => void] {
-  const [theme, setTheme] = useState<Theme>(getTheme())
-  useEffect(() => {
-    const handler = () => setTheme(getTheme())
-    window.addEventListener('fluxus:theme', handler)
-    return () => window.removeEventListener('fluxus:theme', handler)
-  }, [])
-  const set = (t: Theme) => {
-    applyTheme(t)
-    window.dispatchEvent(new Event('fluxus:theme'))
-  }
-  return [theme, set]
-}
 
 export function ThemeToggle({ size = 'sm' }: { size?: 'sm' | 'md' }) {
   const [theme, setTheme] = useTheme()

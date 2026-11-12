@@ -135,7 +135,9 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
   const [serverChecked, setServerChecked] = useState(false)
   const [readOnly, setReadOnly] = useState(false)
   const notifyRef = useRef(notify)
-  notifyRef.current = notify
+  useEffect(() => {
+    notifyRef.current = notify
+  })
 
   // Réconciliation avec le serveur, une fois par montage quand on est en ligne.
   useEffect(() => {

@@ -14,7 +14,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Link, useNavigate } from 'react-router-dom'
 
 import { api, isOnline, unwrap, type Category, type Feed, type Schemas } from '../../api/client'
-import { Button, EmptyState, IconButton, Input, Select, useConfirm, useToast } from '../../components/ui'
+import { useConfirm, useToast } from '../../components/feedback'
+import { Button, EmptyState, IconButton, Input, Select } from '../../components/ui'
 import { db } from '../../db/db'
 import { agoDate, formatTokens, hostname, plural, untilDate } from '../../lib/format'
 import { syncNow } from '../../sync/engine'

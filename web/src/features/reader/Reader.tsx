@@ -6,13 +6,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, isOnline, unwrap, type Feed } from '../../api/client'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { TypographyPicker } from '../../components/TypographyPicker'
-import { EmptyState, IconButton, Kbd, Spinner, useToast } from '../../components/ui'
+import { useToast } from '../../components/feedback'
+import { EmptyState, IconButton, Kbd, Spinner } from '../../components/ui'
 import { db, toLocalEntry } from '../../db/db'
 import { fullDate, hostname } from '../../lib/format'
 import { sanitizeArticle } from '../../lib/markdown'
 import { recordChange } from '../../sync/engine'
 import { SummaryPanel } from '../summary/SummaryPanel'
-import { FeedIcon } from '../feeds/Sidebar'
+import { openExternal } from '../../lib/links'
+import { FeedIcon } from '../feeds/FeedIcon'
 
 interface Props {
   entryId: number | null
@@ -20,11 +22,6 @@ interface Props {
   summaryRequested: number // compteur incrémenté par le raccourci "r"
   fullContentRequested: number // compteur incrémenté par le raccourci "f"
   onCreateSmartFeed?: (feedId: number) => void
-}
-
-/** N'ouvre que des liens http(s) : un flux ne doit pas pouvoir déclencher un autre schéma. */
-export function openExternal(url: string | null | undefined) {
-  if (url && /^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener')
 }
 
 export function Reader({ entryId, onBack, summaryRequested, fullContentRequested, onCreateSmartFeed }: Props) {

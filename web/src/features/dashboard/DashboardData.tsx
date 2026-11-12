@@ -1,24 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 
-import type { Category, Feed, SmartFeed } from '../../api/client'
 import { db } from '../../db/db'
 import { useUnreadCountsFull } from '../feeds/useUnreadCounts'
-
-export interface DashboardData {
-  feeds: Feed[]
-  categories: Category[]
-  smartFeeds: SmartFeed[]
-  feedMap: Map<number, Feed>
-  categoryMap: Map<number, Category>
-  smartFeedMap: Map<number, SmartFeed>
-  unreadByFeed: Map<number, number>
-  unreadBySmartFeed: Map<number, number>
-  ready: boolean
-}
-
-const EMPTY: DashboardData = { feeds: [], categories: [], smartFeeds: [], feedMap: new Map(), categoryMap: new Map(), smartFeedMap: new Map(), unreadByFeed: new Map(), unreadBySmartFeed: new Map(), ready: false }
-const Ctx = createContext<DashboardData>(EMPTY)
+import { DashboardDataContext, type DashboardData } from './dashboardContext'
 
 /** Trois requêtes partagées par tous les widgets au lieu d'une par widget. */
 export function DashboardDataProvider({ children }: { children: ReactNode }) {
@@ -40,9 +25,5 @@ export function DashboardDataProvider({ children }: { children: ReactNode }) {
     }),
     [feeds, categories, smartFeeds, unreadByFeed, unreadBySmartFeed],
   )
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
-}
-
-export function useDashboardData(): DashboardData {
-  return useContext(Ctx)
+  return <DashboardDataContext.Provider value={value}>{children}</DashboardDataContext.Provider>
 }

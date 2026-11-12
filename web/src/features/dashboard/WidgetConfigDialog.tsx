@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { Button, Dialog, Field, Input, Select } from '../../components/ui'
-import { useDashboardData } from './DashboardData'
+import { useDashboardData } from './dashboardContext'
 import { blankWidget, DISPLAY_LABEL, KNOWN_TYPES, TYPE_LABEL, WIDTHS, WIDTH_LABEL, type NewsDisplay, type Widget, type WidgetType, type WidgetWidth } from './layout'
 
 interface Props {

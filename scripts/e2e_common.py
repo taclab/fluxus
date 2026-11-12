@@ -31,7 +31,18 @@ DEFAULT_CONTEXT = {"viewport": {"width": 1400, "height": 900}, "locale": "fr-FR"
 def api(page: Page, method: str, path: str, **kw):
     """Appel API authentifié avec le token de la session du navigateur."""
     token = page.evaluate("localStorage.getItem('fluxus.token')")
-    return page.request.fetch(BASE + path, method=method, headers={"Authorization": f"Bearer {token}", "content-type": "application/json"}, **kw)
+
+    def send():
+        return page.request.fetch(BASE + path, method=method, headers={"Authorization": f"Bearer {token}", "content-type": "application/json"}, **kw)
+
+    try:
+        return send()
+    except Exception as exc:  # noqa: BLE001
+        # Connexion keep-alive fermée par le serveur entre deux appels : la requête n'est pas partie.
+        # Une lecture se rejoue sans risque ; une écriture, non.
+        if method == "GET" and "ECONNRESET" in str(exc):
+            return send()
+        raise
 
 
 SYNCED_JS = """() => new Promise((ok) => {

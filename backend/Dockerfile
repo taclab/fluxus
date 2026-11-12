@@ -20,7 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxml2 libxslt1.1 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Version figée (celle qui a produit uv.lock) : une image reconstruite plus tard reste la même.
+COPY --from=ghcr.io/astral-sh/uv:0.9.9 /uv /uvx /bin/
 
 WORKDIR /app
 COPY backend/pyproject.toml backend/uv.lock ./

@@ -1424,6 +1424,13 @@ export interface components {
             summary_input_tokens: number;
             /** Summary Output Tokens */
             summary_output_tokens: number;
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            /**
+             * Disk Low
+             * @default false
+             */
+            disk_low: boolean;
         };
         /** SummarizeAllIn */
         SummarizeAllIn: {

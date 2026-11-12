@@ -14,7 +14,7 @@ import { ChevronDown, ChevronRight, Folder, FolderOpen, Sparkles, Unlink } from 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 import { api, isOnline, unwrap, type Category, type Feed, type SmartFeed } from '../../api/client'
-import { useToast } from '../../components/ui'
+import { useToast } from '../../components/feedback'
 import { db } from '../../db/db'
 import { syncNow } from '../../sync/engine'
 import type { View } from '../../app/view'

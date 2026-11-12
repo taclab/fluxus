@@ -1,13 +1,11 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Sparkles } from 'lucide-react'
-import { useRef } from 'react'
 
 import type { View } from '../../../app/view'
-import type { LocalEntry } from '../../../db/db'
 import { hostname, relativeDate } from '../../../lib/format'
-import { FeedIcon } from '../../feeds/Sidebar'
-import { useDashboardData } from '../DashboardData'
+import { FeedIcon } from '../../feeds/FeedIcon'
+import { useDashboardData } from '../dashboardContext'
 import { widgetTitle, type StarredWidget as StarredWidgetModel, type WidgetWidth } from '../layout'
 import { latestStarred } from '../queries'
 import { WidgetFrame, type WidgetActions } from '../WidgetFrame'
@@ -26,9 +24,7 @@ export function StarredWidget({ widget, editing, actions, onOpenEntry, onOpenVie
   const data = useDashboardData()
   const { title } = widgetTitle(widget, data.categoryMap, data.feedMap)
   const entries = useLiveQuery(() => latestStarred(widget.limit), [widget.limit])
-  const last = useRef<LocalEntry[]>([])
-  if (entries) last.current = entries
-  const items = entries ?? last.current
+  const items = entries ?? []
 
   return (
     <WidgetFrame
@@ -37,7 +33,7 @@ export function StarredWidget({ widget, editing, actions, onOpenEntry, onOpenVie
       title={title}
       editing={editing}
       width={widget.width as WidgetWidth}
-      loading={entries === undefined && last.current.length === 0}
+      loading={entries === undefined}
       empty={items.length === 0}
       emptyLabel="Aucun favori. Appuyez sur s dans un article pour l’ajouter."
       onOpen={() => onOpenView({ kind: 'starred' })}

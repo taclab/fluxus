@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -67,6 +68,26 @@ class StatsOut(BaseModel):
     jobs_failed: int
     summary_input_tokens: int
     summary_output_tokens: int
+    # Disque du serveur, vu du conteneur de l'API : même système de fichiers que le volume Postgres
+    # dans l'installation Compose par défaut. `None` si la mesure est impossible.
+    disk_free_bytes: int | None = None
+    disk_low: bool = False
+
+
+DISK_LOW_BYTES = 2 * 1024**3
+
+
+def disk_is_low(free: int, total: int) -> bool:
+    """Moins de 2 Gio ou moins de 5 % : Postgres s'arrête quand le disque est plein (incident du 12/11/2026)."""
+    return free < DISK_LOW_BYTES or free * 20 < total
+
+
+def _disk_status() -> tuple[int | None, bool]:
+    try:
+        usage = shutil.disk_usage("/")
+    except OSError:
+        return None, False
+    return usage.free, disk_is_low(usage.free, usage.total)
 
 
 @router.get("", response_model=SettingsOut)
@@ -139,6 +160,7 @@ async def stats(_: Auth, session: Session) -> StatsOut:
     ).one()
     queued = (await session.execute(select(func.count()).where(Job.status.in_(["queued", "running"])))).scalar_one()
     failed = (await session.execute(select(func.count()).where(Job.status == "failed"))).scalar_one()
+    disk_free, disk_low = _disk_status()
     return StatsOut(
         feeds=feeds,
         entries=entries,
@@ -149,4 +171,6 @@ async def stats(_: Auth, session: Session) -> StatsOut:
         jobs_failed=failed,
         summary_input_tokens=int(tokens[0]),
         summary_output_tokens=int(tokens[1]),
+        disk_free_bytes=disk_free,
+        disk_low=disk_low,
     )

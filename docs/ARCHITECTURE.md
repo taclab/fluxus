@@ -624,6 +624,7 @@ browser/
   server.py                 FastAPI + Playwright : POST /render
 scripts/
   build-apk.sh              build de l'APK dans un conteneur (Dockerfile.android)
+  backup.sh                 sauvegarde planifiée : archive, contrôle, rotation (service `backup`)
   e2e-ui.py                 parcours Playwright de l'interface (liste, lecteur, mobile, hors-ligne)
   e2e-reading.py            parcours Playwright de lecture (tout marquer comme lu, purge locale, connexion après changement d'adresse)
   e2e-dashboard.py          parcours Playwright du tableau de bord (défaut, édition, drag, persistance, conflit)
@@ -635,10 +636,13 @@ web/
   src/api/                  client openapi-fetch + ApiError, auth (token, URL serveur),
                             sse (lecture d'un flux SSE en POST), schema.d.ts (généré)
   src/db/db.ts              schéma Dexie, LocalEntry, meta
-  src/sync/                 engine (pull/push/rétention), useSync
+  src/sync/                 engine (pull/push, passes), merge (fusion d'une page, purge par rétention ;
+                            testé sur IndexedDB en mémoire), useSync
+  src/test/                 setup et fixtures des tests Vitest (`*.test.ts` à côté des règles pures)
   src/features/
     dashboard/              Dashboard (page), DashboardGrid (dnd-kit), WidgetFrame, WidgetConfigDialog,
-                            DashboardData (contexte), layout (modèle), queries (Dexie), useDashboardLayout,
+                            DashboardData (fournisseur), dashboardContext (contexte, useDashboardData),
+                            layout (modèle), queries (Dexie), useDashboardLayout,
                             widgets/{News,Youtube,Starred,Summaries,Stats}Widget
     feeds/useUnreadCounts   non lus par flux et par flux intelligent, une passe, partagé Sidebar / dashboard
     smartfeeds/SmartFeedDialog  éditeur de flux intelligent avec aperçu
@@ -654,13 +658,16 @@ web/
     reader/Reader           article, vidéo YouTube, barre d'actions, résumé
     summary/SummaryPanel    consommation du SSE, rendu Markdown, horodatages
     settings/SettingsPage   tous les réglages
-  src/components/           ui (Button, IconButton, Dialog, Toast…), ThemeToggle
-  src/lib/                  format (dates, hôtes), markdown (marked + DOMPurify)
+  src/components/           ui (Button, IconButton, Dialog, fournisseurs Toast et Confirm…),
+                            feedback (useToast, useConfirm), ThemeToggle
+  src/lib/                  format (dates, hôtes, tailles), links (openExternal), markdown (marked + DOMPurify)
   src/index.css             Tailwind, variables de thème, typographie de lecture
   capacitor.config.ts       configuration Android
   android/                  projet natif généré (versionné)
-docker-compose.yml          postgres, api, worker, browser
-backend/Dockerfile          multi-étapes : build du front (Node 22) puis image Python (uv)
+docker-compose.yml          postgres, api, worker, browser, backup (pg_dump quotidien par scripts/backup.sh)
+backend/Dockerfile          multi-étapes : build du front (Node 22) puis image Python (uv, version figée)
+.github/workflows/ci.yml    backend avec PostgreSQL, front (typecheck, lint, tests, build), images et cloisonnement du renderer
+CHANGELOG.md                versions (tag git vX.Y.Z)
 ```
 
 ## 10. Conventions et recettes

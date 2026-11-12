@@ -1,0 +1,79 @@
+# Rejoue à chaque poussée ce que CLAUDE.md demande de lancer à la main.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (ruff, pytest avec PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fluxus
+          POSTGRES_PASSWORD: ci-seulement
+          POSTGRES_DB: fluxus_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fluxus -d fluxus_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://fluxus:ci-seulement@localhost:5432/fluxus_test
+      FLUXUS_SECRET_KEY: cle-de-test-pour-la-ci-uniquement-0123456789abcdef
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.9"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --all-extras --frozen
+      - run: uv run ruff check fluxus tests
+      # Sans DATABASE_URL, plus de la moitié de la suite est ignorée : elle doit tourner en entier ici.
+      - run: uv run pytest -q -rs
+
+  web:
+    name: Front (typecheck, lint, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev
+
+  images:
+    name: Images (application, renderer et son cloisonnement réseau)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f backend/Dockerfile -t fluxus-app .
+      - run: docker build -t fluxus-browser browser
+      - name: Cloisonnement réseau du renderer
+        run: docker run --rm --network none -v "$PWD:/audit:ro" fluxus-browser python /audit/scripts/check-browser-redirect.py
+      - name: Syntaxe du script de sauvegarde
+        run: sh -n scripts/backup.sh

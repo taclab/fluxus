@@ -8,16 +8,16 @@ Lire `docs/ARCHITECTURE.md` avant toute modification structurelle ; `README.md` 
 
 ```bash
 docker compose up -d --build                 # pile complète sur :8000
-cd backend && uv run ruff check fluxus tests && uv run pytest --ignore=tests/test_api.py
-DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus_test uv run pytest tests/test_api.py
-cd web && npm run typecheck && npm run build   # Node 22 (nvm use 22), .npmrc gère les peer deps
+cd backend && uv run ruff check fluxus tests
+DATABASE_URL=postgresql+asyncpg://fluxus:<mdp>@localhost:5433/fluxus_test uv run pytest   # suite complète ; sans DATABASE_URL, plus de la moitié est ignorée
+cd web && npm run typecheck && npm run lint && npm test && npm run build   # Node 22 (nvm use 22), .npmrc gère les peer deps
 npm run gen:api                                # après tout changement de route ou de schéma Python
 ```
 
 ## Règles du projet
 
 - Langue de l'interface, des messages d'erreur `detail` et des commentaires : français.
-- Confirmation : `useConfirm()` (`components/ui.tsx`), jamais `window.confirm` (le navigateur peut le bloquer en silence et renvoyer faux).
+- Confirmation : `useConfirm()` (`components/feedback.ts`, fournisseur dans `ui.tsx`), jamais `window.confirm` (le navigateur peut le bloquer en silence et renvoyer faux).
 - Toute modification d'une entrée visible par un client met `entry.updated_at = now` (pivot de la sync). Toute écriture de `read`/`starred` pose aussi `read_changed_at`/`starred_changed_at` (horloges par champ, seule base de la résolution des conflits de sync ; jamais `updated_at`).
 - Renderer (`browser/server.py`) : Chromium ne sort que par la passerelle (`_gateway_client`, proxy imposé au lancement), qui résout, valide et se connecte à l'adresse validée ; aucun chemin réseau à côté d'elle (pas d'option de lancement ni de contexte qui contourne le proxy). Jamais `route.continue_()` ; les redirections sont suivies à la main dans `route_handler` (posé sur le contexte, pas sur la page) avec revalidation de chaque saut. `scripts/check-browser-redirect.py` doit passer. Image Playwright et paquet `playwright` montés ensemble dans `browser/Dockerfile`. `safe_get` : le corps est déjà décodé, les en-têtes de transport sont réécrits.
 - Consommation LLM : toute génération journalise une ligne `LlmUsage` (réservée avant l'appel, soldée après) ; le budget des résumés automatiques se calcule sur ce journal, pas sur `summaries`.
@@ -36,6 +36,9 @@ npm run gen:api                                # après tout changement de route
 - Ordre de la barre latérale : `position` est la clé de tri partout (barre, `GET /feeds`, OPML) ; la racine mélange dossiers et flux sans dossier sur la même échelle ; un nouveau flux prend `min(position) − 1` de son conteneur (`feeds/router._first_position`), un nouveau dossier va en fin de racine, les flux d'un dossier supprimé héritent de sa position. Les règles de déplacement vivent dans `features/feeds/sidebarOrder.ts`, sans React ; pas de capteur clavier dnd-kit dans la barre (Entrée doit ouvrir la vue).
 - Points d'étape et dette connue : `docs/AUDIT-2026-09-14.md`, `docs/AUDIT-2026-09-15.md` (17 constats, tous corrigés), `docs/AUDIT-2026-11-12.md` (38 constats, plan en quatre lots ; avancement dans son tableau « Suivi des correctifs »).
 - Sauvegarde complète (`backup/service.py`) : toute nouvelle table de données utilisateur s'ajoute à `EXPORT_TABLES` (ordre des clés étrangères) et, si elle doit être vidée à l'import, à `CLEARED` ; une nouvelle colonne est exportée d'office. Jamais de secret, de mot de passe ni de réglage `_…` dans le fichier. Tout nouveau chemin d'écriture client rejouable (file hors ligne) envoie l'époque de sync (`sync.epoch`) et le serveur refuse en 409 une époque périmée.
+- Filet automatique : la CI (`.github/workflows/ci.yml`) rejoue ruff, la suite backend avec PostgreSQL, typecheck, lint, tests et build du front, la construction des images et `check-browser-redirect.py`. Le lint est bloquant (`oxlint --deny-warnings`) : un fichier `.tsx` n'exporte que des composants (hooks, contextes et fonctions dans un fichier `.ts` voisin) ; `react/set-state-in-effect` est la seule règle coupée. Une règle pure du front (sans React) a son test Vitest à côté d'elle (`*.test.ts`) ; ce qui écrit dans Dexie pendant le pull vit dans `sync/merge.ts`, testé sur IndexedDB en mémoire.
+- Version : même numéro dans `backend/fluxus/__init__.py`, `backend/pyproject.toml` (+ `uv.lock`) et `web/package.json` (+ `package-lock.json`), une entrée dans `CHANGELOG.md`, un tag `vX.Y.Z`.
+- `npm ci` échoue sur cette machine (fichiers root laissés dans `node_modules` par le build de l'APK) et vide `node_modules` : utiliser `npm install` en local.
 - Migration : `uv run alembic revision --autogenerate`, relire le fichier (triggers et index partiels non détectés).
 
 ## Pièges connus sur la machine de développement

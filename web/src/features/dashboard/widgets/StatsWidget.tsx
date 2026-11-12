@@ -5,8 +5,8 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { StatsOut } from '../../../api/client'
 import type { View } from '../../../app/view'
 import { db } from '../../../db/db'
-import { formatTokens } from '../../../lib/format'
-import { useDashboardData } from '../DashboardData'
+import { formatBytes, formatTokens } from '../../../lib/format'
+import { useDashboardData } from '../dashboardContext'
 import { widgetTitle, type StatsWidget as StatsWidgetModel, type WidgetWidth } from '../layout'
 import { feedsInError, fetchStatsCached, readTodayCount } from '../queries'
 import { WidgetFrame, type WidgetActions } from '../WidgetFrame'
@@ -28,14 +28,14 @@ export function StatsWidget({ widget, editing, actions, onOpenView, handleProps,
   const starred = useLiveQuery(() => db.entries.where('starredFlag').equals(1).count(), []) ?? 0
   const [server, setServer] = useState<StatsOut | null>(null)
 
+  // Toujours chargées (en cache 10 min) : elles portent aussi l'alerte d'espace disque.
   useEffect(() => {
-    if (!widget.show.tokens) return
     let cancelled = false
     void fetchStatsCached().then((s) => !cancelled && setServer(s))
     return () => {
       cancelled = true
     }
-  }, [widget.show.tokens])
+  }, [])
 
   const totalUnread = useMemo(() => [...data.unreadByFeed.values()].reduce((a, b) => a + b, 0), [data.unreadByFeed])
   const byCategory = useMemo(() => {
@@ -51,6 +51,12 @@ export function StatsWidget({ widget, editing, actions, onOpenView, handleProps,
 
   return (
     <WidgetFrame widgetId={widget.id} widgetType="stats" title={title} editing={editing} width={widget.width as WidgetWidth} actions={actions} handleProps={handleProps} dragging={dragging}>
+      {server?.disk_low && (
+        <p role="alert" data-testid="disk-low" className="mx-4 mt-4 flex items-center gap-1.5 rounded-xl border border-red-300/60 bg-red-50/60 px-3 py-2 text-xs font-medium text-red-800 dark:border-red-700/50 dark:bg-red-900/20 dark:text-red-200">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          Espace disque du serveur presque épuisé{server.disk_free_bytes != null && ` : ${formatBytes(server.disk_free_bytes)} libres`}. La base s’arrête quand le disque est plein.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3 p-4 sm:gap-4 lg:grid-cols-4">
         <Tile icon={<Inbox className="size-4" />} label="Non lus" value={totalUnread} onClick={() => onOpenView({ kind: 'unread' })} />
         {widget.show.readToday && <Tile icon={<BookOpenCheck className="size-4" />} label="Lus aujourd’hui" value={readToday} />}

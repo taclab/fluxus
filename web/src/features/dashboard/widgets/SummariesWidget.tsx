@@ -1,14 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Sparkles } from 'lucide-react'
-import { useRef } from 'react'
 
 import type { View } from '../../../app/view'
 import { relativeDate } from '../../../lib/format'
-import { useDashboardData } from '../DashboardData'
-import { widgetTitle, type SummariesWidget as SummariesWidgetModel, type WidgetWidth } from '../layout'
-import { latestSummaries, type SummaryWithEntry } from '../queries'
+import { useDashboardData } from '../dashboardContext'
+import { viewForSource, widgetTitle, type SummariesWidget as SummariesWidgetModel, type WidgetWidth } from '../layout'
+import { latestSummaries } from '../queries'
 import { WidgetFrame, type WidgetActions } from '../WidgetFrame'
-import { viewForSource } from './NewsWidget'
 
 interface Props {
   widget: SummariesWidgetModel
@@ -36,9 +34,7 @@ export function SummariesWidget({ widget, editing, actions, onOpenEntry, handleP
   const data = useDashboardData()
   const { title } = widgetTitle(widget, data.categoryMap, data.feedMap)
   const rows = useLiveQuery(() => latestSummaries(widget.limit), [widget.limit])
-  const last = useRef<SummaryWithEntry[]>([])
-  if (rows) last.current = rows
-  const items = rows ?? last.current
+  const items = rows ?? []
 
   return (
     <WidgetFrame
@@ -47,7 +43,7 @@ export function SummariesWidget({ widget, editing, actions, onOpenEntry, handleP
       title={title}
       editing={editing}
       width={widget.width as WidgetWidth}
-      loading={rows === undefined && last.current.length === 0}
+      loading={rows === undefined}
       empty={items.length === 0}
       emptyLabel="Aucun résumé pour l’instant. Appuyez sur r dans un article."
       actions={actions}

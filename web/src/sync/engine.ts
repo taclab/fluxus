@@ -6,11 +6,12 @@
  * - les lectures de l'interface se font toujours dans Dexie
  */
 
-import { api, isOnline, unwrap, type EntryOut, type SyncPull } from '../api/client'
+import { api, isOnline, unwrap, type SyncPull } from '../api/client'
 import { getToken } from '../api/auth'
-import { clearDatabase, db, getMeta, setMeta, toLocalEntry, type LocalEntry } from '../db/db'
+import { clearDatabase, db, getMeta, setMeta, type LocalEntry } from '../db/db'
 import { flushDashboardLayout } from '../features/dashboard/useDashboardLayout'
 import { flushViewModes, mergeViewModes, migrateLegacyDisplay } from '../features/entries/useViewMode'
+import { applyRetention, mergeEntries } from './merge'
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error'
 
@@ -64,8 +65,6 @@ let inFlight: Promise<void> | null = null
 /** Vrai pendant le téléchargement des pages d'une passe. */
 let pulling = false
 let timer: number | null = null
-/** Un article dont l'état a changé depuis moins longtemps n'est pas purgé (il est peut-être ouvert). */
-const RECENT_CHANGE_MS = 24 * 3600 * 1000
 
 function emit(patch: Partial<SyncState>) {
   state = { ...state, ...patch }
@@ -192,50 +191,6 @@ async function mergeFeeds(page: SyncPull) {
   await migrateLegacyDisplay(page.default_view_mode)
 }
 
-async function mergeEntries(page: SyncPull) {
-  await db.transaction('rw', db.entries, db.summaries, db.outbox, async () => {
-    // Un changement local encore en attente ne doit pas être écrasé par la version serveur.
-    const pendingIds = new Set((await db.outbox.toArray()).map((o) => o.entry_id))
-    const incoming: LocalEntry[] = []
-    for (const e of page.entries as EntryOut[]) {
-      const local = toLocalEntry(e)
-      if (pendingIds.has(e.id)) {
-        const current = await db.entries.get(e.id)
-        if (current) {
-          local.read = current.read
-          local.readFlag = current.readFlag
-          local.starred = current.starred
-          local.starredFlag = current.starredFlag
-        }
-      }
-      incoming.push(local)
-    }
-    await db.entries.bulkPut(incoming)
-    if (page.summaries.length) await db.summaries.bulkPut(page.summaries)
-  })
-}
-
-/**
- * Purge les articles lus, non favoris, plus vieux que la rétention. Par les index, clés seulement :
- * un article local porte tout son HTML. Un article marqué lu depuis moins d'un jour est gardé, sinon
- * un vieil article ouvert disparaîtrait du lecteur à la synchronisation suivante.
- */
-async function applyRetention() {
-  const now = Date.now()
-  const cutoff = now - retentionDays * 24 * 3600 * 1000
-  const [readOld, starredOld, justChanged] = await Promise.all([
-    db.entries.where('[readFlag+publishedTs]').between([1, -Infinity], [1, cutoff], true, false).primaryKeys(),
-    db.entries.where('[starredFlag+publishedTs]').between([1, -Infinity], [1, cutoff], true, false).primaryKeys(),
-    db.entries.where('[readFlag+updatedTs]').between([1, now - RECENT_CHANGE_MS], [1, Infinity], true, true).primaryKeys(),
-  ])
-  const keep = new Set<number>([...starredOld, ...justChanged])
-  const old = readOld.filter((id) => !keep.has(id))
-  if (old.length) {
-    await db.entries.bulkDelete(old)
-    await db.summaries.where('entry_id').anyOf(old).delete()
-  }
-}
-
 /** Passe supplémentaire demandée pendant une passe en cours (une seule, quel que soit le nombre d'appels). */
 let queued: Promise<void> | null = null
 
@@ -300,7 +255,7 @@ export async function syncNow(): Promise<void> {
       // repart du début et ne perd rien.
       pulling = false
       if (runStartedAt && !hasMore) await setMeta('sync.since', runStartedAt)
-      await applyRetention()
+      await applyRetention(retentionDays)
       const now = new Date().toISOString()
       await setMeta('sync.lastSyncAt', now)
       emit({ status: 'idle', lastSyncAt: now, error: null })
