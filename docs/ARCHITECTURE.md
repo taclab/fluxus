@@ -84,7 +84,7 @@ Boucle asynchrone unique :
 3. toutes les 6 h, purge les jobs terminés depuis plus de 3 jours.
 
 Un job échoué est reprogrammé avec un délai `attempts²` minutes jusqu'à `max_attempts` (3), puis
-passe en `failed`. Un job `running` depuis plus de 15 min est considéré perdu et repris. Les
+passe en `failed`. Chaque type de job a un délai d'exécution (`job_handler(…, timeout=…)`, 5 min par défaut, toujours sous 15 min) : au-delà le handler est interrompu, sa transaction annulée et le job compté en échec. Un job `running` depuis plus de 15 min est considéré perdu (worker tué) et repris tant qu'il lui reste des tentatives ; sinon il passe en `failed` et son `on_abandoned` s'exécute (un flux recule comme après une erreur). `locked_at` identifie l'exécution : `start`, `mark_done` et `mark_failed` n'agissent que si le job lui appartient encore. Les
 handlers sont enregistrés par décorateur (`jobs/registry.py`) ; `handlers.py` importe les modules
 qui en définissent.
 

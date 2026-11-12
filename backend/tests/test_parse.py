@@ -99,3 +99,26 @@ def test_oversized_fields_are_truncated_or_dropped():
     assert e.url is None
     assert e.author is not None and len(e.author) == 300
     assert len(e.guid) <= 2048
+
+
+def test_nul_characters_are_stripped():
+    """Audit du 12/11, constat 31 : `&#0;` dans un titre faisait rejeter tout le lot du flux par PostgreSQL."""
+    import json
+
+    from fluxus.fetcher.parse import parse_feed
+
+    raw = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Flux&#0;</title><link>https://nul.example/</link>
+    <item><title>a&#0;b</title><guid>g&#0;1</guid><link>https://nul.example/1</link><author>x&#0;y</author><description>d&#0;e</description></item>
+    <item><title>sain</title><guid>g2</guid><link>https://nul.example/2</link></item></channel></rss>"""
+    parsed = parse_feed(raw, "https://nul.example/rss")
+    assert len(parsed.entries) == 2
+    dumped = json.dumps([parsed.title, [vars(e) for e in parsed.entries]], default=str)
+    assert "\x00" not in dumped and "\\u0000" not in dumped
+
+
+def test_oversized_validators_are_dropped():
+    from fluxus.fetcher.service import _validator
+
+    assert _validator('W/"abc"', 500) == 'W/"abc"'
+    assert _validator("x" * 501, 500) is None
+    assert _validator(None, 500) is None

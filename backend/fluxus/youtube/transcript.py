@@ -51,6 +51,19 @@ def _fmt(seconds: float) -> str:
     return f"{h:d}:{m:02d}:{sec:02d}" if h else f"{m:d}:{sec:02d}"
 
 
+def _bounded_session():
+    """Session `requests` avec délai : la bibliothèque n'en pose aucun, et un appel figé dans un
+    thread ne peut pas être annulé."""
+    import requests
+
+    class BoundedSession(requests.Session):
+        def request(self, *args, **kwargs):
+            kwargs.setdefault("timeout", (10, 30))
+            return super().request(*args, **kwargs)
+
+    return BoundedSession()
+
+
 def _fetch_sync(video_id: str, languages: list[str]) -> VideoTranscript:
     from youtube_transcript_api import YouTubeTranscriptApi
     from youtube_transcript_api._errors import (  # type: ignore[attr-defined]
@@ -60,7 +73,10 @@ def _fetch_sync(video_id: str, languages: list[str]) -> VideoTranscript:
     )
 
     try:
-        api = YouTubeTranscriptApi()
+        try:
+            api = YouTubeTranscriptApi(http_client=_bounded_session())
+        except TypeError:  # API < 1.0 : pas de client injectable
+            api = YouTubeTranscriptApi()
         if hasattr(api, "list"):
             # API >= 1.0
             transcript_list = api.list(video_id)

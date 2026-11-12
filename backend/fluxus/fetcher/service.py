@@ -115,14 +115,20 @@ async def refresh_feed(session: AsyncSession, feed: Feed) -> FetchResult:
 
     new_count = await _insert_new_entries(session, feed, parsed)
 
-    feed.etag = response.headers.get("ETag")
-    feed.last_modified = response.headers.get("Last-Modified")
+    feed.etag = _validator(response.headers.get("ETag"), 500)
+    feed.last_modified = _validator(response.headers.get("Last-Modified"), 200)
     feed.last_fetched_at = now
     feed.error_count = 0
     feed.last_error = None
     feed.fetch_interval_min = _next_interval(feed, await _recent_entry_count(session, feed, now))
     feed.next_fetch_at = now + timedelta(minutes=feed.fetch_interval_min)
     return FetchResult(new_entries=new_count)
+
+
+def _validator(value: str | None, max_len: int) -> str | None:
+    """En-tête de revalidation à mémoriser. Hors gabarit, on s'en passe (le flux sera retéléchargé en
+    entier) : tronqué il ne correspondrait plus à rien, et trop long il ferait rejeter tout le lot."""
+    return value if value and len(value) <= max_len else None
 
 
 async def _insert_new_entries(session: AsyncSession, feed: Feed, parsed: ParsedFeed) -> int:

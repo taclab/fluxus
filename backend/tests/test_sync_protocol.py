@@ -120,3 +120,35 @@ async def test_pull_horizon_waits_for_open_transactions(client: AsyncClient):
     # sans transaction ouverte, l'horizon revient à « maintenant »
     fresh = (await client.get("/api/sync")).json()["server_time"]
     assert datetime.now(UTC) - datetime.fromisoformat(fresh) < timedelta(seconds=5)
+
+
+async def test_pull_horizon_covers_a_commit_during_the_pull(client: AsyncClient, monkeypatch):
+    """Audit du 12/11, constat 8 : une transaction validée pendant que le pull prépare sa page
+    (après la lecture des entrées) n'est ni dans la page ni perdue au pull suivant."""
+    from fluxus.db import session_factory
+    from fluxus.sync import router as sync_router
+
+    entry_id = await _new_entry(updated_at=datetime.now(UTC) - timedelta(days=1))
+    since = (await client.get("/api/sync")).json()["server_time"]
+
+    factory = session_factory()
+    async with factory() as other:
+        await other.execute(text("SELECT 1"))
+        stamp = datetime.now(UTC)
+        await other.execute(text("UPDATE entries SET read = true, updated_at = :t WHERE id = :id"), {"t": stamp, "id": entry_id})
+
+        original = sync_router.smart_feed_ids_for
+
+        async def commit_then_continue(session, ids):
+            # Appelé juste après la lecture des entrées : la transaction du worker se termine ici.
+            await other.commit()
+            return await original(session, ids)
+
+        monkeypatch.setattr(sync_router, "smart_feed_ids_for", commit_then_continue)
+        pulled = (await client.get("/api/sync", params={"since": since})).json()
+        monkeypatch.undo()
+
+    assert entry_id not in [e["id"] for e in pulled["entries"]]
+    assert datetime.fromisoformat(pulled["server_time"]) <= stamp
+    pulled = (await client.get("/api/sync", params={"since": pulled["server_time"]})).json()
+    assert entry_id in [e["id"] for e in pulled["entries"]]

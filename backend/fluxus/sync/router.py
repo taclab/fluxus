@@ -146,6 +146,10 @@ async def pull(
     feeds = (await session.execute(select(Feed))).scalars().all()
     smart_feeds = (await session.execute(select(SmartFeed).order_by(SmartFeed.position, SmartFeed.name))).scalars().all()
 
+    # Avant la lecture des entrées, jamais après : une transaction validée entre les deux serait
+    # absente de la page et de l'horizon, et ses articles n'arriveraient jamais sur cet appareil.
+    horizon = await _visibility_horizon(session, now)
+
     stmt = select(Entry, exists().where(Summary.entry_id == Entry.id).correlate(Entry))
     min_published: datetime | None = None
     if cursor:
@@ -181,7 +185,6 @@ async def pull(
 
     last = rows[-1][0] if rows else None
     next_cursor = _encode_cursor(last.updated_at, last.id, min_published) if has_more and last else None
-    horizon = await _visibility_horizon(session, now)
     default_view_mode = await get_setting(session, "default_view_mode")
     return SyncPull(
         server_time=horizon,

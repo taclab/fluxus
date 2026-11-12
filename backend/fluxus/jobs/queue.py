@@ -55,6 +55,27 @@ async def enqueue(
     return job
 
 
+def _stale(now: datetime):
+    return (Job.status == "running") & (Job.locked_at < now - STALE_AFTER)
+
+
+async def abandon_exhausted(session: AsyncSession) -> list[Job]:
+    """Passe en échec les jobs perdus qui ont épuisé leurs tentatives, et les renvoie.
+
+    Un job dont chaque exécution a tué ou figé le worker n'atteint jamais `mark_failed` : sans ce
+    plafond il serait repris toutes les 15 minutes, indéfiniment."""
+    now = datetime.now(UTC)
+    stmt = select(Job).where(_stale(now), Job.attempts >= Job.max_attempts).with_for_update(skip_locked=True)
+    jobs = list((await session.execute(stmt)).scalars())
+    for job in jobs:
+        job.status = "failed"
+        job.finished_at = now
+        job.dedupe_key = None
+        job.last_error = f"Abandonné : worker interrompu pendant chacune des {job.attempts} tentatives"
+    await session.flush()
+    return jobs
+
+
 async def claim(session: AsyncSession, limit: int) -> list[Job]:
     now = datetime.now(UTC)
     stmt = (
@@ -62,7 +83,7 @@ async def claim(session: AsyncSession, limit: int) -> list[Job]:
         .where(
             or_(
                 (Job.status == "queued") & (Job.run_at <= now),
-                (Job.status == "running") & (Job.locked_at < now - STALE_AFTER),
+                _stale(now) & (Job.attempts < Job.max_attempts),
             )
         )
         .order_by(Job.run_at)
@@ -78,15 +99,34 @@ async def claim(session: AsyncSession, limit: int) -> list[Job]:
     return jobs
 
 
-async def mark_done(session: AsyncSession, job_id: int) -> None:
-    await session.execute(
+def _held_by(job: Job):
+    """Le job tel que cette exécution l'a réclamé : `locked_at` identifie l'exécution."""
+    return (Job.id == job.id) & (Job.status == "running") & (Job.locked_at == job.locked_at)
+
+
+async def start(session: AsyncSession, job: Job) -> bool:
+    """Démarre l'exécution : le bail de `STALE_AFTER` court à partir de maintenant, pas de la réclamation.
+
+    Faux si le job n'est plus à cette exécution (repris entre-temps, ou supprimé par un import)."""
+    now = datetime.now(UTC)
+    result = await session.execute(update(Job).where(_held_by(job)).values(locked_at=now))
+    if not result.rowcount:
+        return False
+    job.locked_at = now
+    return True
+
+
+async def mark_done(session: AsyncSession, job: Job) -> bool:
+    """Faux si le job a été repris par une autre exécution : son résultat à elle fera foi."""
+    result = await session.execute(
         update(Job)
-        .where(Job.id == job_id)
+        .where(_held_by(job))
         .values(status="done", finished_at=datetime.now(UTC), dedupe_key=None, last_error=None)
     )
+    return bool(result.rowcount)
 
 
-async def mark_failed(session: AsyncSession, job: Job, error: str) -> None:
+async def mark_failed(session: AsyncSession, job: Job, error: str) -> bool:
     now = datetime.now(UTC)
     if job.attempts >= job.max_attempts:
         values = dict(status="failed", finished_at=now, dedupe_key=None, last_error=error[:4000])
@@ -94,7 +134,8 @@ async def mark_failed(session: AsyncSession, job: Job, error: str) -> None:
         # Nouvelle tentative avec attente exponentielle : 1, 4, 9 minutes...
         delay = timedelta(minutes=job.attempts**2)
         values = dict(status="queued", run_at=now + delay, last_error=error[:4000])
-    await session.execute(update(Job).where(Job.id == job.id).values(**values))
+    result = await session.execute(update(Job).where(_held_by(job)).values(**values))
+    return bool(result.rowcount)
 
 
 async def purge_finished(session: AsyncSession, older_than: timedelta = timedelta(days=3)) -> int:

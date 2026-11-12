@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,7 +68,7 @@ def _feed_still_wanted(job: Job, entry: Entry | None, feed: Feed | None) -> bool
     return True
 
 
-@job_handler("summarize_entry")
+@job_handler("summarize_entry", timeout=timedelta(minutes=12))
 async def summarize_entry_job(session: AsyncSession, job: Job) -> None:
     entry_id = int(job.payload["entry_id"])
     smart_feed_id = job.payload.get("smart_feed_id")

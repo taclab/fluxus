@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -19,6 +19,21 @@ TRACKING_PARAMS = {
 }
 
 YOUTUBE_ID_RE = re.compile(r"(?:v=|/shorts/|/embed/|youtu\.be/)([A-Za-z0-9_-]{11})")
+
+
+def _without_nul(value):
+    """Retire le caractère NUL partout (`&#0;` dans un titre traverse feedparser) : PostgreSQL le refuse
+    dans un texte comme dans du JSON, et un seul article ferait rejeter tout le lot du flux."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, list):
+        return [_without_nul(v) for v in value]
+    if isinstance(value, dict):
+        return {_without_nul(k): _without_nul(v) for k, v in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        for f in fields(value):
+            setattr(value, f.name, _without_nul(getattr(value, f.name)))
+    return value
 
 
 @dataclass
@@ -189,7 +204,7 @@ def parse_feed(raw: bytes, feed_url: str) -> ParsedFeed:
         exc = parsed.get("bozo_exception")
         bozo_error = str(exc) if exc else "Ce document n'est pas un flux RSS ou Atom"
 
-    return ParsedFeed(
+    return _without_nul(ParsedFeed(
         title=(fp_feed.get("title") or "").strip(),
         site_url=site_url,
         description=(fp_feed.get("subtitle") or fp_feed.get("description") or None),
@@ -197,4 +212,4 @@ def parse_feed(raw: bytes, feed_url: str) -> ParsedFeed:
         entries=entries,
         is_youtube=is_youtube,
         bozo_error=bozo_error,
-    )
+    ))
