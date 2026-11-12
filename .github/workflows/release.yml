@@ -1,0 +1,62 @@
+# Publie les images sur le registre de GitHub (ghcr.io) à chaque tag de version.
+# `docker-compose.deploy.yml` les consomme : un déploiement n'a plus besoin des sources.
+name: Publication des images
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  # Lancement manuel depuis l'onglet Actions, sur un tag existant.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fluxus
+            context: .
+            dockerfile: backend/Dockerfile
+          - image: fluxus-browser
+            context: browser
+            dockerfile: browser/Dockerfile
+          - image: fluxus-backup
+            context: scripts
+            dockerfile: scripts/Dockerfile.backup
+    steps:
+      - uses: actions/checkout@v4
+      - name: Le tag correspond à la version du code
+        if: github.ref_type == 'tag'
+        run: |
+          code="v$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' backend/fluxus/__init__.py)"
+          test "$code" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME, code $code"; exit 1; }
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          # v1.2.3 → 1.2.3, 1.2, 1 et latest
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.ref_type == 'tag' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max

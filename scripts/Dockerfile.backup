@@ -1,0 +1,4 @@
+# Image du service `backup` : le client pg_dump de la même version que la base, plus le script.
+FROM postgres:16-alpine
+COPY backup.sh /usr/local/bin/fluxus-backup
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/fluxus-backup"]

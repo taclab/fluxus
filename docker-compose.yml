@@ -1,114 +1,46 @@
-# Journaux avec rotation pour tous les services (uvicorn journalise chaque requête).
-x-logging: &default-logging
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
-
+# Développement : mêmes services que docker-compose.deploy.yml, construits à partir des sources.
+#   docker compose up -d --build
+# Un service se modifie dans docker-compose.deploy.yml ; ce fichier n'ajoute que la construction
+# locale, les noms d'images locaux et le port Postgres publié.
 services:
   postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    logging: *default-logging
-    networks: [internal]
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-fluxus}
-      # `:?` : refuse de démarrer si le mot de passe n'est pas défini dans .env
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Définir POSTGRES_PASSWORD dans .env}
-      POSTGRES_DB: ${POSTGRES_DB:-fluxus}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+    extends:
+      file: docker-compose.deploy.yml
+      service: postgres
     ports:
-      # Publié sur l'hôte uniquement en local (développement) ; commenter en production.
+      # Publié sur l'hôte uniquement en local (développement).
       - "127.0.0.1:${FLUXUS_PG_PORT:-5433}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fluxus} -d ${POSTGRES_DB:-fluxus}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   api:
+    extends:
+      file: docker-compose.deploy.yml
+      service: api
     build:
       context: .
       dockerfile: backend/Dockerfile
     image: fluxus-app
-    restart: unless-stopped
-    logging: *default-logging
-    networks: [internal, render]
-    mem_limit: 768m
-    pids_limit: 256
-    env_file: .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?Définir DATABASE_URL dans .env}
-      FLUXUS_BROWSER_URL: http://browser:3000
-      NO_PROXY: browser,postgres,localhost,127.0.0.1
-    ports:
-      # Écoute locale par défaut : seul le reverse proxy de l'hôte joint l'API. Sans proxy devant,
-      # X-Forwarded-For serait falsifiable. FLUXUS_HTTP_BIND=0.0.0.0 pour exposer le port tel quel.
-      - "${FLUXUS_HTTP_BIND:-127.0.0.1}:${FLUXUS_HTTP_PORT:-8000}:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      # --noproxy : un proxy d'entreprise injecté par Docker ne doit pas intercepter le test local.
-      test: ["CMD", "curl", "-fsS", "--noproxy", "*", "http://127.0.0.1:8000/api/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
 
   worker:
+    extends:
+      file: docker-compose.deploy.yml
+      service: worker
     image: fluxus-app
-    restart: unless-stopped
-    logging: *default-logging
-    networks: [internal, render]
-    mem_limit: 768m
-    pids_limit: 256
-    env_file: .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?Définir DATABASE_URL dans .env}
-      FLUXUS_BROWSER_URL: http://browser:3000
-      NO_PROXY: browser,postgres,localhost,127.0.0.1
-    command: ["python", "-m", "fluxus.worker"]
-    depends_on:
-      api:
-        condition: service_healthy
 
-  # Sauvegarde planifiée : une archive pg_dump par jour dans FLUXUS_BACKUP_DIR (voir README, « Exploitation »).
   backup:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    logging: *default-logging
-    networks: [internal]
-    mem_limit: 256m
-    pids_limit: 64
-    environment:
-      PGHOST: postgres
-      PGUSER: ${POSTGRES_USER:-fluxus}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Définir POSTGRES_PASSWORD dans .env}
-      PGDATABASE: ${POSTGRES_DB:-fluxus}
-      BACKUP_KEEP: ${FLUXUS_BACKUP_KEEP:-7}
-      BACKUP_INTERVAL_HOURS: ${FLUXUS_BACKUP_INTERVAL_HOURS:-24}
-    volumes:
-      - ${FLUXUS_BACKUP_DIR:-./backups}:/backups
-      - ./scripts/backup.sh:/usr/local/bin/fluxus-backup:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/fluxus-backup"]
-    depends_on:
-      postgres:
-        condition: service_healthy
+    extends:
+      file: docker-compose.deploy.yml
+      service: backup
+    build:
+      context: scripts
+      dockerfile: Dockerfile.backup
+    image: fluxus-backup
 
   browser:
+    extends:
+      file: docker-compose.deploy.yml
+      service: browser
     build: ./browser
     image: fluxus-browser
-    restart: unless-stopped
-    logging: *default-logging
-    # Réseau `render` seulement : le navigateur ne voit ni Postgres ni le réseau interne.
-    networks: [render]
-    init: true
-    shm_size: 512m
-    mem_limit: 1g
-    pids_limit: 512
-    environment:
-      RENDER_TIMEOUT_MS: "25000"
 
 networks:
   internal:

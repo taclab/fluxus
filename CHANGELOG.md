@@ -4,6 +4,13 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
+## 1.0.1 — 12 novembre 2026
+
+### Exploitation
+- Images publiées sur `ghcr.io` à chaque version (`fluxus`, `fluxus-browser`, `fluxus-backup`).
+- `docker-compose.deploy.yml` : déploiement sans les sources, avec ce fichier et un `.env`.
+- Le service `backup` a sa propre image ; le script n'est plus monté depuis le dépôt.
+
 ## 1.0.0 — 12 novembre 2026
 
 Première version stable : état du projet après les quatre lots de l'audit du 12 novembre 2026

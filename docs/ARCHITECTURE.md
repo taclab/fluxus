@@ -624,7 +624,7 @@ browser/
   server.py                 FastAPI + Playwright : POST /render
 scripts/
   build-apk.sh              build de l'APK dans un conteneur (Dockerfile.android)
-  backup.sh                 sauvegarde planifiée : archive, contrôle, rotation (service `backup`)
+  backup.sh                 sauvegarde planifiée : archive, contrôle, rotation (service `backup`, image Dockerfile.backup)
   e2e-ui.py                 parcours Playwright de l'interface (liste, lecteur, mobile, hors-ligne)
   e2e-reading.py            parcours Playwright de lecture (tout marquer comme lu, purge locale, connexion après changement d'adresse)
   e2e-dashboard.py          parcours Playwright du tableau de bord (défaut, édition, drag, persistance, conflit)
@@ -664,8 +664,10 @@ web/
   src/index.css             Tailwind, variables de thème, typographie de lecture
   capacitor.config.ts       configuration Android
   android/                  projet natif généré (versionné)
-docker-compose.yml          postgres, api, worker, browser, backup (pg_dump quotidien par scripts/backup.sh)
+docker-compose.deploy.yml   postgres, api, worker, browser, backup (pg_dump quotidien) à partir des images publiées
+docker-compose.yml          développement : étend le précédent, construit les images à partir des sources
 backend/Dockerfile          multi-étapes : build du front (Node 22) puis image Python (uv, version figée)
+.github/workflows/release.yml  publication des trois images sur ghcr.io à chaque tag vX.Y.Z
 .github/workflows/ci.yml    backend avec PostgreSQL, front (typecheck, lint, tests, build), images et cloisonnement du renderer
 CHANGELOG.md                versions (tag git vX.Y.Z)
 ```

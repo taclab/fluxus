@@ -75,5 +75,12 @@ jobs:
       - run: docker build -t fluxus-browser browser
       - name: Cloisonnement réseau du renderer
         run: docker run --rm --network none -v "$PWD:/audit:ro" fluxus-browser python /audit/scripts/check-browser-redirect.py
-      - name: Syntaxe du script de sauvegarde
-        run: sh -n scripts/backup.sh
+      - name: Image et script de sauvegarde
+        run: |
+          sh -n scripts/backup.sh
+          docker build -f scripts/Dockerfile.backup -t fluxus-backup scripts
+      - name: Fichiers Compose valides
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose -f docker-compose.deploy.yml config -q

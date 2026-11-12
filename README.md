@@ -35,6 +35,25 @@ Pour comprendre comment c'est construit : [docs/ARCHITECTURE.md](docs/ARCHITECTU
 
 Prérequis : Docker avec le plugin Compose, un reverse proxy HTTPS (Caddy, Traefik, Nginx…) déjà en place.
 
+**Avec les images publiées** (aucune source à récupérer) : deux fichiers suffisent.
+
+```bash
+mkdir fluxus && cd fluxus
+# Récupérer docker-compose.deploy.yml et .env.example depuis le dépôt (page de la version sur GitHub)
+cp .env.example .env
+$EDITOR .env          # mot de passe Postgres, FLUXUS_SECRET_KEY, ports
+docker compose -f docker-compose.deploy.yml up -d
+```
+
+Les images (`fluxus`, `fluxus-browser`, `fluxus-backup`) sont publiées sur `ghcr.io/taclab` à chaque
+version. `FLUXUS_VERSION` dans `.env` fige la version déployée (`1.0.1`, ou `1` pour suivre les
+correctifs ; `latest` par défaut). Si les images sont privées, connectez d'abord Docker au registre :
+`docker login ghcr.io` avec un jeton GitHub portant le droit `read:packages`.
+
+Mise à jour : `docker compose -f docker-compose.deploy.yml pull && docker compose -f docker-compose.deploy.yml up -d`.
+
+**À partir des sources** :
+
 ```bash
 git clone <ce dépôt> fluxus && cd fluxus
 cp .env.example .env
@@ -43,7 +62,7 @@ docker compose up -d --build
 ```
 
 Le premier build prend quelques minutes (front Node, dépendances Python, image Chromium).
-Ensuite l'application répond sur `http://127.0.0.1:8000` (port `FLUXUS_HTTP_PORT`), depuis l'hôte
+Dans les deux cas, l'application répond sur `http://127.0.0.1:8000` (port `FLUXUS_HTTP_PORT`), depuis l'hôte
 seulement : `FLUXUS_HTTP_BIND=0.0.0.0` dans `.env` l'ouvre au réseau sans reverse proxy.
 
 Raccordez ce port à votre reverse proxy en HTTPS. L'API ne gère pas TLS. Renseignez
