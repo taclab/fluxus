@@ -9,7 +9,7 @@ leurs réglages d'origine à la fin, même en cas d'échec.
 
 import json
 
-from e2e_common import BASE, api, main
+from e2e_common import BASE, api, main, set_view_mode
 
 results: dict = {}
 original_feeds: dict[int, dict] = {}
@@ -143,7 +143,7 @@ def cleanup(page):
         body["fetch_interval_fixed_min"] = body["fetch_interval_fixed_min"] or 0
         api(page, "PUT", f"/api/feeds/{fid}", data=json.dumps(body))
     for cid, c in original_categories.items():
-        api(page, "PUT", "/api/view-mode", data=json.dumps({"kind": "category", "id": cid, "view_mode": c["view_mode"] or "inherit"}))
+        set_view_mode(page, "category", c["view_mode"] or "inherit", cid)
 
 
 main(run, results, failure_shot="129-subs-failure", settle_ms=2000, cleanup=cleanup)

@@ -9,7 +9,7 @@ défaut global, état lu des articles ouverts), même en cas d'échec.
 
 import json
 
-from e2e_common import BASE, api, main
+from e2e_common import BASE, api, main, set_view_mode
 
 results: dict = {}
 # Vues modifiées par le parcours : {("feed", id): valeur d'origine ou None}, et défaut d'origine.
@@ -43,8 +43,8 @@ def run(page, ctx, errors):
     touched_modes[("category", cat_id)] = next(c["view_mode"] for c in categories if c["id"] == cat_id)
     # Point de départ connu : aucune présentation propre sur ces vues, défaut « compacte ».
     for kind, id_ in (("feed", feed_a["id"]), ("feed", feed_b["id"]), ("feed", feed_c["id"]), ("category", cat_id)):
-        api(page, "PUT", "/api/view-mode", data=json.dumps({"kind": kind, "id": id_, "view_mode": "inherit"}))
-    api(page, "PUT", "/api/view-mode", data=json.dumps({"kind": "default", "view_mode": "compact"}))
+        set_view_mode(page, kind, "inherit", id_)
+    set_view_mode(page, "default", "compact")
 
     def open_view(path: str):
         page.goto(BASE + path, wait_until="networkidle")
@@ -177,7 +177,7 @@ def run(page, ctx, errors):
     results["offline_choice_sent"] = api(page, "GET", f"/api/feeds/{feed_b['id']}").json()["view_mode"]
 
     # 12. Reprise des anciennes préférences d'appareil (pleine largeur + magazine) quand le serveur a le défaut d'origine.
-    api(page, "PUT", "/api/view-mode", data=json.dumps({"kind": "default", "view_mode": "compact"}))
+    set_view_mode(page, "default", "compact")
     page.evaluate("localStorage.setItem('fluxus.listLayout', 'full'); localStorage.setItem('fluxus.fullDensity', 'magazine')")
     page.reload(wait_until="networkidle")
     page.wait_for_timeout(4000)
@@ -189,9 +189,9 @@ def run(page, ctx, errors):
 
 def cleanup(page):
     for (kind, id_), value in touched_modes.items():
-        api(page, "PUT", "/api/view-mode", data=json.dumps({"kind": kind, "id": id_, "view_mode": value or "inherit"}))
+        set_view_mode(page, kind, value or "inherit", id_)
     if "value" in original_default:
-        api(page, "PUT", "/api/view-mode", data=json.dumps({"kind": "default", "view_mode": original_default["value"]}))
+        set_view_mode(page, "default", original_default["value"])
     for entry_id, was_read in initial_read.items():
         api(page, "PATCH", f"/api/entries/{entry_id}", data=json.dumps({"read": was_read}))
 

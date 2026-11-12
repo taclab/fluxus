@@ -40,17 +40,23 @@ export async function knownEpoch(): Promise<string | null> {
  * Aligne l'époque locale sur celle du serveur. Si la base serveur a été remplacée (import d'une
  * sauvegarde) depuis que ce cache a été construit, le cache — outbox et choix en attente compris —
  * est vidé : ses identifiants désignent désormais d'autres contenus. Un appareil sans époque connue
- * face à une instance déjà restaurée est traité de même. Renvoie vrai si le cache a été vidé.
+ * mais déjà synchronisé (version antérieure aux époques) face à une instance déjà restaurée est traité
+ * de même ; un appareil neuf, non : rien à jeter, et vider `meta` effacerait la disposition du tableau
+ * de bord mise en cache pendant cette première passe. Renvoie vrai si le cache a été vidé.
  */
 async function adoptEpoch(epoch: string): Promise<boolean> {
   const known = await getMeta(EPOCH_KEY)
   if (known === epoch) return false
-  const stale = known !== undefined || epoch !== INITIAL_EPOCH
+  const stale = known !== undefined || (epoch !== INITIAL_EPOCH && (await hasSyncedData()))
   if (stale) await clearDatabase()
   await setMeta(EPOCH_KEY, epoch)
   if (stale) await refreshPending()
   return stale
 }
+async function hasSyncedData(): Promise<boolean> {
+  return (await getMeta('sync.since')) !== undefined || (await db.entries.count()) > 0 || (await db.outbox.count()) > 0
+}
+
 let retentionDays = DEFAULT_RETENTION_DAYS
 const listeners = new Set<Listener>()
 let state: SyncState = { status: 'idle', lastSyncAt: null, error: null, pendingChanges: 0 }

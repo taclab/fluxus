@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
@@ -31,6 +32,83 @@ def api(page: Page, method: str, path: str, **kw):
     """Appel API authentifié avec le token de la session du navigateur."""
     token = page.evaluate("localStorage.getItem('fluxus.token')")
     return page.request.fetch(BASE + path, method=method, headers={"Authorization": f"Bearer {token}", "content-type": "application/json"}, **kw)
+
+
+SYNCED_JS = """() => new Promise((ok) => {
+  const r = indexedDB.open('fluxus')
+  r.onsuccess = () => {
+    const db = r.result
+    if (!db.objectStoreNames.contains('meta')) { db.close(); return ok(false) }
+    const g = db.transaction('meta').objectStore('meta').get('sync.since')
+    g.onsuccess = () => { ok(Boolean(g.result)); db.close() }
+  }
+})"""
+
+
+def wait_synced(page: Page, timeout_s: int = 300) -> None:
+    """Attend la fin de la première synchronisation complète (`sync.since` n'est posé qu'après une passe
+    entière) : sur une copie de base réelle, un contexte neuf télécharge des milliers d'articles et les
+    vues locales restent incomplètes d'ici là."""
+    deadline = time.time() + timeout_s
+    while not page.evaluate(SYNCED_JS):
+        assert time.time() < deadline, "synchronisation initiale inachevée"
+        page.wait_for_timeout(1000)
+
+
+def wait_offline_ready(page: Page) -> None:
+    """Avant `set_offline(True)` puis rechargement : service worker actif (sans lui, la page ne se charge
+    pas hors ligne) et base locale complète."""
+    page.evaluate("navigator.serviceWorker.ready.then(() => true)")
+    wait_synced(page)
+
+
+def set_view_mode(page: Page, kind: str, view_mode: str, id_: int | None = None) -> None:
+    """Présentation d'une vue (`feed`, `category`, `smart`) ou du défaut (`default`, sans `id_`).
+    L'époque de synchro est obligatoire sur une instance déjà restaurée (409 sinon)."""
+    epoch = api(page, "GET", "/api/sync?limit=1").json()["epoch"]
+    r = api(page, "PUT", "/api/view-mode", data=json.dumps({"kind": kind, "id": id_, "view_mode": view_mode, "epoch": epoch}))
+    assert r.ok, f"présentation {kind}:{id_} → {view_mode} : {r.status} {r.text()[:200]}"
+
+
+def set_dashboard_layout(page: Page, layout_json: str):
+    """Écrit la disposition comme le ferait un autre appareil : avec la version serveur courante."""
+    version = api(page, "GET", "/api/settings").json()["dashboard_layout_version"]
+    return api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": layout_json}, "dashboard_layout_base_version": version}))
+
+
+class Restorer:
+    """Remise en état de l'instance après un parcours : chaque modification mémorise d'abord la valeur
+    d'origine, `restore` (à passer en `cleanup` de `main`) la rétablit.
+
+    Un parcours ne doit pas dépendre des présentations de l'instance : en pleine largeur (« Grille »…),
+    l'article s'ouvre dans une fenêtre qui recouvre la barre latérale et les en-têtes de vue."""
+
+    def __init__(self) -> None:
+        self.view_modes: dict[tuple[str, int | None], str] = {}
+        self.layout: str | None = None
+
+    def view_mode(self, page: Page, kind: str, view_mode: str, id_: int | None = None) -> None:
+        """Force la présentation d'une vue (`feed`, `category`, `smart`) ou du défaut (`default`)."""
+        if (kind, id_) not in self.view_modes:
+            if kind == "default":
+                current = api(page, "GET", "/api/settings").json()["values"].get("default_view_mode") or "compact"
+            elif kind == "category":
+                current = next(c["view_mode"] for c in api(page, "GET", "/api/categories").json() if c["id"] == id_)
+            else:
+                current = api(page, "GET", f"/api/{'feeds' if kind == 'feed' else 'smart-feeds'}/{id_}").json()["view_mode"]
+            self.view_modes[(kind, id_)] = current or "inherit"
+        set_view_mode(page, kind, view_mode, id_)
+
+    def save_layout(self, page: Page) -> None:
+        """Mémorise la disposition du tableau de bord avant de la modifier."""
+        if self.layout is None:
+            self.layout = api(page, "GET", "/api/settings").json()["values"].get("dashboard_layout") or ""
+
+    def restore(self, page: Page) -> None:
+        for (kind, id_), value in self.view_modes.items():
+            set_view_mode(page, kind, value, id_)
+        if self.layout is not None:
+            set_dashboard_layout(page, self.layout)
 
 
 def watch_errors(page: Page, errors: list[str] | None = None) -> list[str]:

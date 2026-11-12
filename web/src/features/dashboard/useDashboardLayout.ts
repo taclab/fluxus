@@ -141,8 +141,10 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
   useEffect(() => {
     let cancelled = false
     async function run() {
-      if (!isOnline()) return
       try {
+        // Hors ligne : on s'en tient au cache, ou à la disposition automatique s'il n'y en a pas
+        // (le `finally` lève l'état de chargement).
+        if (!isOnline()) return
         const settings = unwrap(await api().GET('/api/settings'))
         if (cancelled) return
         const server = parseLayout(settings.values.dashboard_layout)

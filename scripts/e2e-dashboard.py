@@ -7,35 +7,34 @@ import json
 import re
 import time
 
-from playwright.sync_api import sync_playwright
-
-from e2e_common import BASE, api, login, new_context, watch_errors
+from e2e_common import (
+    BASE,
+    Restorer,
+    api,
+    main,
+    new_context,
+    set_dashboard_layout,
+    shot,
+    wait_offline_ready,
+    wait_synced,
+)
 
 results: dict = {}
-
-
-def patch_layout(page, layout_json):
-    """Écrit la disposition comme le ferait un autre appareil : avec la version serveur courante."""
-    version = api(page, "GET", "/api/settings").json()["dashboard_layout_version"]
-    return api(page, "PATCH", "/api/settings", data=json.dumps({"values": {"dashboard_layout": layout_json}, "dashboard_layout_base_version": version}))
+restorer = Restorer()
 
 
 def widget_ids(page):
     return page.eval_on_selector_all("[data-widget]", "els => els.map(e => e.dataset.widgetId)")
 
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(args=["--no-sandbox"])
-    ctx = new_context(browser)
-    page = ctx.new_page()
-    errors = watch_errors(page)
-
-    # Repart d'une disposition serveur vide.
-    login(page, settle_ms=0)
-    patch_layout(page, "")
-    page.evaluate("indexedDB.open('fluxus')")  # no-op ; le cache meta est vidé par reload + reconcile
-    page.reload(wait_until="networkidle")
+def run(page, ctx, errors):
+    # Repart d'une disposition serveur vide ; article à côté de la liste pour le retour au tableau de bord.
+    restorer.save_layout(page)
+    restorer.view_mode(page, "default", "compact")
+    set_dashboard_layout(page, "")
+    page.reload(wait_until="load")
     page.wait_for_selector("[data-widget]", timeout=60000)
+    wait_synced(page)
     page.wait_for_timeout(1500)
 
     categories = api(page, "GET", "/api/categories").json()
@@ -44,7 +43,7 @@ with sync_playwright() as p:
     results["stats_widget"] = page.locator("[data-widget-type=stats]").count()
     results["youtube_thumbs"] = page.locator("[data-widget-type=youtube] img[src*='i.ytimg.com']").count()
     results["dexie_version"] = page.evaluate("""() => new Promise(res => { const r = indexedDB.open('fluxus'); r.onsuccess = () => { res(r.result.version); r.result.close() } })""")
-    page.screenshot(path="/out/40-dashboard-default.png")
+    shot(page, "40-dashboard-default")
 
     # Clic sur un article d'un widget catégorie → lecteur en contexte, retour → dashboard
     first_cat_widget = page.locator("[data-widget-type=news]:has([data-entry-id])").first
@@ -96,7 +95,7 @@ with sync_playwright() as p:
     with page.expect_request(lambda r: r.method == "PATCH" and "/api/settings" in r.url, timeout=5000):
         pass
     page.wait_for_timeout(800)
-    page.screenshot(path="/out/41-dashboard-edit.png")
+    shot(page, "41-dashboard-edit")
 
     # Ajouter un widget flux
     page.click("[data-testid=add-widget]")
@@ -153,7 +152,7 @@ with sync_playwright() as p:
     # Persistance : reload + serveur
     page.click("[data-testid=toggle-edit]")
     page.wait_for_timeout(1500)
-    page.reload(wait_until="networkidle")
+    page.reload(wait_until="load")
     page.wait_for_selector("[data-widget]", timeout=30000)
     page.wait_for_timeout(800)
     results["persist_reload"] = widget_ids(page) == ids3
@@ -166,35 +165,37 @@ with sync_playwright() as p:
     remote["widgets"] = list(reversed(server_layout["widgets"]))
     remote["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600))
     # Un autre appareil connaît la version serveur courante et l'envoie (sinon 409, constat 16 de l'audit du 15/09).
-    results["remote_patch_status"] = patch_layout(page, json.dumps(remote)).status
-    page.reload(wait_until="networkidle")
+    results["remote_patch_status"] = set_dashboard_layout(page, json.dumps(remote)).status
+    page.reload(wait_until="load")
     page.wait_for_selector("[data-widget]", timeout=30000)
     page.wait_for_timeout(1200)
     results["conflict_server_wins"] = widget_ids(page) == [w["id"] for w in remote["widgets"]]
 
     # Lecture seule : version future
-    patch_layout(page, json.dumps({**remote, "version": 99}))
-    page.reload(wait_until="networkidle")
+    set_dashboard_layout(page, json.dumps({**remote, "version": 99}))
+    page.reload(wait_until="load")
     page.wait_for_selector("[data-widget]", timeout=30000)
     page.wait_for_timeout(1000)
     results["readonly_banner"] = page.locator("text=version plus récente").count() > 0
     results["readonly_edit_disabled"] = page.locator("[data-testid=toggle-edit]").is_disabled()
     # retour à une version normale
-    patch_layout(page, json.dumps(remote))
+    set_dashboard_layout(page, json.dumps(remote))
 
     # Mobile + thème sombre + hors-ligne
     page.evaluate("localStorage.setItem('fluxus.theme','dark')")
-    mobile = new_context(browser, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, storage_state=ctx.storage_state())
+    # Contexte neuf : synchronisation complète, d'où `load` et non `networkidle`.
+    mobile = new_context(page.context.browser, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, storage_state=ctx.storage_state())
     mp = mobile.new_page()
-    mp.goto(BASE, wait_until="networkidle")
+    mp.goto(BASE, wait_until="load")
     mp.wait_for_selector("[data-widget]", timeout=60000)
     mp.wait_for_timeout(1500)
     widths = mp.eval_on_selector_all("[data-widget]", "els => els.map(e => Math.round(e.getBoundingClientRect().width))")
     results["mobile_full_width"] = all(w >= 340 for w in widths)
-    mp.screenshot(path="/out/42-dashboard-mobile-dark.png")
+    shot(mp, "42-dashboard-mobile-dark")
+    wait_offline_ready(mp)
     mobile.set_offline(True)
     mp.reload()
-    mp.wait_for_timeout(2500)
+    mp.wait_for_selector("[data-widget]", timeout=15000)
     results["offline_widgets"] = mp.locator("[data-widget]").count()
     mp.click("[data-testid=toggle-edit]")
     mp.locator("[data-widget]").nth(0).locator("button[aria-label='Options du widget']").click()
@@ -206,7 +207,13 @@ with sync_playwright() as p:
     server_after = json.loads(api(mp, "GET", "/api/settings").json()["values"]["dashboard_layout"])
     results["offline_change_pushed"] = [w["id"] for w in server_after["widgets"]] == offline_order
 
-    results["js_errors"] = errors[:10]
-    browser.close()
+    mobile.close()
 
-print(json.dumps(results, ensure_ascii=False, indent=1))
+    failed = [k for k, v in results.items() if v is False]
+    assert not failed, f"contrôles en échec : {failed}"
+    assert results["mark_all_read"]["server_read"] == [True] * len(results["mark_all_read"]["server_read"])
+    assert results["mouse_drag"]["after_index"] == 0 and results["keyboard_drag"]["after_index"] == 0
+    assert not errors, errors[:10]
+
+
+main(run, results, failure_shot="dashboard-echec", settle_ms=0, cleanup=restorer.restore)
