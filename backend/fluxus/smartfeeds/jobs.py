@@ -29,6 +29,7 @@ PERMANENT_MARKERS = (
     "refusé de résumer",
     "Fournisseur inconnu",
     "Modèle inconnu",
+    "déjà en cours",  # une autre génération du même article produira le résumé
 )
 
 
@@ -103,7 +104,7 @@ async def summarize_entry_job(session: AsyncSession, job: Job) -> None:
     # estimée sur le texte qui sera réellement envoyé : article complet extrait ou transcription, pas
     # l'extrait du flux (la préparation n'appelle pas le modèle et son résultat est conservé).
     try:
-        source = await prepare_source(session, entry_id)
+        kind, source = await prepare_source(session, entry_id)
     except (TranscriptUnavailable, SummarizerError) as exc:
         log.info("résumé auto #%s abandonné : %s", entry_id, exc)
         await session.commit()
@@ -126,6 +127,7 @@ async def summarize_entry_job(session: AsyncSession, job: Job) -> None:
         model_override=model,
         usage=reservation,
         max_output_tokens=max_output,
+        source=(kind, source),  # le texte sur lequel la réservation a été estimée, pas une seconde extraction
     ):
         if event.type == "done":
             return

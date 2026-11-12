@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -27,6 +28,8 @@ JS_HEAVY_DOMAINS = (
 MIN_GAIN_RATIO = 1.2
 MIN_TEXT_CHARS = 400
 MAX_PAGE_BYTES = 5 * 1024 * 1024
+# Réponse du renderer : le HTML rendu, encodé en JSON (plus gros que la page d'origine).
+MAX_RENDERED_BYTES = 15 * 1024 * 1024
 
 
 def host_matches(url: str, domains: tuple[str, ...]) -> bool:
@@ -90,11 +93,20 @@ async def _fetch_browser(url: str) -> str:
     settings = get_settings()
     # trust_env=False : le service navigateur est sur le réseau interne, jamais via un proxy HTTP.
     async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
-        response = await client.post(f"{settings.browser_url}/render", json={"url": url})
+        # Lu par morceaux et borné : le DOM rendu d'une page arbitraire peut peser des centaines de Mo.
+        async with client.stream("POST", f"{settings.browser_url}/render", json={"url": url}) as response:
+            body = bytearray()
+            async for piece in response.aiter_bytes():
+                body += piece
+                if len(body) > MAX_RENDERED_BYTES:
+                    raise ExtractionError(f"Navigateur: page rendue de plus de {MAX_RENDERED_BYTES // (1024 * 1024)} Mo refusée")
+    try:
+        data = json.loads(body)
+    except ValueError as exc:
+        raise ExtractionError(f"Navigateur: réponse illisible ({response.status_code})") from exc
     if response.status_code != 200:
-        detail = response.json().get("detail") if response.headers.get("content-type", "").startswith("application/json") else response.text
-        raise ExtractionError(f"Navigateur: {detail}")
-    return response.json()["html"]
+        raise ExtractionError(f"Navigateur: {data.get('detail') if isinstance(data, dict) else data}")
+    return data["html"]
 
 
 async def extract_article(url: str, mode: str = "auto", reference_text_len: int = 0) -> Extracted:

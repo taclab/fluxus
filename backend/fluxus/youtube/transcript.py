@@ -51,15 +51,29 @@ def _fmt(seconds: float) -> str:
     return f"{h:d}:{m:02d}:{sec:02d}" if h else f"{m:d}:{sec:02d}"
 
 
+# Une page de vidéo pèse 1 à 2 Mo, des sous-titres de plusieurs heures quelques Mo.
+MAX_RESPONSE_BYTES = 20 * 1024 * 1024
+
+
 def _bounded_session():
-    """Session `requests` avec délai : la bibliothèque n'en pose aucun, et un appel figé dans un
-    thread ne peut pas être annulé."""
+    """Session `requests` bornée en durée et en taille : la bibliothèque ne pose ni délai ni limite,
+    et un appel figé dans un thread ne peut pas être annulé. La bibliothèque sort hors de `safe_get`
+    (elle ne joint que YouTube) ; ces bornes en tiennent lieu."""
     import requests
 
     class BoundedSession(requests.Session):
         def request(self, *args, **kwargs):
             kwargs.setdefault("timeout", (10, 30))
-            return super().request(*args, **kwargs)
+            kwargs["stream"] = True  # corps lu ici, par morceaux, au lieu d'être chargé d'un bloc
+            response = super().request(*args, **kwargs)
+            body = bytearray()
+            for piece in response.iter_content(64 * 1024):
+                body += piece
+                if len(body) > MAX_RESPONSE_BYTES:
+                    response.close()
+                    raise TranscriptUnavailable(f"Réponse de plus de {MAX_RESPONSE_BYTES // (1024 * 1024)} Mo refusée")
+            response._content = bytes(body)  # ce que `response.text` et `.json()` liront ensuite
+            return response
 
     return BoundedSession()
 

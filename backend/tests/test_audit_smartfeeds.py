@@ -358,3 +358,157 @@ async def test_opml_keeps_mixed_root_order():
     )
     assert xml.index('text="Root first"') < xml.index('text="Folder"') < xml.index('text="Inside"') < xml.index('text="Root last"')
     assert 'text="Empty"' not in xml
+
+
+# --- Audit du 12/11 : journal des résumés manuels (28), source réservée (29), verrou par article (30) ---
+
+
+async def _usage_rows(entry_id: int) -> list[tuple[str, str, int, int]]:
+    from sqlalchemy import select
+
+    from fluxus.db import session_scope
+    from fluxus.models import LlmUsage
+
+    async with session_scope() as session:
+        rows = (await session.execute(select(LlmUsage).where(LlmUsage.entry_id == entry_id).order_by(LlmUsage.id))).scalars().all()
+        return [(u.origin, u.status, u.tokens, u.estimated_tokens) for u in rows]
+
+
+async def test_manual_summary_is_logged_before_the_call_and_after_a_disconnect(client: AsyncClient, monkeypatch):
+    """Constat 28 : la ligne `LlmUsage` existe avant l'appel ; un client parti en cours de génération la laisse soldée."""
+    from fluxus.db import session_scope
+    from fluxus.summarize import service as sum_service
+    from fluxus.summarize.providers import StreamResult, Usage
+
+    entry_id = await _entry_id(client, "Élection")
+    await client.delete(f"/api/entries/{entry_id}/summary")
+    seen_during_call: list = []
+
+    class SlowSummarizer:
+        name, model = "fake", "fake-manuel"
+
+        def stream(self, system, user, max_tokens=4000):
+            async def gen():
+                seen_during_call.extend(await _usage_rows(entry_id))
+                yield "Début du résumé"
+                yield " — suite jamais lue"
+
+            return StreamResult(gen(), Usage())
+
+    monkeypatch.setattr(sum_service, "build_summarizer", lambda settings: SlowSummarizer())
+    before = len(await _usage_rows(entry_id))
+    async with session_scope() as session:
+        events = sum_service.summarize_entry(session, entry_id, force=True)
+        async for event in events:
+            if event.type == "delta":
+                break
+        await events.aclose()  # le client SSE se déconnecte au premier fragment
+
+    reserved = seen_during_call[before:]
+    assert len(reserved) == 1 and reserved[0][:2] == ("manual", "reserved") and reserved[0][3] > 0
+    after = (await _usage_rows(entry_id))[before:]
+    # Tokens réels inconnus (flux interrompu) : l'estimation réservée est comptée.
+    assert after == [("manual", "failed", reserved[0][3], reserved[0][3])]
+
+
+async def test_reserved_source_is_not_prepared_twice(client: AsyncClient, fake_provider, monkeypatch):
+    """Constat 29 : le texte sur lequel le budget a été réservé est celui qui est envoyé."""
+    from fluxus.db import session_scope
+    from fluxus.summarize import service as sum_service
+
+    entry_id = await _entry_id(client, "Élection")
+    await client.delete(f"/api/entries/{entry_id}/summary")
+
+    async def boom(*args, **kwargs):
+        raise AssertionError("seconde préparation de la source")
+
+    monkeypatch.setattr(sum_service, "_prepare_source", boom)
+    async with session_scope() as session:
+        events = [e.type async for e in sum_service.summarize_entry(session, entry_id, force=True, source=("article", "Texte réservé. " * 40))]
+    assert events[-1] == "done"
+
+
+async def test_one_generation_at_a_time_per_entry(client: AsyncClient, fake_provider):
+    """Constat 30 : une génération en cours sur un article refuse la seconde, puis rend la main."""
+    from fluxus.db import session_scope
+    from fluxus.models import LlmUsage
+    from fluxus.summarize import service as sum_service
+
+    entry_id = await _entry_id(client, "Élection")
+    await client.delete(f"/api/entries/{entry_id}/summary")
+    before = len(await _usage_rows(entry_id))
+    async with sum_service.generation_lock(entry_id) as acquired:
+        assert acquired
+        r = await client.post(f"/api/entries/{entry_id}/summarize?force=true")
+        assert "déjà en cours" in r.text and fake_provider.calls == []
+        # Un job automatique dans la même situation rend sa réservation de budget.
+        async with session_scope() as session:
+            reservation = LlmUsage(entry_id=entry_id, origin="auto", status="reserved", estimated_tokens=500)
+            session.add(reservation)
+            await session.commit()
+            events = [e async for e in sum_service.summarize_entry(session, entry_id, force=True, origin="auto", usage=reservation)]
+        assert [e.type for e in events] == ["error"] and "déjà en cours" in events[0].data["message"]
+        # Un autre article n'est pas concerné.
+        other = await _entry_id(client, "GPU")
+        async with sum_service.generation_lock(other) as other_acquired:
+            assert other_acquired
+    assert (await _usage_rows(entry_id))[before:] == [("auto", "done", 0, 500)]
+    assert fake_provider.calls == []
+    r = await client.post(f"/api/entries/{entry_id}/summarize?force=true")
+    assert "Résumé simulé" in r.text and len(fake_provider.calls) == 1
+
+
+async def test_sse_client_disconnect_leaves_a_settled_usage_line(client: AsyncClient, monkeypatch):
+    """Constat 28, bout en bout : vrai serveur HTTP, client SSE qui coupe pendant la génération."""
+    import asyncio
+    import socket
+
+    import httpx
+    import uvicorn
+
+    from fluxus.main import app
+    from fluxus.summarize import service as sum_service
+    from fluxus.summarize.providers import StreamResult, Usage
+
+    entry_id = await _entry_id(client, "Élection")
+    await client.delete(f"/api/entries/{entry_id}/summary")
+    before = len(await _usage_rows(entry_id))
+
+    class EndlessSummarizer:
+        name, model = "fake", "fake-lent"
+
+        def stream(self, system, user, max_tokens=4000):
+            async def gen():
+                while True:
+                    yield "fragment "
+                    await asyncio.sleep(0.05)
+
+            return StreamResult(gen(), Usage())
+
+    monkeypatch.setattr(sum_service, "build_summarizer", lambda settings: EndlessSummarizer())
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="off"))
+    task = asyncio.create_task(server.serve())
+    try:
+        while not server.started:
+            await asyncio.sleep(0.05)
+        async with httpx.AsyncClient(trust_env=False, headers={"Authorization": client.headers["Authorization"]}) as http:
+            async with http.stream("POST", f"http://127.0.0.1:{port}/api/entries/{entry_id}/summarize?force=true") as response:
+                async for line in response.aiter_lines():
+                    if "fragment" in line:
+                        break  # sortie du bloc : la connexion est coupée en pleine génération
+        rows: list = []
+        for _ in range(100):
+            rows = (await _usage_rows(entry_id))[before:]
+            if rows and rows[0][1] != "reserved":
+                break
+            await asyncio.sleep(0.1)
+        assert len(rows) == 1 and rows[0][:2] == ("manual", "failed") and rows[0][2] == rows[0][3] > 0
+        # Le verrou de génération est rendu : l'article peut être résumé à nouveau.
+        async with sum_service.generation_lock(entry_id) as acquired:
+            assert acquired
+    finally:
+        server.should_exit = True
+        await task

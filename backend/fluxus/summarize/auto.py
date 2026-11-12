@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..jobs.queue import enqueue
 from ..models import Entry, Feed, Job, LlmUsage, Summary
 from ..settings_store import get_setting
+from .estimate import estimate_input_tokens  # noqa: F401 — réexporté : la réservation s'estime avec lui
 
 # Étalement des résumés automatiques : un job toutes les 20 s pour ne pas monopoliser le worker.
 AUTO_SUMMARY_SPACING = timedelta(seconds=20)
@@ -64,11 +65,6 @@ async def auto_tokens_today(session: AsyncSession) -> int:
         )
     ).scalar_one()
     return int(settled) + int(reserved)
-
-
-def estimate_input_tokens(text: str) -> int:
-    """Estimation prudente (≈ 3 caractères par token en français) + enveloppe des consignes."""
-    return len(text) // 3 + 300
 
 
 async def reserve_auto_budget(session: AsyncSession, *, entry_id: int, smart_feed_id: int | None, input_tokens: int) -> LlmUsage | None:
