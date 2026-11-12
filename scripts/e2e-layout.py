@@ -137,6 +137,24 @@ def run(page, ctx, errors):
     page.keyboard.press("ArrowLeft")
     page.wait_for_timeout(700)
     results["arrow_left_prev"] = entry_param(page.url) == str(ids[0])
+    # Fenêtre de lecture ouverte : ↓ fait défiler l'article, j / k changent d'article.
+    page.keyboard.press("ArrowDown")
+    page.wait_for_timeout(300)
+    results["arrow_down_keeps_article"] = entry_param(page.url) == str(ids[0])
+    page.keyboard.press("j")
+    page.wait_for_function("id => new URL(location.href).searchParams.get('entry') === id", arg=str(ids[1]), timeout=5000)
+    page.keyboard.press("k")
+    page.wait_for_function("id => new URL(location.href).searchParams.get('entry') === id", arg=str(ids[0]), timeout=5000)
+    results["j_k_change_article"] = True
+    # Aide des raccourcis : une fenêtre de l'application (plus d'alert), qu'Échap ferme seule.
+    native_dialogs: list[str] = []
+    page.on("dialog", lambda d: (native_dialogs.append(d.message), d.dismiss()))
+    page.keyboard.press("?")
+    page.wait_for_selector("[data-testid=shortcuts-help]", timeout=5000)
+    results["help_is_in_app"] = native_dialogs == []
+    page.keyboard.press("Escape")
+    page.wait_for_selector("[data-testid=shortcuts-help]", state="detached", timeout=5000)
+    results["escape_closes_help_only"] = page.locator("[data-testid=reader-modal]").count() == 1 and entry_param(page.url) == str(ids[0])
     page.keyboard.press("Escape")
     page.wait_for_timeout(500)
     results["escape_closes"] = page.locator("[data-testid=reader-modal]").count() == 0

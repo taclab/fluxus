@@ -41,9 +41,17 @@ async function setKnownVersion(version: number): Promise<void> {
 
 type PatchOutcome = { kind: 'ok'; version: number } | { kind: 'conflict'; serverJson: string; version: number } | { kind: 'error' }
 
-/** Envoie la disposition en annonçant la version de base ; 409 = un autre appareil a écrit entre-temps. */
-async function patchServer(json: string): Promise<PatchOutcome> {
+/** Dispositions envoyées par cet appareil (les dernières) : un 409 qui renvoie l'une d'elles n'est
+ * pas l'écriture d'un autre appareil mais la nôtre, partie par un autre chemin d'envoi. */
+const sentByThisDevice: string[] = []
+function rememberSent(json: string): void {
+  sentByThisDevice.push(json)
+  if (sentByThisDevice.length > 8) sentByThisDevice.shift()
+}
+
+async function patchOnce(json: string): Promise<PatchOutcome> {
   const base = await getKnownVersion()
+  rememberSent(json)
   try {
     const out = unwrap(await api().PATCH('/api/settings', { body: { values: { dashboard_layout: json }, dashboard_layout_base_version: base } }))
     await setKnownVersion(out.dashboard_layout_version)
@@ -55,6 +63,33 @@ async function patchServer(json: string): Promise<PatchOutcome> {
     }
     return { kind: 'error' }
   }
+}
+
+let sending: Promise<unknown> = Promise.resolve()
+
+/**
+ * Envoie la disposition en annonçant la version de base ; `conflict` = un autre appareil a écrit
+ * entre-temps. Trois chemins envoient (délai d'écriture, moteur de sync, fermeture de l'onglet) : les
+ * envois passent un par un, et un refus dû à notre propre écriture précédente n'est pas un conflit.
+ */
+function patchServer(json: string): Promise<PatchOutcome> {
+  const run = sending.then(async (): Promise<PatchOutcome> => {
+    const out = await patchOnce(json)
+    if (out.kind !== 'conflict') return out
+    if (out.serverJson === json) {
+      // Le serveur a déjà cette disposition (envoi à la fermeture de l'onglet, dont la réponse n'a pas été lue).
+      await setKnownVersion(out.version)
+      return { kind: 'ok', version: out.version }
+    }
+    if (sentByThisDevice.includes(out.serverJson)) {
+      // Il a une de nos dispositions précédentes : on repart de sa version.
+      await setKnownVersion(out.version)
+      return patchOnce(json)
+    }
+    return out
+  })
+  sending = run.catch(() => undefined)
+  return run
 }
 
 /** Adopte la disposition serveur (conflit ou version plus récente) et abandonne la locale. */
@@ -159,7 +194,8 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
         if (server.kind === 'newer') setReadOnly(true)
         if (decision === 'take-server') {
           await adoptServer(settings.values.dashboard_layout, serverVersion)
-          if (dirty) notifyRef.current?.('Disposition mise à jour depuis un autre appareil')
+          // Même contenu que le cache : c'est notre écriture, envoyée à la fermeture de l'onglet.
+          if (dirty && settings.values.dashboard_layout !== localRaw) notifyRef.current?.('Disposition mise à jour depuis un autre appareil')
         } else if (decision === 'push-local' && localRaw) {
           const out = await patchServer(localRaw)
           if (out.kind === 'ok') {
@@ -194,6 +230,7 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
       if (saveTimer === null || !pendingJson) return
       window.clearTimeout(saveTimer)
       saveTimer = null
+      rememberSent(pendingJson)
       // Synchrone : pas de lecture Dexie ici, l'onglet peut disparaître avant sa résolution.
       void fetch(apiUrl('/api/settings'), {
         method: 'PATCH',

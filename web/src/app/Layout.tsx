@@ -1,9 +1,10 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import type { Category, Feed, SmartFeed } from '../api/client'
+import { Dialog, Kbd } from '../components/ui'
 import { db } from '../db/db'
 import { recordChange } from '../sync/engine'
 import { Dashboard } from '../features/dashboard/Dashboard'
@@ -20,6 +21,20 @@ import { openExternal } from '../lib/links'
 import { ReaderModal } from '../features/reader/ReaderModal'
 import { useKeyboard } from './useKeyboard'
 import { useView } from './view'
+
+const SHORTCUT_HELP: [string[], string][] = [
+  [['h'], 'Tableau de bord'],
+  [['j', 'k'], 'Article suivant, précédent'],
+  [['m'], 'Lu / non lu'],
+  [['s'], 'Favori'],
+  [['v'], 'Ouvrir l’original'],
+  [['f'], 'Article complet'],
+  [['r'], 'Résumer'],
+  [['u'], 'Non lus seulement'],
+  [['/'], 'Rechercher'],
+  [['Échap'], 'Retour'],
+  [['?'], 'Cette aide'],
+]
 
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
@@ -89,10 +104,9 @@ export function Layout() {
     () => document.querySelector<HTMLInputElement>('[data-search-input]')?.focus() ?? document.querySelector<HTMLButtonElement>('[aria-label="Rechercher"]')?.click(),
     [],
   )
-  const help = useCallback(
-    () => alert('Raccourcis : h accueil · j/k naviguer · m lu/non lu · s favori · v ouvrir · f article complet · r résumer · u non lus · / rechercher · Échap retour'),
-    [],
-  )
+  const [helpOpen, setHelpOpen] = useState(false)
+  const help = useCallback(() => setHelpOpen(true), [])
+  const readerModalOpen = fullList && entryId !== null
 
   // Sur le tableau de bord, pas d'article courant : on ne capture ni les flèches ni les touches d'article
   // (dnd-kit utilise les flèches pour déplacer un widget au clavier).
@@ -106,8 +120,8 @@ export function Layout() {
       h: goHome,
       j: () => move(1),
       k: () => move(-1),
-      ArrowDown: () => move(1),
-      ArrowUp: () => move(-1),
+      // Fenêtre de lecture ouverte : les flèches font défiler l'article (j / k changent d'article).
+      ...(readerModalOpen ? {} : { ArrowDown: () => move(1), ArrowUp: () => move(-1) }),
       m: () => current && void recordChange(current.id, { read: !current.read }),
       s: () => current && void recordChange(current.id, { starred: !current.starred }),
       v: () => openExternal(current?.url),
@@ -118,7 +132,7 @@ export function Layout() {
       '/': focusSearch,
       '?': help,
     }),
-    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly, goHome, focusSearch, help],
+    [move, current, entryId, setEntry, setUnreadOnly, unreadOnly, goHome, focusSearch, help, readerModalOpen],
   )
   useKeyboard(isDashboard ? dashboardShortcuts : shortcuts)
 
@@ -201,6 +215,20 @@ export function Layout() {
         onClose={() => setEditSmart((s) => ({ ...s, open: false }))}
         onSaved={(sf) => setView({ kind: 'smart', id: sf.id })}
       />
+      <Dialog open={helpOpen} onClose={() => setHelpOpen(false)} title="Raccourcis clavier">
+        <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm" data-testid="shortcuts-help">
+          {SHORTCUT_HELP.map(([keys, label]) => (
+            <Fragment key={label}>
+              <dt className="flex gap-1">
+                {keys.map((k) => (
+                  <Kbd key={k}>{k}</Kbd>
+                ))}
+              </dt>
+              <dd className="text-muted">{label}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      </Dialog>
     </div>
   )
 }

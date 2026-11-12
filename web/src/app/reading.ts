@@ -1,5 +1,7 @@
 /** Préférences typographiques de lecture (par appareil, comme le thème). Appliquées via des attributs sur <html>. */
 
+import { createDevicePref } from './devicePref'
+
 export type ReadingFont = 'editorial' | 'literary' | 'journal' | 'modern' | 'legible' | 'system'
 export type ReadingSize = 's' | 'm' | 'l' | 'xl'
 export type ReadingWidth = 'narrow' | 'normal' | 'wide'
@@ -36,9 +38,8 @@ export const READING_WIDTHS: { id: ReadingWidth; label: string; rem: number }[] 
 const KEY = 'fluxus.reading'
 const DEFAULTS: ReadingPrefs = { font: 'editorial', size: 'm', width: 'normal' }
 
-export function getReadingPrefs(): ReadingPrefs {
+function parseReadingPrefs(raw: string | null): ReadingPrefs {
   try {
-    const raw = localStorage.getItem(KEY)
     if (!raw) return DEFAULTS
     const p = JSON.parse(raw) as Partial<ReadingPrefs>
     return {
@@ -51,11 +52,17 @@ export function getReadingPrefs(): ReadingPrefs {
   }
 }
 
+/** Même clé que `public/theme-init.js`, qui applique la typographie avant le premier rendu. */
+export const readingPref = createDevicePref<ReadingPrefs>(KEY, parseReadingPrefs, JSON.stringify)
+
+export function getReadingPrefs(): ReadingPrefs {
+  return readingPref.get()
+}
+
 export function applyReadingPrefs(prefs: ReadingPrefs): void {
-  localStorage.setItem(KEY, JSON.stringify(prefs))
+  readingPref.set(prefs)
   const root = document.documentElement
   root.dataset.readingFont = prefs.font
   root.dataset.readingSize = prefs.size
   root.dataset.readingWidth = prefs.width
-  window.dispatchEvent(new Event('fluxus:reading'))
 }

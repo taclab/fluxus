@@ -91,6 +91,13 @@ export class FluxusDB extends Dexie {
 
 export const db = new FluxusDB()
 
+// Un autre onglet ouvre une version plus récente du schéma (application mise à jour) : cet onglet doit
+// fermer sa connexion, sinon la migration de l'autre reste bloquée. Il se recharge pour la reprendre.
+db.on('versionchange', () => {
+  db.close()
+  if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') window.location.reload()
+})
+
 /** Millisecondes ou undefined : une clé NaN rendrait l'entrée invisible dans tous les index. */
 function safeTs(iso: string | null | undefined): number | undefined {
   const t = iso ? new Date(iso).getTime() : NaN

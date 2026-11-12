@@ -3,20 +3,20 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { getServerUrl, isDeviceToken, getToken, setToken } from '../../api/auth'
-import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type SettingsOut, type StatsOut } from '../../api/client'
+import { api, apiUrl, authHeaders, unwrap, type DeviceOut, type Schemas, type SettingsOut, type StatsOut } from '../../api/client'
 import type { Theme } from '../../app/theme'
 import { useTheme } from '../../app/useTheme'
 import { TypographyPicker } from '../../components/TypographyPicker'
-import { useToast } from '../../components/feedback'
+import { useConfirm, useToast } from '../../components/feedback'
 import { Button, Field, IconButton, Input, Select, Spinner } from '../../components/ui'
-import { clearDatabase } from '../../db/db'
+import { clearDatabase, db } from '../../db/db'
 import { resetDashboardLayout } from '../dashboard/useDashboardLayout'
 import { BackupSection } from './BackupSection'
 import { setViewMode, useDefaultViewMode } from '../entries/useViewMode'
 import { LAYOUT_GROUPS, VIEW_MODE_SPECS, modesFor, type ListLayout } from '../entries/viewMode'
 import { saveBlob } from '../../lib/download'
 import { formatBytes, formatTokens, relativeDate } from '../../lib/format'
-import { resetAndSync, syncNow } from '../../sync/engine'
+import { pushOutbox, resetAndSync, syncNow } from '../../sync/engine'
 
 const ANTHROPIC_MODELS = [
   { id: 'claude-opus-5', label: 'Claude Opus 5 (recommandé)' },
@@ -35,6 +35,7 @@ export function SettingsPage() {
   const [pwd, setPwd] = useState({ current: '', next: '', confirm: '', revokeDevices: false })
   const fileRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
+  const confirm = useConfirm()
   const navigate = useNavigate()
 
   async function load() {
@@ -95,7 +96,7 @@ export function SettingsPage() {
     try {
       const res = await fetch(apiUrl('/api/opml/import'), { method: 'POST', headers: authHeaders(), body: form })
       if (!res.ok) throw new Error((await res.json()).detail ?? 'Import impossible')
-      const data = (await res.json()) as { imported: number; skipped: number; categories_created: number }
+      const data = (await res.json()) as Schemas['OpmlImportResult']
       toast(`${data.imported} flux importés, ${data.skipped} ignorés`, 'success')
       window.setTimeout(() => void syncNow(), 3000)
       window.setTimeout(() => void syncNow(), 15000)
@@ -143,6 +144,18 @@ export function SettingsPage() {
   }
 
   async function logout() {
+    // La déconnexion vide la base locale : ce qui n'est pas encore parti vers le serveur serait perdu.
+    await pushOutbox().catch(() => undefined)
+    const pending = await db.outbox.count()
+    if (pending > 0) {
+      const ok = await confirm({
+        title: 'Se déconnecter ?',
+        message: `${pending} ${pending > 1 ? 'changements n’ont pas pu être envoyés' : 'changement n’a pas pu être envoyé'} au serveur (lu, favori) et ${pending > 1 ? 'seront perdus' : 'sera perdu'}.`,
+        confirmLabel: 'Se déconnecter quand même',
+        danger: true,
+      })
+      if (!ok) return
+    }
     setToken(null)
     await clearDatabase()
     navigate('/')

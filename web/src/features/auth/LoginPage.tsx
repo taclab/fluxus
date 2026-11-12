@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { getServerUrl, isCapacitor, setServerUrl, setToken } from '../../api/auth'
-import { api, ApiError, reconfigureClient, unwrap } from '../../api/client'
+import { api, ApiError, reconfigureClient, unwrap, type Schemas } from '../../api/client'
 import { Button, Field, Input } from '../../components/ui'
 
 /** Saisie conservée le temps du rechargement qui suit un changement d'adresse du serveur. */
@@ -44,7 +44,7 @@ export function LoginPage() {
     const timer = window.setTimeout(() => {
       fetch(`${base}/api/auth/status`, { headers: { Accept: 'application/json' } })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-        .then((d: { setup_required?: boolean }) => {
+        .then((d: Schemas['AuthStatus']) => {
           if (!cancelled) setSetupRequired(Boolean(d.setup_required))
         })
         .catch(() => {

@@ -1,13 +1,16 @@
+import { createDevicePref, oneOf } from './devicePref'
+
 export type Theme = 'light' | 'dark' | 'system'
 
-const KEY = 'fluxus.theme'
+/** Même clé que `public/theme-init.js`, qui applique le thème avant le premier rendu. */
+export const themePref = createDevicePref<Theme>('fluxus.theme', oneOf(['light', 'dark', 'system'] as const, 'system'))
 
 export function getTheme(): Theme {
-  return (localStorage.getItem(KEY) as Theme) || 'system'
+  return themePref.get()
 }
 
 export function applyTheme(theme: Theme): void {
-  localStorage.setItem(KEY, theme)
+  themePref.set(theme)
   const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.classList.toggle('dark', dark)
   const meta = document.querySelector('meta[name="theme-color"]')

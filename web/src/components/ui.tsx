@@ -118,6 +118,9 @@ export function Spinner({ className }: { className?: string }) {
 
 /* ---------- Dialogue ---------- */
 
+/** Fenêtres ouvertes, dans l'ordre d'ouverture. */
+const openDialogs: symbol[] = []
+
 export function Dialog({
   open,
   onClose,
@@ -135,14 +138,19 @@ export function Dialog({
 }) {
   useEffect(() => {
     if (!open) return
+    // Fenêtres empilées (confirmation au-dessus d'un éditeur) : Échap ne ferme que celle du dessus.
+    const id = Symbol('dialog')
+    openDialogs.push(id)
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
+      if (e.key !== 'Escape' || openDialogs[openDialogs.length - 1] !== id) return
+      e.stopImmediatePropagation()
+      onClose()
     }
     document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      openDialogs.splice(openDialogs.indexOf(id), 1)
+    }
   }, [open, onClose])
 
   if (!open) return null

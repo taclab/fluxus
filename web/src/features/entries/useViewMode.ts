@@ -88,8 +88,9 @@ export function flushViewModes(): Promise<void> {
           await send(target, choice)
           done = true
         } catch (err) {
-          // 4xx : la vue n'existe plus ou la valeur est refusée, inutile de réessayer.
-          done = err instanceof ApiError && err.status >= 400 && err.status < 500
+          // 4xx : la vue n'existe plus ou la valeur est refusée, inutile de réessayer. Sauf session
+          // expirée (401), délai (408) ou limitation (429) : le choix reste en file pour la suite.
+          done = err instanceof ApiError && err.status >= 400 && err.status < 500 && ![401, 408, 429].includes(err.status)
           if (!done) break
         }
       }

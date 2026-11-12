@@ -1,10 +1,11 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Inbox, LayoutDashboard, ListChecks, Plus, RefreshCw, Rss, Settings, Star } from 'lucide-react'
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { Category, Feed, SmartFeed } from '../../api/client'
+import { createDevicePref, idList } from '../../app/devicePref'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { IconButton } from '../../components/ui'
 import { db } from '../../db/db'
@@ -27,7 +28,7 @@ interface Props {
 const EMPTY_FEEDS: Feed[] = []
 const EMPTY_CATEGORIES: Category[] = []
 const EMPTY_SMART: SmartFeed[] = []
-const COLLAPSED_KEY = 'fluxus.collapsed'
+const collapsedPref = createDevicePref<number[]>('fluxus.collapsed', idList, JSON.stringify)
 
 export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmartFeed }: Props) {
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
@@ -37,21 +38,13 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
   const starredCount = useLiveQuery(() => db.entries.where('starredFlag').equals(1).count(), []) ?? 0
   const sync = useSyncState()
   const [addOpen, setAddOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState<Set<number>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]') as number[])
-    } catch {
-      return new Set()
-    }
-  })
+  const collapsedIds = collapsedPref.useValue()
+  const collapsed = useMemo(() => new Set(collapsedIds), [collapsedIds])
 
   const updateCollapsed = useCallback((fn: (next: Set<number>) => void) => {
-    setCollapsed((cur) => {
-      const next = new Set(cur)
-      fn(next)
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
-      return next
-    })
+    const next = new Set(collapsedPref.get())
+    fn(next)
+    collapsedPref.set([...next])
   }, [])
   const toggle = useCallback((id: number) => updateCollapsed((next) => (next.has(id) ? next.delete(id) : next.add(id))), [updateCollapsed])
   const expand = useCallback((id: number) => updateCollapsed((next) => next.delete(id)), [updateCollapsed])
