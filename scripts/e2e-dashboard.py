@@ -67,11 +67,16 @@ def run(page, ctx, errors):
     # Tout marquer lu sur un widget
     # Un widget « non lus » se remplit avec les non-lus suivants : on vérifie que les articles affichés ont changé
     # et que ceux marqués sont bien lus côté serveur.
-    w = page.locator("[data-widget-type=news]:has([data-entry-id])").nth(1)
-    wid = w.get_attribute("data-widget-id")
+    # Le widget est choisi une fois, puis visé par son identifiant : « le deuxième widget qui a des
+    # articles » ne désigne plus le même tant que les widgets finissent de se remplir.
+    wid = page.locator("[data-widget-type=news]:has([data-entry-id])").nth(1).get_attribute("data-widget-id")
+    w = page.locator(f"[data-widget-id='{wid}']")
     shown = page.eval_on_selector_all(f"[data-widget-id='{wid}'] [data-entry-id]", "els => els.map(e => Number(e.dataset.entryId))")
     w.locator("button[aria-label='Tout marquer comme lu']").click()
-    page.wait_for_timeout(1500)
+    for _ in range(40):  # attend l'état serveur, pas un délai fixe
+        if all(api(page, "GET", f"/api/entries/{i}").json()["read"] for i in shown[:3]):
+            break
+        page.wait_for_timeout(250)
     shown_after = page.eval_on_selector_all(f"[data-widget-id='{wid}'] [data-entry-id]", "els => els.map(e => Number(e.dataset.entryId))")
     read_flags = [api(page, "GET", f"/api/entries/{i}").json()["read"] for i in shown[:3]]
     results["mark_all_read"] = {"shown": len(shown), "still_shown": len(set(shown) & set(shown_after)), "server_read": read_flags}

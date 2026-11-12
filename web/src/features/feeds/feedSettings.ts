@@ -5,6 +5,7 @@
 
 import { api, unwrap, type Feed, type Schemas } from '../../api/client'
 import { db } from '../../db/db'
+import { resyncIfPulling } from '../../sync/engine'
 import { forgetPendingViewModes } from '../entries/useViewMode'
 
 export type ExtractionMode = NonNullable<Schemas['FeedSettingsIn']['extraction_mode']>
@@ -77,6 +78,7 @@ export async function updateFeed(id: number, changes: FeedUpdateChanges): Promis
     const updated = unwrap(await api().PUT('/api/feeds/{feed_id}', { params: { path: { feed_id: id } }, body: { clear_category: false, ...changes } }))
     if (changes.view_mode) await forgetPendingViewModes([{ kind: 'feed', id }])
     await db.feeds.put(updated)
+    resyncIfPulling()
     return updated
   } catch (err) {
     if (before) await db.feeds.put(before)
@@ -88,6 +90,7 @@ export async function updateFeeds(ids: number[], changes: FeedChanges): Promise<
   const out = unwrap(await api().POST('/api/feeds/bulk', { body: { feed_ids: ids, changes: { clear_category: false, ...changes } } }))
   if (changes.view_mode) await forgetPendingViewModes(ids.map((id) => ({ kind: 'feed', id })))
   await db.feeds.bulkPut(out.feeds)
+  resyncIfPulling()
   return out.feeds
 }
 

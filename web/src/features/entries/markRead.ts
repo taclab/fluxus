@@ -1,9 +1,11 @@
 /**
  * « Tout marquer comme lu » sur le périmètre complet d'une vue, pas seulement la page chargée.
  *
- * - les identifiants locaux viennent des index Dexie de la vue (jamais d'un scan) ;
- * - en ligne : une seule requête serveur ciblée (`POST /api/entries/mark-read`, bornée par `before`)
- *   puis mise à jour locale directe, sans passer par l'outbox ;
+ * - le périmètre est ce que cet appareil connaît : les identifiants viennent des index Dexie de la
+ *   vue (jamais d'un scan). Une cible serveur (« tout le flux jusqu'à maintenant ») marquerait aussi
+ *   les articles arrivés depuis la dernière synchronisation, que personne n'a vus ;
+ * - en ligne : ces identifiants sont envoyés à `POST /api/entries/mark-read`, par lots, puis la base
+ *   locale est mise à jour directement, sans passer par l'outbox ;
  * - hors ligne ou serveur injoignable : mise à jour locale et outbox (`recordBulkRead`), rejouée à la sync.
  * La vue « recherche » n'a pas de périmètre local fiable : elle ne traite que les résultats affichés.
  */
@@ -11,12 +13,15 @@
 import { api, isOnline, unwrap, type Feed, type Schemas } from '../../api/client'
 import type { View } from '../../app/view'
 import { db } from '../../db/db'
-import { recordBulkRead } from '../../sync/engine'
+import { recordBulkRead, resyncIfPulling } from '../../sync/engine'
 
 /** Au-delà, une confirmation est demandée avant de marquer. */
 export const CONFIRM_THRESHOLD = 50
 
 type MarkReadBody = Schemas['MarkReadIn']
+
+/** Identifiants par requête : un seul `UPDATE … WHERE id IN (…)` côté serveur. */
+const BATCH = 2000
 
 /** Identifiants des articles non lus de la vue, publiés jusqu'à `until`, par les index. */
 export async function collectUnreadIds(view: View, feeds: Feed[], until: number): Promise<number[]> {
@@ -48,25 +53,6 @@ export async function collectUnreadIds(view: View, feeds: Feed[], until: number)
   }
 }
 
-/** Cible serveur équivalente à la vue ; null pour la recherche (identifiants explicites). */
-function serverTarget(view: View): Partial<MarkReadBody> | null {
-  switch (view.kind) {
-    case 'feed':
-      return { feed_id: view.id }
-    case 'category':
-      return { category_id: view.id }
-    case 'smart':
-      return { smart_feed_id: view.id }
-    case 'starred':
-      return { starred_only: true }
-    case 'all':
-    case 'unread':
-      return { all: true }
-    default:
-      return null
-  }
-}
-
 export interface MarkResult {
   /** Articles marqués localement. */
   count: number
@@ -81,24 +67,23 @@ export interface MarkResult {
 export async function markViewRead(view: View, feeds: Feed[], displayedIds: number[]): Promise<MarkResult> {
   const now = Date.now()
   const at = new Date(now).toISOString()
-  const target = serverTarget(view)
-  const localIds = target ? await collectUnreadIds(view, feeds, now) : displayedIds
-  const body: MarkReadBody = { all: false, starred_only: false, read: true, ...(target ? { ...target, before: at } : { entry_ids: displayedIds }) }
+  const ids = view.kind === 'search' ? displayedIds : await collectUnreadIds(view, feeds, now)
+  if (ids.length === 0) return { count: 0, mode: 'server' }
 
-  let serverOk = false
-  if (isOnline() && (target || displayedIds.length)) {
+  if (isOnline()) {
     try {
-      unwrap(await api().POST('/api/entries/mark-read', { body }))
-      serverOk = true
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const body: MarkReadBody = { all: false, starred_only: false, read: true, entry_ids: ids.slice(i, i + BATCH) }
+        unwrap(await api().POST('/api/entries/mark-read', { body }))
+      }
+      // Le serveur a fait foi : écriture locale directe, sans action en attente.
+      await db.entries.where('id').anyOf(ids).modify({ read: true, readFlag: 1, updated_at: at, updatedTs: now })
+      resyncIfPulling()
+      return { count: ids.length, mode: 'server' }
     } catch {
-      serverOk = false
+      // Lots déjà acceptés compris : le rejeu par l'outbox est idempotent.
     }
   }
-  if (serverOk) {
-    // Le serveur a fait foi : écriture locale directe, sans action en attente.
-    await db.entries.where('id').anyOf(localIds).modify({ read: true, readFlag: 1, updated_at: at, updatedTs: now })
-    return { count: localIds.length, mode: 'server' }
-  }
-  if (localIds.length) await recordBulkRead(localIds, true)
-  return { count: localIds.length, mode: 'outbox' }
+  await recordBulkRead(ids, true)
+  return { count: ids.length, mode: 'outbox' }
 }

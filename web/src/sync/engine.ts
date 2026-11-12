@@ -61,7 +61,11 @@ let retentionDays = DEFAULT_RETENTION_DAYS
 const listeners = new Set<Listener>()
 let state: SyncState = { status: 'idle', lastSyncAt: null, error: null, pendingChanges: 0 }
 let inFlight: Promise<void> | null = null
+/** Vrai pendant le téléchargement des pages d'une passe. */
+let pulling = false
 let timer: number | null = null
+/** Un article dont l'état a changé depuis moins longtemps n'est pas purgé (il est peut-être ouvert). */
+const RECENT_CHANGE_MS = 24 * 3600 * 1000
 
 function emit(patch: Partial<SyncState>) {
   state = { ...state, ...patch }
@@ -155,6 +159,8 @@ export function pushOutbox(): Promise<void> {
               await db.entries.update(c.entry_id, { read: c.read, readFlag: c.read ? 1 : 0, starred: c.starred, starredFlag: c.starred ? 1 : 0 })
             }
           })
+          // Ces articles ne sont plus protégés par l'outbox : une page lue avant ce lot les ferait reculer.
+          resyncIfPulling()
         }
       } while (pushRequested)
     } catch (err) {
@@ -209,9 +215,21 @@ async function mergeEntries(page: SyncPull) {
   })
 }
 
+/**
+ * Purge les articles lus, non favoris, plus vieux que la rétention. Par les index, clés seulement :
+ * un article local porte tout son HTML. Un article marqué lu depuis moins d'un jour est gardé, sinon
+ * un vieil article ouvert disparaîtrait du lecteur à la synchronisation suivante.
+ */
 async function applyRetention() {
-  const cutoff = Date.now() - retentionDays * 24 * 3600 * 1000
-  const old = await db.entries.where('publishedTs').below(cutoff).filter((e) => e.read && !e.starred).primaryKeys()
+  const now = Date.now()
+  const cutoff = now - retentionDays * 24 * 3600 * 1000
+  const [readOld, starredOld, justChanged] = await Promise.all([
+    db.entries.where('[readFlag+publishedTs]').between([1, -Infinity], [1, cutoff], true, false).primaryKeys(),
+    db.entries.where('[starredFlag+publishedTs]').between([1, -Infinity], [1, cutoff], true, false).primaryKeys(),
+    db.entries.where('[readFlag+updatedTs]').between([1, now - RECENT_CHANGE_MS], [1, Infinity], true, true).primaryKeys(),
+  ])
+  const keep = new Set<number>([...starredOld, ...justChanged])
+  const old = readOld.filter((id) => !keep.has(id))
   if (old.length) {
     await db.entries.bulkDelete(old)
     await db.summaries.where('entry_id').anyOf(old).delete()
@@ -220,6 +238,16 @@ async function applyRetention() {
 
 /** Passe supplémentaire demandée pendant une passe en cours (une seule, quel que soit le nombre d'appels). */
 let queued: Promise<void> | null = null
+
+/**
+ * À appeler après une écriture acceptée par le serveur hors de l'outbox (ou qui vient d'en sortir).
+ * Si une passe télécharge ses pages à cet instant, l'une d'elles a pu être lue par le serveur avant
+ * cette écriture : fusionnée, elle la ferait reculer jusqu'à la passe suivante. On en relance une
+ * à sa suite, qui remet l'état à jour.
+ */
+export function resyncIfPulling(): void {
+  if (pulling) void syncNow()
+}
 
 export async function syncNow(): Promise<void> {
   if (inFlight) {
@@ -250,6 +278,7 @@ export async function syncNow(): Promise<void> {
       let hasMore = true
       let pages = 0
       const MAX_PAGES = 500
+      pulling = true
       while (hasMore && pages < MAX_PAGES) {
         const page = unwrap(
           await api().GET('/api/sync', { params: { query: cursor ? { cursor, limit: 300 } : { since, limit: 300 } } }),
@@ -269,6 +298,7 @@ export async function syncNow(): Promise<void> {
       }
       // Le curseur `since` n'avance qu'une fois la passe complète : une passe interrompue (ou plafonnée)
       // repart du début et ne perd rien.
+      pulling = false
       if (runStartedAt && !hasMore) await setMeta('sync.since', runStartedAt)
       await applyRetention()
       const now = new Date().toISOString()
@@ -279,6 +309,7 @@ export async function syncNow(): Promise<void> {
       emit({ status: isOnline() ? 'error' : 'offline', error: message })
     }
   })().finally(() => {
+    pulling = false
     inFlight = null
   })
   return inFlight

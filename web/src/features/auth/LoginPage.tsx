@@ -1,14 +1,36 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { getServerUrl, isCapacitor, setServerUrl, setToken } from '../../api/auth'
 import { api, ApiError, reconfigureClient, unwrap } from '../../api/client'
 import { Button, Field, Input } from '../../components/ui'
 
+/** Saisie conservée le temps du rechargement qui suit un changement d'adresse du serveur. */
+const HANDOFF_KEY = 'fluxus.login.handoff'
+
+function takeHandoff(): { password: string; confirm: string } | null {
+  try {
+    const raw = sessionStorage.getItem(HANDOFF_KEY)
+    sessionStorage.removeItem(HANDOFF_KEY)
+    const data: unknown = raw ? JSON.parse(raw) : null
+    if (data && typeof data === 'object' && 'password' in data && typeof data.password === 'string') {
+      return { password: data.password, confirm: 'confirm' in data && typeof data.confirm === 'string' ? data.confirm : '' }
+    }
+  } catch {
+    // stockage indisponible : l'utilisateur ressaisira
+  }
+  return null
+}
+
+/** Lu une seule fois au chargement de la page, et retiré du stockage dans le même geste. */
+const handoff = takeHandoff()
+
 export function LoginPage() {
   const [serverUrl, setServer] = useState(getServerUrl())
   const [showServer, setShowServer] = useState(isCapacitor() || !getServerUrl())
-  const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
+  const [password, setPassword] = useState(handoff?.password ?? '')
+  const [confirm, setConfirm] = useState(handoff?.confirm ?? '')
+  const formRef = useRef<HTMLFormElement>(null)
+  const resumed = useRef(false)
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -35,6 +57,13 @@ export function LoginPage() {
     }
   }, [serverUrl, showServer])
 
+  // Après le rechargement : on reprend l'envoi là où il s'était arrêté, dès que le serveur a répondu.
+  useEffect(() => {
+    if (!handoff || resumed.current || setupRequired === null) return
+    resumed.current = true
+    formRef.current?.requestSubmit()
+  }, [setupRequired])
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -49,7 +78,13 @@ export function LoginPage() {
         setServerUrl(serverUrl)
         if (getServerUrl() !== previous) {
           // La base locale est nommée d'après le serveur : on recharge pour l'ouvrir sous le bon nom,
-          // sans réutiliser le cache, l'outbox ni le curseur de sync de l'ancienne instance.
+          // sans réutiliser le cache, l'outbox ni le curseur de sync de l'ancienne instance. La
+          // saisie traverse le rechargement, sinon il faudrait retaper le mot de passe sans explication.
+          try {
+            sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ password, confirm }))
+          } catch {
+            // stockage indisponible : le formulaire reviendra vide
+          }
           window.location.reload()
           return
         }
@@ -77,7 +112,7 @@ export function LoginPage() {
 
   return (
     <div className="min-h-full flex items-center justify-center p-6 bg-app">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-5 bg-panel border border-app rounded-2xl p-7 shadow-sm">
+      <form ref={formRef} onSubmit={submit} className="w-full max-w-sm space-y-5 bg-panel border border-app rounded-2xl p-7 shadow-sm">
         <div className="flex items-center gap-3">
           <img src="/favicon.svg" alt="" className="size-10 rounded-xl" />
           <div>

@@ -246,7 +246,8 @@ mergeFeeds (page 1) : remplace catégories et flux, supprime les entrées orphel
 mergeEntries : bulkPut ; un état local encore dans l'outbox n'est pas écrasé
 sync.since := server_time de la page 1   (seulement si la passe est complète) ; server_time =
                                          min(now, début de la plus ancienne transaction ouverte)
-applyRetention : supprime localement les articles lus, non favoris, > 30 j
+applyRetention : supprime localement les articles lus, non favoris, > 30 j, sauf ceux
+                 dont l'état a changé depuis moins d'un jour (l'article ouvert) ; par les index, clés seulement
 ```
 
 Le curseur composite `(updated_at, id)` est indispensable : un import OPML crée des centaines
@@ -624,6 +625,7 @@ browser/
 scripts/
   build-apk.sh              build de l'APK dans un conteneur (Dockerfile.android)
   e2e-ui.py                 parcours Playwright de l'interface (liste, lecteur, mobile, hors-ligne)
+  e2e-reading.py            parcours Playwright de lecture (tout marquer comme lu, purge locale, connexion après changement d'adresse)
   e2e-dashboard.py          parcours Playwright du tableau de bord (défaut, édition, drag, persistance, conflit)
   e2e-smartfeeds.py         parcours Playwright des flux intelligents (aperçu, vue, édition rétroactive, regex, widget, orphelin, hors-ligne)
 web/

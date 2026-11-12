@@ -46,15 +46,18 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
 
   // Réinitialisation à chaque changement d'article (et seulement là : l'arrivée d'un résumé ou d'un
   // changement d'état ne doit ni remonter la page ni perdre la bascule flux / article complet).
-  const initializedFor = useRef<number | null>(null)
-  useEffect(() => {
-    if (!entry || initializedFor.current === entry.id) return
-    initializedFor.current = entry.id
+  // Pendant le rendu, pas dans un effet : sinon le nouvel article serait affiché une fois avec l'état
+  // du précédent, et `SummaryPanel` monté avec un `autoStart` que personne n'a demandé pour lui.
+  const [shownId, setShownId] = useState<number | null>(null)
+  if (entry && shownId !== entry.id) {
+    setShownId(entry.id)
     setShowFull(true)
     setSummaryOpen(Boolean(entry.has_summary))
     setSummaryAuto(false)
+  }
+  useEffect(() => {
     containerRef.current?.scrollTo({ top: 0 })
-  }, [entry])
+  }, [shownId])
 
   useEffect(() => {
     if (!typoOpen) return
@@ -261,7 +264,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
             </div>
           )}
 
-          {summaryOpen && <SummaryPanel entryId={entry.id} isVideo={isVideo} autoStart={summaryAuto} onClose={() => setSummaryOpen(false)} onSeek={isVideo ? seek : undefined} />}
+          {summaryOpen && <SummaryPanel key={entry.id} entryId={entry.id} isVideo={isVideo} autoStart={summaryAuto} onClose={() => setSummaryOpen(false)} onSeek={isVideo ? seek : undefined} />}
 
           {entry.extraction_status === 'failed' && !isVideo && (
             <p className="text-xs text-muted rounded-lg bg-muted px-3 py-2">
