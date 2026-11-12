@@ -354,7 +354,7 @@ s'exécute dans un conteneur :
 
 ```bash
 scripts/build-apk.sh            # debug  -> dist/app-debug.apk (installable tel quel)
-scripts/build-apk.sh release    # release non signé -> dist/app-release-unsigned.apk
+scripts/build-apk.sh release    # release -> dist/app-release.apk si une clé est fournie, sinon non signée
 ```
 
 Le premier appel construit l'image de build (JDK + SDK Android, quelques minutes) ; les suivants
@@ -365,7 +365,41 @@ L'application obtient un **token d'appareil** longue durée, révocable dans *Pa
 Le bouton retour matériel navigue dans l'application. La synchronisation a lieu à l'ouverture et au
 retour au premier plan ; il n'y a pas encore de synchronisation planifiée quand l'appli est fermée.
 
-Signature d'une release : `apksigner sign --ks ma-cle.jks dist/app-release-unsigned.apk`.
+### APK publiée à chaque version
+
+À chaque tag `vX.Y.Z`, la CI construit l'APK, la signe et la joint à la release GitHub du tag
+(`fluxus-X.Y.Z.apk`), avec les notes de `CHANGELOG.md`. Il faut pour cela une **clé de signature**,
+créée une fois. Android n'installe une mise à jour que si elle porte la même clé que la version
+installée : conservez le fichier et son mot de passe hors du dépôt, en lieu sûr ; les perdre oblige
+à désinstaller l'application sur chaque appareil.
+
+```bash
+# 1. Créer la clé (keytool est dans l'image de build ; il demande un mot de passe)
+docker run --rm -it -v "$PWD:/k" -w /k fluxus-android-builder \
+  keytool -genkeypair -keystore fluxus-release.jks -alias fluxus -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Fluxus"
+sudo chown "$USER" fluxus-release.jks && mv fluxus-release.jks ~/   # hors du dépôt
+
+# 2. L'encoder pour GitHub
+base64 -w0 ~/fluxus-release.jks
+```
+
+Dans le dépôt GitHub, *Settings → Secrets and variables → Actions → New repository secret* :
+
+| Secret | Valeur |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | la sortie de `base64` |
+| `ANDROID_KEYSTORE_PASSWORD` | le mot de passe saisi à l'étape 1 |
+| `ANDROID_KEY_ALIAS` | `fluxus` |
+| `ANDROID_KEY_PASSWORD` | facultatif (même mot de passe par défaut) |
+
+Sans ces secrets, la release est créée sans APK. Pour l'ajouter après coup : onglet *Actions* →
+« Publication (images, APK, release) » → *Run workflow* en choisissant le tag.
+
+La même clé sert en local :
+`FLUXUS_KEYSTORE_FILE=~/fluxus-release.jks FLUXUS_KEYSTORE_PASSWORD=… FLUXUS_KEY_ALIAS=fluxus scripts/build-apk.sh release`.
+
+Une APK de debug déjà installée porte une autre clé : désinstallez-la une fois avant d'installer
+l'APK signée (les données sont sur le serveur, il suffit de se reconnecter).
 
 ## Exploitation
 

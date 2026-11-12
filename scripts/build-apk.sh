@@ -3,7 +3,11 @@
 #
 # Usage :
 #   scripts/build-apk.sh            -> APK de debug, installable directement (adb install)
-#   scripts/build-apk.sh release    -> APK release non signé (à signer avec apksigner)
+#   scripts/build-apk.sh release    -> APK release, signée si une clé est fournie, sinon non signée
+#
+# Signature (release) : FLUXUS_KEYSTORE_FILE=/chemin/cle.jks FLUXUS_KEYSTORE_PASSWORD=… FLUXUS_KEY_ALIAS=…
+# [FLUXUS_KEY_PASSWORD=…]. Android n'installe une mise à jour que si elle porte la même clé : la
+# garder en lieu sûr. La CI utilise la même clé (secrets du dépôt, voir README).
 #
 # Le build web (web/dist) doit être à jour : `cd web && npm run build && npx cap sync android`.
 set -euo pipefail
@@ -23,9 +27,18 @@ echo "→ Build web + sync Capacitor…"
 echo "→ Gradle ($MODE)…"
 TASK="assembleDebug"
 [ "$MODE" = "release" ] && TASK="assembleRelease"
+SIGNING=()
+if [ "$MODE" = "release" ] && [ -n "${FLUXUS_KEYSTORE_FILE:-}" ]; then
+  SIGNING=(
+    -v "$(realpath "$FLUXUS_KEYSTORE_FILE"):/keys/release.jks:ro"
+    -e FLUXUS_KEYSTORE_FILE=/keys/release.jks
+    -e FLUXUS_KEYSTORE_PASSWORD -e FLUXUS_KEY_ALIAS -e FLUXUS_KEY_PASSWORD
+  )
+fi
 docker run --rm \
   -v "$PWD/web:/web" \
   -v fluxus-gradle-cache:/root/.gradle \
+  "${SIGNING[@]}" \
   -w /web/android \
   "$IMAGE" \
   bash -c '

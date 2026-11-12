@@ -4,6 +4,24 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
+## 1.0.2 — 12 novembre 2026
+
+### Application Android
+- APK signée construite par la CI et jointe à la release GitHub de chaque version.
+- La version de l'application suit celle du projet. Passage d'une APK de debug à cette APK signée :
+  désinstaller l'ancienne une fois (la clé de signature change).
+
+### Corrections
+- Écritures refusées après un import de sauvegarde tant que l'appareil ne s'est pas resynchronisé.
+- Résumés : consommation journalisée avant l'appel, une seule génération à la fois par article,
+  estimation du budget plus juste (textes très longs, écritures non latines).
+- Horodatages `[mm:ss]` des résumés de vidéos (le lien pointait vers une position invalide).
+- Échap ne ferme que la fenêtre du dessus ; flèches dans la fenêtre de lecture ; aide des raccourcis
+  dans une fenêtre ; confirmation avant une déconnexion qui perdrait des changements.
+- Thème, typographie et dossiers repliés synchronisés entre onglets.
+- Import OPML : nouveau dossier en fin de liste ; adresse d'un flux modifié vérifiée ; changement de
+  mot de passe limité en tentatives.
+
 ## 1.0.1 — 12 novembre 2026
 
 ### Exploitation

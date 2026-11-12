@@ -1,6 +1,7 @@
-# Publie les images sur le registre de GitHub (ghcr.io) à chaque tag de version.
-# `docker-compose.deploy.yml` les consomme : un déploiement n'a plus besoin des sources.
-name: Publication des images
+# À chaque tag de version : images publiées sur le registre de GitHub (ghcr.io), APK Android signée,
+# release GitHub avec l'APK et les notes de CHANGELOG.md.
+# `docker-compose.deploy.yml` consomme les images : un déploiement n'a plus besoin des sources.
+name: Publication (images, APK, release)
 
 on:
   push:
@@ -60,3 +61,85 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+  apk:
+    name: APK Android et release GitHub
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # création de la release
+    env:
+      # Clé de signature, déposée une fois dans les secrets du dépôt (voir README, « Application Android »).
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      FLUXUS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      FLUXUS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      FLUXUS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Version du code (et accord avec le tag)
+        run: |
+          version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' backend/fluxus/__init__.py)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME, code v$version"; exit 1; }
+          fi
+      - id: signing
+        name: Clé de signature
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::Secrets ANDROID_KEYSTORE_* absents : aucune APK construite (une APK signée d'une autre clé ne pourrait pas mettre à jour l'application installée)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/fluxus.jks"
+            echo "FLUXUS_KEYSTORE_FILE=$RUNNER_TEMP/fluxus.jks" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.signing.outputs.signed == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-java@v4
+        if: steps.signing.outputs.signed == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Front et projet Android
+        if: steps.signing.outputs.signed == 'true'
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+      - name: APK signée
+        if: steps.signing.outputs.signed == 'true'
+        working-directory: web/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon -q assembleRelease
+          apk="$GITHUB_WORKSPACE/fluxus-${{ steps.version.outputs.version }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          "$ANDROID_HOME"/build-tools/*/apksigner verify "$apk" | tail -n 1
+      - uses: actions/upload-artifact@v4
+        if: steps.signing.outputs.signed == 'true'
+        with:
+          name: fluxus-apk
+          path: fluxus-*.apk
+      - name: Release GitHub
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Notes : la section de cette version dans CHANGELOG.md.
+          awk -v v="$VERSION" '$1 == "##" { on = ($2 == v) ; next } on' CHANGELOG.md > notes.md
+          test -s notes.md || echo "Voir CHANGELOG.md." > notes.md
+          shopt -s nullglob
+          files=(fluxus-*.apk)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            [ ${#files[@]} -eq 0 ] || gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --title "Fluxus $VERSION" --notes-file notes.md "${files[@]}"
+          fi
+

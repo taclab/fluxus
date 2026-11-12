@@ -1,5 +1,14 @@
 apply plugin: 'com.android.application'
 
+// Version unique du projet : celle de web/package.json (voir CHANGELOG.md). Le code de version, qui
+// doit croître à chaque mise à jour installée, s'en déduit : 1.2.3 -> 10203.
+def fluxusVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+def (vMajor, vMinor, vPatch) = fluxusVersion.tokenize('.-').take(3).collect { it as int }
+
+// Signature de la release : clé fournie par l'environnement (CI ou scripts/build-apk.sh), jamais dans
+// le dépôt. Sans elle, `assembleRelease` produit une APK non signée.
+def keystorePath = System.getenv('FLUXUS_KEYSTORE_FILE')
+
 android {
     namespace = "fr.fluxus.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +16,8 @@ android {
         applicationId "fr.fluxus.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode vMajor * 10000 + vMinor * 100 + vPatch
+        versionName fluxusVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +25,19 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (keystorePath) {
+            release {
+                storeFile file(keystorePath)
+                storePassword System.getenv('FLUXUS_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('FLUXUS_KEY_ALIAS')
+                keyPassword System.getenv('FLUXUS_KEY_PASSWORD') ?: System.getenv('FLUXUS_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (keystorePath) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
