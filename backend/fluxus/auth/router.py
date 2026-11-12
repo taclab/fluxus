@@ -87,16 +87,23 @@ async def setup(body: PasswordBody, session: Session) -> TokenResponse:
     return TokenResponse(access_token=create_access_token(version))
 
 
-@router.post("/login", response_model=TokenResponse)
-async def login(body: PasswordBody, request: Request, session: Session) -> TokenResponse:
+async def password_matches(request: Request, session: AsyncSession, password: str) -> bool:
+    """Vérifie le mot de passe sous limitation de tentatives (429 si un plafond est atteint)."""
     key = _client_key(request)
-    if not login_limiter.check(key):
+    stamp = login_limiter.acquire(key)
+    if stamp is None:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Trop de tentatives, réessayez plus tard")
     password_hash = await get_setting(session, "_password_hash", default="")
-    if not password_hash or not verify_password(body.password, password_hash):
-        login_limiter.record_failure(key)
+    if not password_hash or not verify_password(password, password_hash):
+        return False
+    login_limiter.release(key, stamp)
+    return True
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(body: PasswordBody, request: Request, session: Session) -> TokenResponse:
+    if not await password_matches(request, session, body.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Mot de passe incorrect")
-    login_limiter.reset(key)
     version = await get_setting(session, "_password_version", default="")
     return TokenResponse(access_token=create_access_token(version or ""))
 
@@ -136,14 +143,8 @@ async def list_devices(_: Auth, session: Session) -> list[DeviceOut]:
 async def create_device(body: DeviceCreate, request: Request, session: Session) -> DeviceCreated:
     """Crée un token d'appareil. Ne nécessite pas de session : le mot de passe suffit,
     ce qui permet à l'appli mobile de s'appairer directement."""
-    key = _client_key(request)
-    if not login_limiter.check(key):
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Trop de tentatives, réessayez plus tard")
-    password_hash = await get_setting(session, "_password_hash", default="")
-    if not password_hash or not verify_password(body.password, password_hash):
-        login_limiter.record_failure(key)
+    if not await password_matches(request, session, body.password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Mot de passe incorrect")
-    login_limiter.reset(key)
     token = generate_device_token()
     device = DeviceToken(name=body.name, token_hash=hash_device_token(token))
     session.add(device)

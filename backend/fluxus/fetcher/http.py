@@ -29,6 +29,8 @@ def _is_private_ip(ip: str) -> bool:
         or addr.is_multicast
         or addr.is_reserved
         or addr.is_unspecified
+        # Couvre ce que les autres drapeaux laissent passer (100.64.0.0/10 : CGNAT, Tailscale).
+        or not addr.is_global
     )
 
 

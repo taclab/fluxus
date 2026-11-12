@@ -1,6 +1,6 @@
-FROM mcr.microsoft.com/playwright/python:v1.47.0-noble
+FROM mcr.microsoft.com/playwright/python:v1.65.1-noble
 WORKDIR /srv
-RUN pip install --no-cache-dir playwright==1.47.0 "fastapi>=0.115,<1" "uvicorn[standard]>=0.30,<1" "pydantic>=2,<3"
+RUN pip install --no-cache-dir playwright==1.65.1 "fastapi>=0.115,<1" "uvicorn[standard]>=0.30,<1" "pydantic>=2,<3"
 COPY server.py ./
 # Utilisateur non privilégié fourni par l'image Playwright.
 USER pwuser

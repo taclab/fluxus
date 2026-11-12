@@ -43,7 +43,9 @@ services:
       FLUXUS_BROWSER_URL: http://browser:3000
       NO_PROXY: browser,postgres,localhost,127.0.0.1
     ports:
-      - "${FLUXUS_HTTP_PORT:-8000}:8000"
+      # Écoute locale par défaut : seul le reverse proxy de l'hôte joint l'API. Sans proxy devant,
+      # X-Forwarded-For serait falsifiable. FLUXUS_HTTP_BIND=0.0.0.0 pour exposer le port tel quel.
+      - "${FLUXUS_HTTP_BIND:-127.0.0.1}:${FLUXUS_HTTP_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy

@@ -16,11 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
 from ..auth import Auth
-from ..auth.router import _client_key, login_limiter
-from ..auth.security import hash_device_token, verify_password
+from ..auth.router import password_matches
+from ..auth.security import hash_device_token
 from ..db import get_session, session_factory
 from ..models import Setting
-from ..settings_store import get_setting, set_setting
+from ..settings_store import set_setting
 from . import service
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
@@ -134,14 +134,8 @@ async def import_backup(request: Request, _: Auth, session: Session) -> ImportRe
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Sauvegarde trop volumineuse (1 Go au plus)")
     if confirm.strip().upper() != CONFIRM_WORD:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Confirmation manquante : saisissez « {CONFIRM_WORD} »")
-    key = _client_key(request)
-    if not login_limiter.check(key):
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Trop de tentatives, réessayez plus tard")
-    password_hash = await get_setting(session, "_password_hash", default="")
-    if not password_hash or not verify_password(password, password_hash):
-        login_limiter.record_failure(key)
+    if not await password_matches(request, session, password):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Mot de passe incorrect")
-    login_limiter.reset(key)
     try:
         header, counts = await service.import_replace(session, file.file)
         await session.commit()

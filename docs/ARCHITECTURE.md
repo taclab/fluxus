@@ -577,7 +577,7 @@ plateforme par `window.Capacitor.isNativePlatform()`. Le bouton retour matériel
 
 | Risque | Mesure | Où |
 |---|---|---|
-| SSRF via une URL de flux ou d'article | Résolution DNS puis refus des IP privées, loopback, link-local ; seuls http/https ; **revalidé à chaque redirection** ; le service navigateur intercepte chaque requête de la page (`page.route`), **suit lui-même les redirections** avec `route.fetch(max_redirects=0)` en revalidant chaque destination (Chromium suivrait sinon un 302 sans repasser par le filtre), refuse chaque sous-ressource vers un hôte privé ou interne, et vit sur un réseau Compose sans Postgres ; vérifié par `scripts/check-browser-redirect.py` | `fetcher/http.safe_get`, `browser/server.py`, `docker-compose.yml` |
+| SSRF via une URL de flux ou d'article | Résolution DNS puis refus des IP privées, loopback, link-local ; seuls http/https ; **revalidé à chaque redirection** ; refus aussi de 100.64.0.0/10 (`not is_global`) ; dans le service navigateur, Chromium ne sort que par une **passerelle de sortie** interne (proxy imposé au lancement, boucle locale comprise, QUIC et UDP WebRTC coupés) qui résout le nom, refuse toute adresse non publique et **se connecte à l'adresse qu'elle vient de valider** : popups, WebSocket, service workers et changement de résolution DNS y passent tous ; par-dessus, le filtre de requêtes du contexte (`context.route`) **suit lui-même les redirections** avec `route.fetch(max_redirects=0)` en revalidant chaque destination, ferme les popups et les WebSocket ; le service vit sur un réseau Compose sans Postgres ; vérifié par `scripts/check-browser-redirect.py` | `fetcher/http.safe_get`, `browser/server.py`, `docker-compose.yml` |
 | Traversée de chemin sur le repli SPA | Chemin résolu et vérifié sous le dossier statique | `main.py` |
 | Serveur au goutte-à-goutte, corps géant | Délai global 60 s, lecture en flux bornée (10 Mo / 5 Mo), upload OPML ≤ 5 Mo | `fetcher/http.safe_get`, `feeds/router.py` |
 | Secret d'exemple en production | Refus de démarrer (`validate_runtime_config`) | `config.py`, `main.py`, `worker.py` |
@@ -732,7 +732,7 @@ la capture d'échec, le code de sortie et la remise en état (`cleanup`). Lancem
 
 - **Pas de sync planifiée quand l'appli Android est fermée** : la synchronisation se fait à
   l'ouverture. Piste : Capacitor Background Runner.
-- **Le limiteur de connexion est en mémoire** : par processus, remis à zéro au redémarrage.
+- **Le limiteur de connexion est en mémoire** : par processus, remis à zéro au redémarrage. Chaque tentative est comptée avant la vérification du mot de passe (`acquire`) et décomptée si elle réussit (`release`) : des requêtes simultanées ne passent pas le plafond.
 - **Pas de rétention côté serveur ni de suppression propagée** : la table `entries` croît ; la sync
   ne supprime localement que les entrées dont le flux a disparu (`deleted_entry_ids` réservé, vide).
 - **DNS rebinding** : le contrôle anti-SSRF et la connexion httpx sont deux résolutions distinctes.

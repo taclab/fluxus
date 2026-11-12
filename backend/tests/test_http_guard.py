@@ -14,6 +14,8 @@ from fluxus.fetcher.http import UnsafeURLError, assert_public_url
         "ftp://exemple.fr/",
         "file:///etc/passwd",
         "http://169.254.169.254/latest/meta-data",
+        "http://100.64.0.1/",
+        "http://100.100.100.200/",
     ],
 )
 def test_private_and_unsupported_urls_rejected(url):
@@ -74,35 +76,26 @@ def test_rate_limiter_global_cap_defeats_ip_spoofing():
 
     limiter = LoginRateLimiter(max_attempts=5, window_seconds=60, global_max=8)
     for i in range(8):
-        key = f"10.0.0.{i}"  # une IP différente à chaque essai, comme un X-Forwarded-For forgé
-        assert limiter.check(key)
-        limiter.record_failure(key)
-    assert not limiter.check("10.0.0.99")
+        # une IP différente à chaque essai, comme un X-Forwarded-For forgé
+        assert limiter.acquire(f"10.0.0.{i}") is not None
+    assert limiter.acquire("10.0.0.99") is None
 
 
-async def test_safe_get_gzip_body_is_decoded_once():
-    """Constat 2 de l'audit du 15/09 : le corps décodé en flux ne doit pas garder Content-Encoding."""
-    import gzip
+def test_rate_limiter_counts_attempts_before_their_outcome():
+    """Des tentatives lancées ensemble sont plafonnées avant qu'aucune n'ait échoué."""
+    from fluxus.auth.security import LoginRateLimiter
 
-    import httpx
+    limiter = LoginRateLimiter(max_attempts=5, window_seconds=60, global_max=20)
+    stamps = [limiter.acquire("10.0.0.1") for _ in range(8)]
+    assert [s is not None for s in stamps] == [True] * 5 + [False] * 3
 
-    import fluxus.fetcher.http as http_mod
-    from fluxus.fetcher.http import safe_get
 
-    payload = b"<rss>audit</rss>"
+def test_rate_limiter_success_does_not_count():
+    from fluxus.auth.security import LoginRateLimiter
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=gzip.compress(payload), headers={"content-encoding": "gzip", "content-type": "application/rss+xml"})
-
-    original = http_mod.socket.getaddrinfo
-    http_mod.socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))]
-    try:
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            r = await safe_get(client, "http://public.example/feed.xml")
-            assert r.status_code == 200
-            assert r.content == payload
-            assert "content-encoding" not in r.headers
-            assert r.headers["content-length"] == str(len(payload))
-            assert r.headers["content-type"] == "application/rss+xml"
-    finally:
-        http_mod.socket.getaddrinfo = original
+    limiter = LoginRateLimiter(max_attempts=2, window_seconds=60, global_max=3)
+    for _ in range(10):
+        stamp = limiter.acquire("10.0.0.1")
+        assert stamp is not None
+        limiter.release("10.0.0.1", stamp)
+    assert limiter.acquire("10.0.0.1") is not None

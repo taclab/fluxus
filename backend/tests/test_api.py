@@ -56,6 +56,28 @@ async def test_auth_flow(client: AsyncClient):
     client.headers["Authorization"] = f"Bearer {token}"
 
 
+async def test_login_limiter_holds_under_concurrent_attempts(client: AsyncClient):
+    """Audit du 12/11, constat 11 : 30 mauvais mots de passe envoyés ensemble ne passent pas tous."""
+    import asyncio
+
+    from fluxus.auth.security import login_limiter
+
+    login_limiter._attempts.clear()
+    try:
+        responses = await asyncio.gather(
+            *(client.post("/api/auth/login", json={"password": f"mauvais-mot-de-passe-{i}"}) for i in range(30))
+        )
+        codes = sorted(r.status_code for r in responses)
+        assert codes == [401] * 5 + [429] * 25
+        # Le bon mot de passe reste refusé tant que la fenêtre court : le plafond tient pour tous.
+        r = await client.post("/api/auth/login", json={"password": "motdepasse"})
+        assert r.status_code == 429
+    finally:
+        login_limiter._attempts.clear()
+    r = await client.post("/api/auth/login", json={"password": "motdepasse"})
+    assert r.status_code == 200
+
+
 async def test_password_change_invalidates_sessions(client: AsyncClient):
     old = client.headers["Authorization"]
     r = await client.post("/api/auth/password", json={"current_password": "motdepasse", "new_password": "motdepasse2"})

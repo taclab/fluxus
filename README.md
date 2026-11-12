@@ -43,7 +43,8 @@ docker compose up -d --build
 ```
 
 Le premier build prend quelques minutes (front Node, dépendances Python, image Chromium).
-Ensuite l'application répond sur `http://<hôte>:8000` (port `FLUXUS_HTTP_PORT`).
+Ensuite l'application répond sur `http://127.0.0.1:8000` (port `FLUXUS_HTTP_PORT`), depuis l'hôte
+seulement : `FLUXUS_HTTP_BIND=0.0.0.0` dans `.env` l'ouvre au réseau sans reverse proxy.
 
 Raccordez ce port à votre reverse proxy en HTTPS. L'API ne gère pas TLS. Renseignez
 `FORWARDED_ALLOW_IPS` avec l'adresse du proxy pour que la limitation des tentatives de connexion
@@ -85,6 +86,7 @@ les 5 minutes ; le bouton ↻ force une synchronisation.
 | `DATABASE_URL` | Chaîne SQLAlchemy utilisée par l'API et le worker (hôte `postgres` = service Compose) | |
 | `FLUXUS_SECRET_KEY` | Signe les JWT et chiffre les clés LLM stockées. **32 caractères aléatoires minimum, ne jamais changer ensuite** (les clés stockées deviendraient illisibles). | |
 | `FLUXUS_HTTP_PORT` | Port publié sur l'hôte pour l'API et le front | `8000` |
+| `FLUXUS_HTTP_BIND` | Interface d'écoute de ce port ; `0.0.0.0` pour l'exposer sans reverse proxy | `127.0.0.1` |
 | `FLUXUS_PG_PORT` | Port hôte de Postgres, utile en développement | `5433` |
 | `FLUXUS_BROWSER_URL` | URL interne du service de rendu | `http://browser:3000` |
 | `FORWARDED_ALLOW_IPS` | IP(s) du reverse proxy autorisées à fournir `X-Forwarded-For` | `*` |

@@ -2,6 +2,7 @@ import hashlib
 import secrets
 import time
 from collections import defaultdict
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -79,16 +80,24 @@ class LoginRateLimiter:
         self._attempts[key] = attempts
         return attempts
 
-    def check(self, key: str) -> bool:
-        return len(self._recent(key)) < self.max_attempts and len(self._recent(self.GLOBAL_KEY)) < self.global_max
+    def acquire(self, key: str) -> float | None:
+        """Compte une tentative et renvoie son jeton, ou None si un plafond est atteint.
 
-    def record_failure(self, key: str) -> None:
-        now = time.monotonic()
-        self._attempts[key].append(now)
-        self._attempts[self.GLOBAL_KEY].append(now)
+        La tentative est comptée avant la vérification du mot de passe : des requêtes simultanées
+        ne peuvent pas toutes passer le contrôle avant que la première ait échoué.
+        """
+        if len(self._recent(key)) >= self.max_attempts or len(self._recent(self.GLOBAL_KEY)) >= self.global_max:
+            return None
+        stamp = time.monotonic()
+        self._attempts[key].append(stamp)
+        self._attempts[self.GLOBAL_KEY].append(stamp)
+        return stamp
 
-    def reset(self, key: str) -> None:
+    def release(self, key: str, stamp: float) -> None:
+        """Mot de passe correct : la tentative ne compte pas et l'adresse repart de zéro."""
         self._attempts.pop(key, None)
+        with suppress(ValueError):
+            self._attempts[self.GLOBAL_KEY].remove(stamp)
 
 
 login_limiter = LoginRateLimiter()
