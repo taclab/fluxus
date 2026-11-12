@@ -17,6 +17,7 @@ from e2e_common import (
     shot,
     wait_offline_ready,
     wait_synced,
+    wait_until,
 )
 
 results: dict = {}
@@ -208,9 +209,11 @@ def run(page, ctx, errors):
     mp.wait_for_timeout(500)
     offline_order = widget_ids(mp)
     mobile.set_offline(False)
-    mp.wait_for_timeout(3000)
-    server_after = json.loads(api(mp, "GET", "/api/settings").json()["values"]["dashboard_layout"])
-    results["offline_change_pushed"] = [w["id"] for w in server_after["widgets"]] == offline_order
+
+    def server_order() -> list[str]:
+        return [w["id"] for w in json.loads(api(mp, "GET", "/api/settings").json()["values"]["dashboard_layout"])["widgets"]]
+
+    results["offline_change_pushed"] = wait_until(lambda: server_order() == offline_order, "disposition hors ligne poussée", 30)
 
     mobile.close()
 

@@ -66,6 +66,18 @@ def wait_synced(page: Page, timeout_s: int = 300) -> None:
         page.wait_for_timeout(1000)
 
 
+def wait_until(check: Callable[[], bool], what: str, timeout_s: int = 60) -> bool:
+    """Attend qu'un état soit atteint au lieu d'un délai fixe ; renvoie faux à l'expiration (le parcours
+    enregistre alors un contrôle en échec plutôt que de s'interrompre)."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if check():
+            return True
+        time.sleep(0.25)
+    print(f"attente expirée : {what}")
+    return False
+
+
 def wait_offline_ready(page: Page) -> None:
     """Avant `set_offline(True)` puis rechargement : service worker actif (sans lui, la page ne se charge
     pas hors ligne) et base locale complète."""

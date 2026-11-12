@@ -636,7 +636,7 @@ web/
   src/api/                  client openapi-fetch + ApiError, auth (token, URL serveur),
                             sse (lecture d'un flux SSE en POST), schema.d.ts (généré)
   src/db/db.ts              schéma Dexie, LocalEntry, meta
-  src/sync/                 engine (pull/push, passes), merge (fusion d'une page, purge par rétention ;
+  src/sync/                 engine (pull/push, passes), epoch (époque du cache, annoncée dans chaque écriture), merge (fusion d'une page, purge par rétention ;
                             testé sur IndexedDB en mémoire), useSync
   src/test/                 setup et fixtures des tests Vitest (`*.test.ts` à côté des règles pures)
   src/features/

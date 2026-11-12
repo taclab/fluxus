@@ -12,7 +12,7 @@ fichier, resynchronisation de l'appareil (cache vidé par le changement d'époqu
 import gzip
 import json
 
-from e2e_common import BASE, PASSWORD, api, main, new_context, watch_errors
+from e2e_common import BASE, PASSWORD, api, main, new_context, wait_synced, wait_until, watch_errors
 
 results: dict = {}
 
@@ -21,7 +21,7 @@ def run(page, ctx, errors):
     before = api(page, "GET", "/api/sync?limit=1").json()
     feeds_before = len(api(page, "GET", "/api/feeds").json())
 
-    page.goto(BASE + "/settings", wait_until="networkidle")
+    page.goto(BASE + "/settings")
     page.wait_for_selector("[data-testid=backup-export]", timeout=30000)
     page.locator("[data-testid=backup-export]").scroll_into_view_if_needed()
     page.screenshot(path="/out/130-backup-section.png")
@@ -56,9 +56,9 @@ def run(page, ctx, errors):
     device_b = new_context(page.context.browser, storage_state=ctx.storage_state())
     pb = device_b.new_page()
     errors_b = watch_errors(pb)
-    pb.goto(BASE + "/all", wait_until="networkidle")
+    pb.goto(BASE + "/all")
+    wait_synced(pb)  # contexte neuf sur une copie de base réelle : des milliers d'articles à télécharger
     pb.wait_for_selector("[data-entry-id]", timeout=60000)
-    pb.wait_for_timeout(1500)
     target = int(pb.locator("[data-entry-id]").first.get_attribute("data-entry-id"))
     read_before = api(page, "GET", f"/api/entries/{target}").json()["read"]
     device_b.set_offline(True)
@@ -73,34 +73,33 @@ def run(page, ctx, errors):
     page.fill("[data-testid=backup-password]", PASSWORD)
     page.click("[data-testid=backup-confirm]")
     page.wait_for_selector("[data-testid=backup-counts]", state="detached", timeout=120000)
-    page.wait_for_timeout(3000)
     after = api(page, "GET", "/api/sync?limit=1").json()
     results["epoch_changed"] = after["epoch"] != before["epoch"]
     results["feeds_after"] = len(api(page, "GET", "/api/feeds").json()) == feeds_before
-    results["local_epoch"] = page.evaluate(
-        """() => new Promise((ok) => { const r = indexedDB.open('fluxus'); r.onsuccess = () => {
+    local_epoch_js = """() => new Promise((ok) => { const r = indexedDB.open('fluxus'); r.onsuccess = () => {
              const tx = r.result.transaction('meta'); const g = tx.objectStore('meta').get('sync.epoch');
              g.onsuccess = () => ok(g.result?.value ?? null) } })"""
-    ) == after["epoch"]
+    results["local_epoch"] = wait_until(lambda: page.evaluate(local_epoch_js) == after["epoch"], "époque locale alignée", 120)
 
     # Le second appareil revient en ligne : son changement en attente est abandonné, pas appliqué.
     device_b.set_offline(False)
     pb.evaluate("window.dispatchEvent(new Event('online'))")
-    pb.wait_for_timeout(6000)
-    results["device_b_change_not_applied"] = api(page, "GET", f"/api/entries/{target}").json()["read"] == read_before
-    results["device_b_outbox_cleared"] = pb.evaluate(
-        """() => new Promise((ok) => { const r = indexedDB.open('fluxus'); r.onsuccess = () => {
+    outbox_js = """() => new Promise((ok) => { const r = indexedDB.open('fluxus'); r.onsuccess = () => {
              const c = r.result.transaction('outbox').objectStore('outbox').count(); c.onsuccess = () => ok(c.result) } })"""
-    ) == 0
+    results["device_b_outbox_cleared"] = wait_until(lambda: pb.evaluate(outbox_js) == 0, "file hors ligne du second appareil vidée", 120)
+    results["device_b_change_not_applied"] = api(page, "GET", f"/api/entries/{target}").json()["read"] == read_before
     results["device_b_errors"] = errors_b[:3]
     device_b.close()
 
     # L'appareil a rechargé ses données : la liste s'affiche.
-    page.goto(BASE + "/all", wait_until="networkidle")
-    page.wait_for_selector("[data-entry-id]", timeout=60000)
+    page.goto(BASE + "/all")
+    page.wait_for_selector("[data-entry-id]", timeout=120000)
     results["list_repopulated"] = page.locator("[data-entry-id]").count() > 0
 
     results["js_errors"] = errors[:5]
+    failed = [k for k, v in results.items() if v is False]
+    assert not failed, f"contrôles en échec : {failed}"
+    assert not results["js_errors"] and not results["device_b_errors"], "erreurs JavaScript pendant le parcours"
 
 
 main(run, results, failure_shot="139-backup-failure", settle_ms=2000)

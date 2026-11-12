@@ -118,10 +118,10 @@ async def refresh(principal: Auth, session: Session) -> TokenResponse:
 
 
 @router.post("/password", response_model=TokenResponse)
-async def change_password(body: ChangePasswordBody, _: Auth, session: Session) -> TokenResponse:
+async def change_password(body: ChangePasswordBody, request: Request, _: Auth, session: Session) -> TokenResponse:
     """Change le mot de passe et invalide toutes les sessions web ; renvoie un nouveau JWT pour la session courante."""
-    password_hash = await get_setting(session, "_password_hash", default="")
-    if not password_hash or not verify_password(body.current_password, password_hash):
+    # Même limiteur que la connexion : une session volée ne doit pas servir à deviner le mot de passe.
+    if not await password_matches(request, session, body.current_password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Mot de passe actuel incorrect")
     await set_setting(session, "_password_hash", hash_password(body.new_password))
     version = datetime.now(UTC).isoformat()

@@ -1,6 +1,7 @@
 import createClient, { type Middleware } from 'openapi-fetch'
 
 import type { components, paths } from './schema'
+import { EPOCH_HEADER, knownEpoch, markEpochStale, STALE_EPOCH_CODE, STALE_EPOCH_EVENT } from '../sync/epoch'
 import { getServerUrl, getToken, setToken } from './auth'
 
 export type Schemas = components['schemas']
@@ -39,15 +40,34 @@ function extractMessage(detail: unknown): string | undefined {
   return undefined
 }
 
+async function isStaleEpoch(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.clone().json()) as { detail?: { code?: string } }
+    return body.detail?.code === STALE_EPOCH_CODE
+  } catch {
+    return false
+  }
+}
+
 const authMiddleware: Middleware = {
   async onRequest({ request }) {
     const token = getToken()
     if (token) request.headers.set('Authorization', `Bearer ${token}`)
+    // Toute écriture annonce l'époque du cache : après un import de sauvegarde, les identifiants que
+    // cet appareil connaît désignent d'autres contenus et le serveur refuse (409 `stale_epoch`).
+    if (request.method !== 'GET') {
+      const epoch = await knownEpoch().catch(() => null)
+      if (epoch) request.headers.set(EPOCH_HEADER, encodeURIComponent(epoch))
+    }
     return request
   },
   async onResponse({ response, request }) {
     if (response.status === 401 && !request.url.includes('/api/auth/')) {
       setToken(null)
+    }
+    if (response.status === 409 && (await isStaleEpoch(response))) {
+      await markEpochStale()
+      window.dispatchEvent(new Event(STALE_EPOCH_EVENT))
     }
     return response
   },

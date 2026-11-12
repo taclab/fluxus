@@ -19,7 +19,7 @@ from ..models import Entry, Feed, SmartFeedMatch, Summary
 from ..schemas import EntryListItem, EntryOut, EntryPage, EntryPatch, FetchContentIn, MarkReadIn
 from ..smartfeeds.service import smart_feed_ids_for
 
-router = APIRouter(prefix="/api/entries", tags=["entries"])
+router = APIRouter(prefix="/api/entries", tags=["entries"], dependencies=[Depends(maintenance.epoch_guard)])
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 PAGE_SIZE = 50
@@ -150,7 +150,7 @@ async def get_entry(entry_id: int, _: Auth, session: Session) -> EntryOut:
 
 @router.patch("/{entry_id}", response_model=EntryOut)
 async def patch_entry(entry_id: int, body: EntryPatch, _: Auth, session: Session) -> EntryOut:
-    entry = await session.get(Entry, entry_id)
+    entry = (await session.execute(select(Entry).where(Entry.id == entry_id).with_for_update())).scalar_one_or_none()
     if entry is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Article introuvable")
     now = datetime.now(UTC)

@@ -15,10 +15,11 @@ from ..auth import Auth
 from ..config import get_settings
 from ..db import get_session
 from ..fetcher.discover import discover_feeds
-from ..fetcher.http import UnsafeURLError
+from ..fetcher.http import UnsafeURLError, assert_public_url_async
 from ..fetcher.parse import normalize_url
 from ..fetcher.service import fetch_feed_preview
 from ..jobs import enqueue
+from ..maintenance import epoch_guard
 from ..models import Category, Entry, Feed, SmartFeed
 from ..schemas import (
     CategoryIn,
@@ -41,7 +42,7 @@ from ..schemas import (
 )
 from .opml import build_opml, parse_opml
 
-router = APIRouter(prefix="/api", tags=["feeds"])
+router = APIRouter(prefix="/api", tags=["feeds"], dependencies=[Depends(epoch_guard)])
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -222,7 +223,12 @@ async def create_feed(body: FeedCreate, _: Auth, session: Session) -> FeedOut:
         next_fetch_at=datetime.now(UTC),
     )
     session.add(feed)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # Deux créations simultanées du même flux : la contrainte d'unicité tranche.
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ce flux est déjà abonné") from exc
     await enqueue(session, "fetch_feed", {"feed_id": feed.id}, dedupe_key=f"fetch_feed:{feed.id}")
     await session.commit()
     await session.refresh(feed)
@@ -384,12 +390,21 @@ async def update_feed(feed_id: int, body: FeedUpdate, _: Auth, session: Session)
         other = await session.execute(select(Feed.id).where(Feed.url == body.url, Feed.id != feed.id))
         if other.scalar_one_or_none() is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "Un autre flux utilise déjà cette adresse")
+        try:
+            await assert_public_url_async(body.url)
+        except UnsafeURLError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
         feed.url = body.url
         feed.etag = None
         feed.last_modified = None
         feed.next_fetch_at = datetime.now(UTC)
     await _apply_feed_settings(session, feed, body)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # Course entre le contrôle et l'écriture : la contrainte d'unicité tranche.
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Un autre flux utilise déjà cette adresse") from exc
     await session.refresh(feed)
     return _feed_out(feed, await _unread_by_feed(session))
 
@@ -505,7 +520,7 @@ async def opml_import(file: UploadFile, _: Auth, session: Session) -> OpmlImport
             item.category = item.category[:200]
             cat = cats.get(item.category.lower())
             if cat is None:
-                cat = Category(title=item.category, position=len(cats) + 1)
+                cat = Category(title=item.category, position=await _root_end_position(session))
                 session.add(cat)
                 await session.flush()
                 cats[item.category.lower()] = cat

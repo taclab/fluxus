@@ -9,5 +9,5 @@ Object.assign(globalThis, {
     removeItem: (key: string) => void store.delete(key),
     clear: () => store.clear(),
   },
-  window: { location: { origin: 'http://localhost' } },
+  window: Object.assign(new EventTarget(), { location: { origin: 'http://localhost' } }),
 })

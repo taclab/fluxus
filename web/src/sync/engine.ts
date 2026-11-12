@@ -11,7 +11,10 @@ import { getToken } from '../api/auth'
 import { clearDatabase, db, getMeta, setMeta, type LocalEntry } from '../db/db'
 import { flushDashboardLayout } from '../features/dashboard/useDashboardLayout'
 import { flushViewModes, mergeViewModes, migrateLegacyDisplay } from '../features/entries/useViewMode'
+import { EPOCH_KEY, INITIAL_EPOCH, knownEpoch, markEpochStale, STALE_EPOCH_EVENT } from './epoch'
 import { applyRetention, mergeEntries } from './merge'
+
+export { knownEpoch }
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error'
 
@@ -25,17 +28,6 @@ export interface SyncState {
 }
 
 const DEFAULT_RETENTION_DAYS = 30
-const EPOCH_KEY = 'sync.epoch'
-/** Époque d'une instance jamais restaurée (valeur du serveur tant qu'aucun import n'a eu lieu). */
-const INITIAL_EPOCH = '0'
-/** Époque marquée périmée après un 409 : ne correspond à aucune époque serveur, donc toute écriture
- * envoyée d'ici la prochaine passe est refusée, et la passe vide le cache. */
-const STALE_EPOCH = 'périmée'
-
-/** Époque connue de ce cache, à joindre à toute écriture rejouable (file hors ligne). */
-export async function knownEpoch(): Promise<string | null> {
-  return (await getMeta(EPOCH_KEY)) ?? null
-}
 
 /**
  * Aligne l'époque locale sur celle du serveur. Si la base serveur a été remplacée (import d'une
@@ -142,7 +134,7 @@ export function pushOutbox(): Promise<void> {
             // Base serveur remplacée depuis la dernière synchronisation : ces identifiants désignent
             // d'autres articles. L'époque est marquée périmée (pas effacée : une écriture sans époque
             // passerait sur une instance jamais restaurée) ; la passe suivante vide le cache.
-            await setMeta(EPOCH_KEY, STALE_EPOCH)
+            await markEpochStale()
             window.setTimeout(() => void syncNow(), 0)
             return
           }
@@ -281,17 +273,21 @@ export function startAutoSync(intervalMs = 5 * 60 * 1000): () => void {
   void refreshPending()
   void syncNow()
   const onOnline = () => void syncNow()
+  // Écriture refusée pour époque périmée (client d'API) : la passe vide le cache et le reconstruit.
+  const onStaleEpoch = () => void syncNow()
   const onOffline = () => emit({ status: 'offline' })
   const onVisible = () => {
     if (document.visibilityState === 'visible') void syncNow()
   }
   window.addEventListener('online', onOnline)
   window.addEventListener('offline', onOffline)
+  window.addEventListener(STALE_EPOCH_EVENT, onStaleEpoch)
   document.addEventListener('visibilitychange', onVisible)
   timer = window.setInterval(() => void syncNow(), intervalMs)
   return () => {
     window.removeEventListener('online', onOnline)
     window.removeEventListener('offline', onOffline)
+    window.removeEventListener(STALE_EPOCH_EVENT, onStaleEpoch)
     document.removeEventListener('visibilitychange', onVisible)
     if (timer) window.clearInterval(timer)
   }

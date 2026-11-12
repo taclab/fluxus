@@ -223,7 +223,9 @@ async def push(body: SyncPush, _: Auth, session: Session) -> SyncPushResult:
     ids = [c.entry_id for c in body.changes]
     if not ids:
         return SyncPushResult(applied=0, ignored=0, server_time=datetime.now(UTC))
-    entries = {e.id: e for e in (await session.execute(select(Entry).where(Entry.id.in_(ids)))).scalars()}
+    # Verrou de ligne (dans l'ordre des identifiants : pas d'interblocage entre deux lots) : sans lui, un
+    # « marquer lu » concurrent validé entre cette lecture et notre écriture verrait son horloge reculer.
+    entries = {e.id: e for e in (await session.execute(select(Entry).where(Entry.id.in_(ids)).order_by(Entry.id).with_for_update())).scalars()}
     now = datetime.now(UTC)
     # Une horloge client en avance ne doit pas projeter les dates dans le futur : l'horloge du champ
     # serait alors postérieure à toute action normale et refuserait les changements suivants.

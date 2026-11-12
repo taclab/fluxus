@@ -11,9 +11,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from typing import Annotated
+from urllib.parse import unquote
 
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from .db import get_session
 
 # Distincte de celle de l'enregistrement du tableau de bord (727003).
 MAINTENANCE_LOCK_KEY = 727004
@@ -58,3 +63,30 @@ async def guard(session: AsyncSession) -> None:
         return
     if not (await session.execute(select(func.pg_try_advisory_xact_lock_shared(MAINTENANCE_LOCK_KEY)))).scalar_one():
         raise Busy(IMPORT_RUNNING)
+
+
+EPOCH_HEADER = "X-Fluxus-Epoch"
+STALE_EPOCH_CODE = "stale_epoch"
+
+
+async def epoch_guard(request: Request, session: Annotated[AsyncSession, Depends(get_session)]) -> None:
+    """Dépendance des routeurs qui écrivent par identifiant (articles, flux, dossiers, flux intelligents).
+
+    Toute écriture est refusée pendant un import (`Busy`, 503). Si le client annonce l'époque de son
+    cache (en-tête `X-Fluxus-Epoch`, envoyé par le front), une époque périmée est refusée en 409 avec le
+    code `stale_epoch` : depuis un import, ses identifiants désignent d'autres contenus. Sans en-tête
+    (scripts, anciens clients), seule la garde d'import s'applique.
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    await guard(session)
+    announced = request.headers.get(EPOCH_HEADER)
+    if announced is None:
+        return
+    from .backup.service import sync_epoch
+
+    if unquote(announced) != await sync_epoch(session):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {"code": STALE_EPOCH_CODE, "message": "La base du serveur a été remplacée : resynchronisation nécessaire"},
+        )

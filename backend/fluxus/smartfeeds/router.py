@@ -10,12 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import Auth
 from ..db import get_session
+from ..maintenance import epoch_guard
 from ..models import Entry, SmartFeed, SmartFeedMatch
 from ..schemas import SummarizeAllIn, SummarizeAllOut, ViewMode
 from . import service
 from .rules import InvalidDefinition, normalize_definition
 
-router = APIRouter(prefix="/api/smart-feeds", tags=["smart-feeds"])
+router = APIRouter(prefix="/api/smart-feeds", tags=["smart-feeds"], dependencies=[Depends(epoch_guard)])
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 
