@@ -31,7 +31,7 @@ export function UpdateBanner() {
 
   if (!needRefresh || dismissed || isCapacitor()) return null
   return (
-    <div role="status" className="fixed bottom-4 right-4 z-[60] flex items-center gap-3 rounded-lg border border-app bg-panel px-4 py-2.5 text-sm text-app shadow-lg" data-testid="update-banner">
+    <div role="status" className="fixed bottom-[calc(1rem+var(--sab))] right-[calc(1rem+var(--sar))] z-[60] flex items-center gap-3 rounded-lg border border-app bg-panel px-4 py-2.5 text-sm text-app shadow-lg" data-testid="update-banner">
       <span>Nouvelle version de Fluxus disponible.</span>
       <Button variant="primary" size="sm" onClick={() => void updateServiceWorker(true)}>
         <RefreshCw className="size-4" /> Recharger

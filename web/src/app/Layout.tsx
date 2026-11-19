@@ -152,7 +152,7 @@ export function Layout() {
       ) : (
         <>
           <div className={clsx('fixed inset-0 z-40 bg-black/40 transition-opacity', sidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0')} onClick={() => setSidebarOpen(false)} />
-          <div className={clsx('fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] border-r border-app shadow-xl transition-transform', sidebarOpen ? 'translate-x-0' : '-translate-x-full')}>
+          <div className={clsx('fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-app pt-[var(--sat)] pb-[var(--sab)] pl-[var(--sal)] border-r border-app shadow-xl transition-transform', sidebarOpen ? 'translate-x-0' : '-translate-x-full')}>
             <Sidebar view={view} onSelect={selectView} onEditFeed={setEditFeed} onEditCategory={(c) => setEditCategory({ open: true, category: c })} onEditSmartFeed={(sf) => openSmartEditor(sf)} />
           </div>
         </>

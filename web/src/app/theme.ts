@@ -1,3 +1,4 @@
+import { isCapacitor } from '../api/auth'
 import { createDevicePref, oneOf } from './devicePref'
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -15,6 +16,21 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle('dark', dark)
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) meta.setAttribute('content', dark ? '#0f172a' : '#ffffff')
+  void syncStatusBar(dark)
+}
+
+/**
+ * APK : la WebView passe sous la barre d'état (bord à bord) ; ses icônes doivent contraster avec le
+ * fond de l'application. `Style.Dark` = icônes claires pour fond sombre.
+ */
+async function syncStatusBar(dark: boolean): Promise<void> {
+  if (!isCapacitor()) return
+  try {
+    const { StatusBar, Style } = await import('@capacitor/status-bar')
+    await StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light })
+  } catch (err) {
+    console.warn('barre d’état', err)
+  }
 }
 
 export function watchSystemTheme(): () => void {

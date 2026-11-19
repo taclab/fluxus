@@ -69,7 +69,7 @@ export function ReaderModal({ entryId, index, total, onClose, onMove, children }
   )
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Lecture de l’article" data-testid="reader-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center safe-area" role="dialog" aria-modal="true" aria-label="Lecture de l’article" data-testid="reader-modal">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
       <div className="hidden md:block absolute left-4 top-1/2 -translate-y-1/2">{navButton(-1, hasPrev)}</div>
       <div className="hidden md:block absolute right-4 top-1/2 -translate-y-1/2">{navButton(1, hasNext)}</div>
