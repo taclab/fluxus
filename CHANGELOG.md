@@ -4,6 +4,13 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
+## Non publié
+
+### Corrections
+- Images des articles et icônes des flux qui disparaissaient dans le navigateur après la première
+  visite : le service worker recevait la CSP de la page (`connect-src 'self'`) et ne pouvait pas
+  télécharger les images d'autres sites qu'il met en cache. `sw.js` a désormais sa propre CSP.
+
 ## 1.0.2 — 12 novembre 2026
 
 ### Application Android

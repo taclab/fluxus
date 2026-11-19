@@ -169,3 +169,12 @@ async def test_password_change_is_rate_limited(client: AsyncClient):
         assert (await client.get("/api/feeds")).status_code == 200  # le mot de passe n'a pas changé
     finally:
         login_limiter._attempts.clear()
+
+
+async def test_service_worker_peut_telecharger_les_images_distantes(client):
+    """sw.js a sa propre CSP : Workbox y met en cache les images d'autres sites (connect-src)."""
+    sw = (await client.get("/sw.js")).headers["content-security-policy"]
+    assert "connect-src 'self' https: http:" in sw
+    assert "script-src 'self'" in sw
+    page = (await client.get("/")).headers["content-security-policy"]
+    assert "connect-src 'self';" in page  # la page garde son connect-src strict

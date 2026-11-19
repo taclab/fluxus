@@ -64,6 +64,12 @@ CSP = "; ".join(
     ]
 )
 
+# Le service worker obéit à sa propre CSP, celle des en-têtes de sw.js : ses fetch() relèvent de
+# connect-src. Workbox y met en cache les images distantes (runtimeCaching de vite.config.ts) ; avec
+# le connect-src 'self' de la page, chacune serait refusée et les images disparaîtraient dès que le
+# service worker contrôle la page. Il garde des scripts locaux uniquement.
+SW_CSP = "default-src 'self'; script-src 'self'; connect-src 'self' https: http:; object-src 'none'; base-uri 'self'"
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -72,7 +78,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        if not request.url.path.startswith("/api/"):
+        if request.url.path == "/sw.js":
+            response.headers.setdefault("Content-Security-Policy", SW_CSP)
+        elif not request.url.path.startswith("/api/"):
             response.headers.setdefault("Content-Security-Policy", CSP)
         return response
 
