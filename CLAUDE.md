@@ -2,7 +2,7 @@
 
 Lecteur RSS auto-hébergé mono-utilisateur : FastAPI + PostgreSQL + worker de jobs (backend/),
 front React offline-first (web/), micro-service Playwright (browser/), APK Capacitor.
-Lire `docs/ARCHITECTURE.md` avant toute modification structurelle ; `README.md` pour l'usage.
+Lire `docs/ARCHITECTURE.md` avant toute modification structurelle ; `README.md` et `docs/` (INSTALL, USER-GUIDE, MOBILE, DEVELOPMENT) pour l'usage.
 
 ## Commandes
 
@@ -17,6 +17,7 @@ npm run gen:api                                # après tout changement de route
 ## Règles du projet
 
 - Langue de l'interface, des messages d'erreur `detail` et des commentaires : français.
+- Messages de commit en anglais. Le README et les guides de `docs/` (hors ARCHITECTURE et audits) sont en anglais ; README court, le détail va dans `docs/`.
 - Confirmation : `useConfirm()` (`components/feedback.ts`, fournisseur dans `ui.tsx`), jamais `window.confirm` (le navigateur peut le bloquer en silence et renvoyer faux).
 - Toute modification d'une entrée visible par un client met `entry.updated_at = now` (pivot de la sync). Toute écriture de `read`/`starred` pose aussi `read_changed_at`/`starred_changed_at` (horloges par champ, seule base de la résolution des conflits de sync ; jamais `updated_at`).
 - Renderer (`browser/server.py`) : Chromium ne sort que par la passerelle (`_gateway_client`, proxy imposé au lancement), qui résout, valide et se connecte à l'adresse validée ; aucun chemin réseau à côté d'elle (pas d'option de lancement ni de contexte qui contourne le proxy). Jamais `route.continue_()` ; les redirections sont suivies à la main dans `route_handler` (posé sur le contexte, pas sur la page) avec revalidation de chaque saut. `scripts/check-browser-redirect.py` doit passer. Image Playwright et paquet `playwright` montés ensemble dans `browser/Dockerfile`. `safe_get` : le corps est déjà décodé, les en-têtes de transport sont réécrits. Les deux sorties hors `safe_get` (sous-titres YouTube, réponse du renderer) sont bornées en durée et en taille à leur point d'appel.

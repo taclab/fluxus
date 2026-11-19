@@ -70,7 +70,7 @@ services:
       api:
         condition: service_healthy
 
-  # Sauvegarde planifiée : une archive pg_dump par jour dans FLUXUS_BACKUP_DIR (voir README, « Exploitation »).
+  # Sauvegarde planifiée : une archive pg_dump par jour dans FLUXUS_BACKUP_DIR (voir docs/INSTALL.md, « Backups »).
   backup:
     image: ${FLUXUS_REGISTRY:-ghcr.io/taclab}/fluxus-backup:${FLUXUS_VERSION:-latest}
     restart: unless-stopped

@@ -68,7 +68,7 @@ jobs:
     permissions:
       contents: write   # création de la release
     env:
-      # Clé de signature, déposée une fois dans les secrets du dépôt (voir README, « Application Android »).
+      # Clé de signature, déposée une fois dans les secrets du dépôt (voir docs/MOBILE.md).
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       FLUXUS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       FLUXUS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}

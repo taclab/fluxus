@@ -7,7 +7,7 @@
 #
 # Signature (release) : FLUXUS_KEYSTORE_FILE=/chemin/cle.jks FLUXUS_KEYSTORE_PASSWORD=… FLUXUS_KEY_ALIAS=…
 # [FLUXUS_KEY_PASSWORD=…]. Android n'installe une mise à jour que si elle porte la même clé : la
-# garder en lieu sûr. La CI utilise la même clé (secrets du dépôt, voir README).
+# garder en lieu sûr. La CI utilise la même clé (secrets du dépôt, voir docs/MOBILE.md).
 #
 # Le build web (web/dist) doit être à jour : `cd web && npm run build && npx cap sync android`.
 set -euo pipefail

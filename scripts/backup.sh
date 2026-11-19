@@ -1,7 +1,7 @@
 #!/bin/sh
 # Sauvegarde planifiée de la base (service `backup` de docker-compose.yml, image postgres).
 # Une archive `fluxus-AAAAMMJJ-HHMMSS.sql.gz` par intervalle dans /backups, les plus anciennes sont
-# supprimées. Connexion par les variables PG* ; restauration : voir README, « Exploitation ».
+# supprimées. Connexion par les variables PG* ; restauration : voir docs/INSTALL.md, « Backups ».
 set -eu
 set -o pipefail
 

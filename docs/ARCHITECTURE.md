@@ -2,7 +2,7 @@
 
 Ce document explique comment le projet est construit : les composants, le modèle de données, les
 principaux flux de traitement, la carte du code et les conventions. Il complète le
-[README](../README.md), qui couvre l'installation et l'usage.
+[README](../README.md) et les guides de `docs/` (installation, usage, mobile, développement).
 
 ## Sommaire
 
