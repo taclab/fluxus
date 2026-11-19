@@ -400,6 +400,7 @@ export function SettingsPage() {
             <p className="text-sm text-muted">
               Serveur : <span className="font-mono text-xs">{getServerUrl() || window.location.origin}</span>
               {isDeviceToken(getToken()) && ' · token d’appareil'}
+              {` · Fluxus ${__APP_VERSION__}`}
             </p>
             <Button variant="danger" onClick={() => void logout()}>
               Se déconnecter et effacer les données locales
