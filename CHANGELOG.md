@@ -4,6 +4,14 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
+## 1.0.4 — 19 novembre 2026
+
+### Application Android
+- L'application ne passe plus sous la barre d'état ni sous la barre de navigation (affichage bord à
+  bord d'Android 15+, signalé sur Galaxy S25) : le contenu, les fenêtres, le tiroir de la barre
+  latérale et les messages respectent les zones sûres, aussi dans la PWA.
+- Les icônes de la barre d'état suivent le thème clair ou sombre.
+
 ## 1.0.3 — 19 novembre 2026
 
 ### Corrections
