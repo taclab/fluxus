@@ -11,6 +11,8 @@ source readers don't offer in one place:
 - **Offline-first** web app (installable PWA) and **Android app**, with read / starred sync.
 - Folders, drag-and-drop ordering, feed discovery from a site URL, OPML import / export, full-text search, keyboard shortcuts.
 
+![Dashboard](docs/screenshots/dashboard.jpg)
+
 The interface is in French. Four Docker containers, PostgreSQL as the only dependency, no external queue.
 
 ## Quick start
@@ -31,6 +33,8 @@ create your password. Then add feeds with **+** and set an LLM API key in *Param
 
 The Android APK is attached to each [GitHub release](../../releases).
 
+![Reader, dark theme](docs/screenshots/reader.jpg)
+
 ## Documentation
 
 | | |
@@ -40,8 +44,8 @@ The Android APK is attached to each [GitHub release](../../releases).
 | [Mobile](docs/MOBILE.md) | PWA, Android app, building and signing the APK |
 | [Development](docs/DEVELOPMENT.md) | local setup, tests, CI, releases |
 | [Architecture](docs/ARCHITECTURE.md) | code map and data flows |
-| [Changelog](CHANGELOG.md) | |
+| [Changelog](CHANGELOG.md) | release notes |
 
 ## License
 
-To be defined.
+[MIT](LICENSE)
