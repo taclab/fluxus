@@ -46,9 +46,16 @@ async def _youtube_feed(url: str, client: httpx.AsyncClient) -> list[DiscoveredF
     channel_id = m.group(1)
     if not channel_id:
         # Handle @nom ou /c/nom : il faut lire la page pour trouver l'identifiant du canal.
+        # Depuis l'UE, YouTube redirige vers consent.youtube.com sans ce cookie (refus des
+        # cookies non essentiels) : la page reçue ne contiendrait alors aucun identifiant.
+        client.cookies.set("SOCS", "CAI", domain=".youtube.com")
         response = await safe_get(client, url)
-        found = re.search(r'"channelId":"(UC[\w-]+)"', response.text) or re.search(
-            r'channel_id=(UC[\w-]+)', response.text
+        text = response.text
+        # L'URL canonique désigne la chaîne de la page ; `"channelId"` peut citer une autre chaîne.
+        found = (
+            re.search(r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[\w-]+)"', text)
+            or re.search(r"channel_id=(UC[\w-]+)", text)
+            or re.search(r'"channelId":"(UC[\w-]+)"', text)
         )
         if not found:
             return []
