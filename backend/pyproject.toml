@@ -1,6 +1,6 @@
 [project]
 name = "fluxus"
-version = "1.0.5"
+version = "1.0.6"
 description = "Lecteur RSS auto-hébergé avec résumés LLM"
 requires-python = ">=3.12"
 dependencies = [

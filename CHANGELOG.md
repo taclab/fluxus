@@ -4,7 +4,7 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
-## Non publié
+## 1.0.6 — 24 novembre 2026
 
 ### Nouveautés
 - Types de résumé, au menu du bouton ✨ du lecteur (choix avant toute génération ; le raccourci `r`
