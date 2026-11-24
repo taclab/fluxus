@@ -4,7 +4,7 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
-## Non publié
+## 1.0.5 — 24 novembre 2026
 
 ### Nouveautés
 - Interface en anglais en plus du français : langue du navigateur au premier lancement, choix dans
@@ -15,6 +15,9 @@ porte un tag git `vX.Y.Z`.
 ### Corrections
 - Abonnement à une chaîne YouTube par son adresse `@nom` refusé depuis l'Union européenne : la page
   de consentement aux cookies de YouTube masquait l'identifiant de la chaîne.
+
+### Projet
+- Captures d'écran du README en anglais et en thème sombre (`scripts/readme-screenshots.py`).
 
 ## 1.0.4 — 19 novembre 2026
 
