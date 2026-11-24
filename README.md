@@ -11,7 +11,7 @@ source readers don't offer in one place:
 - **Offline-first** web app (installable PWA) and **Android app**, with read / starred sync.
 - Folders, drag-and-drop ordering, feed discovery from a site URL, OPML import / export, full-text search, keyboard shortcuts.
 
-![Dashboard](docs/screenshots/dashboard.jpg)
+![Dashboard, dark theme](docs/screenshots/dashboard.jpg)
 
 The interface is available in French and English. Four Docker containers, PostgreSQL as the only dependency, no external queue.
 
@@ -29,7 +29,7 @@ docker compose -f docker-compose.deploy.yml up -d
 
 Images (`fluxus`, `fluxus-browser`, `fluxus-backup`) are published on `ghcr.io/taclab` for every
 release. The app listens on `http://127.0.0.1:8000`; point your reverse proxy at it, open it, and
-create your password. Then add feeds with **+** and set an LLM API key in *Paramètres → Résumés*.
+create your password. Then add feeds with **+** and set an LLM API key in *Settings → Summaries*.
 
 The Android APK is attached to each [GitHub release](../../releases).
 

@@ -51,8 +51,14 @@ docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/o
   fluxus-browser python /scripts/e2e-ui.py
 ```
 
-One script per area: `scripts/e2e-*.py` (ui, dashboard, smartfeeds, layout, sidebar, subscriptions, reading, pwa, backup).
+One script per area: `scripts/e2e-*.py` (ui, dashboard, smartfeeds, layout, sidebar, subscriptions, reading, pwa, backup, i18n).
 Set `E2E_BASE` to target another instance (for example a disposable copy on :8001).
+
+The README screenshots come from `scripts/readme-screenshots.py` (English, dark theme, 2880×1800).
+Run it against a disposable demo instance with English-language feeds, never on personal data:
+an empty database, folders Tech, Science, Design and Videos, a few feeds in each, and the worker
+stopped once they are fetched so the content stays still. Write to a temporary directory
+(`-v /tmp/shots:/out`), then copy `dashboard.jpg` and `reader.jpg` into `docs/screenshots/`.
 
 ## CI and releases
 
