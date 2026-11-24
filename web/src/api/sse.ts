@@ -8,10 +8,12 @@ export interface SseEvent {
   data: string
 }
 
-export async function* postSse(path: string, signal?: AbortSignal): AsyncGenerator<SseEvent> {
+/** `body` : envoyé en JSON s'il est fourni. */
+export async function* postSse(path: string, signal?: AbortSignal, body?: unknown): AsyncGenerator<SseEvent> {
   const response = await fetch(apiUrl(path), {
     method: 'POST',
-    headers: { ...authHeaders(), Accept: 'text/event-stream' },
+    headers: { ...authHeaders(), Accept: 'text/event-stream', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   })
   if (!response.ok || !response.body) {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -12,7 +12,7 @@ from .. import maintenance
 from ..auth import Auth
 from ..db import get_session
 from ..models import Summary
-from ..schemas import SummaryOut
+from ..schemas import SummarizeIn, SummaryOut
 from .service import summarize_entry
 
 router = APIRouter(prefix="/api/entries", tags=["summaries"])
@@ -20,15 +20,25 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 
 
 @router.post("/{entry_id}/summarize")
-async def summarize(entry_id: int, _: Auth, session: Session, force: bool = Query(False)):
-    """Flux SSE : événements `status`, `delta`, `done`, `error`."""
+async def summarize(
+    entry_id: int,
+    _: Auth,
+    session: Session,
+    force: bool = Query(False),
+    body: Annotated[SummarizeIn | None, Body()] = None,
+):
+    """Flux SSE : événements `status`, `delta`, `done`, `error`. Corps facultatif : type de résumé,
+    question libre, mode approfondi (sans corps : type par défaut des réglages)."""
+    options = body or SummarizeIn()
 
     async def event_stream():
         # Verrou de maintenance pendant toute la génération : un import ne peut pas remplacer l'article
         # entre sa lecture et l'enregistrement du résumé.
         try:
             async with maintenance.shared():
-                async for event in summarize_entry(session, entry_id, force=force):
+                async for event in summarize_entry(
+                    session, entry_id, force=force, style=options.style, question=options.question, deep=options.deep
+                ):
                     yield {"event": event.type, "data": json.dumps(event.data, ensure_ascii=False)}
         except maintenance.Busy as exc:
             yield {"event": "error", "data": json.dumps({"message": str(exc)}, ensure_ascii=False)}

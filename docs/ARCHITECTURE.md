@@ -201,8 +201,11 @@ POST /api/entries/{id}/fetch-content   (synchrone : l'utilisateur attend)
 
 ```
 POST /api/entries/{id}/summarize[?force=true]   → text/event-stream
+     corps facultatif {style?, question?, deep?} (`SummarizeIn`)
    summarize/service.summarize_entry (générateur d'événements)
-     1. résumé existant et !force → event done {summary, cached: true}   (aucun appel LLM)
+     0. type : question si `question`, sinon `style`, sinon le réglage `llm_default_style`
+     1. résumé existant du même type (et de la même question) et !force
+        → event done {summary, cached: true}   (aucun appel LLM)
      2. build_summarizer(settings)  → AnthropicSummarizer | OpenAISummarizer
         (clé absente → event error)
      3. _prepare_source
@@ -220,6 +223,15 @@ Le front lit le flux avec `fetch` + `ReadableStream` (`web/src/api/sse.ts`) car 
 ne sait pas faire de POST ; les fins de ligne `\r\n` de sse-starlette sont normalisées.
 Événements : `status`, `delta`, `done`, `error`. Les prompts (`summarize/prompts.py`) portent un
 `PROMPT_VERSION` stocké avec chaque résumé.
+
+Types de résumé : `prompts.STYLES` (consigne article, consigne vidéo, plafond de sortie), un seul
+endroit pour en ajouter un ; `summaries.style` et `summaries.question` les distinguent, plusieurs
+résumés par article coexistent (le plus récent par type et question fait foi, `summaryStyles.ts`
+côté front). Les consignes personnelles (`llm_instructions`) s'ajoutent au prompt système ; elles et
+la question sont tronquées à `MAX_INSTRUCTIONS_CHARS` / `MAX_QUESTION_CHARS`, que
+`estimate.PROMPT_OVERHEAD_TOKENS` couvre dans l'écriture la plus coûteuse (test à l'appui). Le mode
+approfondi (`deep`) remplace le modèle par `llm_deep_model` (vide : le modèle courant) et l'effort
+par `high`. Les résumés automatiques prennent le type par défaut, jamais le mode approfondi.
 
 Côté Anthropic : `client.messages.stream` avec `thinking={"type": "adaptive"}` et
 `output_config={"effort": …}` (sauf Haiku) ; `stop_reason == "refusal"` devient une erreur lisible.
@@ -577,7 +589,7 @@ attributs `data-reading-font|size|width` sur `<html>` par le script inline d'`in
 `index.css` (variables : Inter, Source Serif 4, Literata, Lora, Montserrat, JetBrains Mono ;
 statique : Atkinson Hyperlegible). Chaque fichier woff2 est découpé par alphabet avec
 `unicode-range` ; le service worker ne pré-cache que le latin et met les autres en cache à l'usage.
-`components/TypographyPicker.tsx` est partagé entre la page Paramètres et le popover Aa du lecteur.
+Réglage dans *Paramètres → Lecture* (`components/TypographyPicker.tsx`).
 
 ### Mobile (Capacitor)
 

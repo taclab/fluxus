@@ -21,6 +21,12 @@ DEFAULTS: dict[str, str] = {
     "llm_api_key_anthropic": "",
     "llm_api_key_openai": "",
     "openai_base_url": "",
+    # Type de résumé par défaut (`summarize/prompts.STYLES`), aussi celui des résumés automatiques.
+    "llm_default_style": "standard",
+    # Consignes personnelles ajoutées à chaque résumé (1000 caractères au plus).
+    "llm_instructions": "",
+    # Modèle du mode « approfondi » (même fournisseur) ; vide = modèle courant à l'effort maximal.
+    "llm_deep_model": "",
     # Horizon (jours) des articles conservés sur les appareils et envoyés à la première synchronisation.
     "sync_prefetch_days": "30",
     # Résumés automatiques des flux intelligents : modèle dédié (économique) et budget de tokens par jour UTC (0 = désactivé).

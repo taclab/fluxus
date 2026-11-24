@@ -268,6 +268,79 @@ async def test_summarize_sse_with_mocked_provider(client: AsyncClient, monkeypat
     assert "event: delta" not in r.text
 
 
+async def test_summary_styles_questions_and_deep_mode(client: AsyncClient, monkeypatch):
+    """Un résumé par type (et par question), mis en cache séparément ; consigne du type, consignes
+    personnelles et mode approfondi transmis au fournisseur."""
+    from fluxus.summarize import prompts, service
+    from fluxus.summarize.providers import StreamResult, Summarizer, Usage
+
+    calls: list[dict] = []
+
+    class FakeSummarizer(Summarizer):
+        name = "fake"
+
+        def __init__(self, settings):
+            self.model = settings.get("llm_model") or "fake-1"
+            self.effort = settings.get("llm_effort") or "low"
+
+        def stream(self, system, user, max_tokens=4000):
+            calls.append({"system": system, "user": user, "max_tokens": max_tokens, "model": self.model, "effort": self.effort})
+            usage = Usage()
+
+            async def gen():
+                yield f"réponse {len(calls)}"
+                usage.input_tokens, usage.output_tokens = 100, 10
+
+            return StreamResult(gen(), usage)
+
+    monkeypatch.setattr(service, "build_summarizer", FakeSummarizer)
+    monkeypatch.setattr(service, "MIN_SOURCE_CHARS", 5)
+    entry_id = (await client.get("/api/entries")).json()["items"][0]["id"]
+    r = await client.patch("/api/settings", json={"values": {"llm_model": "base-1", "llm_deep_model": "", "llm_instructions": "Je suis développeur."}})
+    assert r.status_code == 200
+
+    async def summarize(body: dict | None = None, force: bool = False) -> str:
+        r = await client.post(f"/api/entries/{entry_id}/summarize", params={"force": "true"} if force else None, json=body)
+        assert r.status_code == 200, r.text
+        return r.text
+
+    await summarize({"style": "oneline"})
+    assert prompts.STYLES["oneline"].article.split(":")[0] in calls[-1]["user"]
+    assert "Je suis développeur." in calls[-1]["system"]
+    await summarize({"style": "detailed"})
+    assert calls[-1]["max_tokens"] == prompts.STYLES["detailed"].max_output_tokens
+    # Chaque type a son cache.
+    assert '"cached": true' in await summarize({"style": "oneline"})
+    assert len(calls) == 2
+
+    # Question libre : cache par question exacte ; type « question » sans question refusé.
+    text = await summarize({"question": "  Qui parle de chatons ?  "})
+    assert "Question du lecteur : Qui parle de chatons ?" in calls[-1]["user"]
+    assert '"style": "question"' in text
+    assert '"cached": true' in await summarize({"question": "Qui parle de chatons ?"})
+    await summarize({"question": "Et des chiens ?"})
+    assert len(calls) == 4
+    assert "Question vide" in await summarize({"style": "question"})
+    assert len(calls) == 4
+
+    # Mode approfondi : modèle dédié s'il est réglé, sinon le modèle courant, toujours à l'effort maximal.
+    await summarize({"style": "oneline", "deep": True}, force=True)
+    assert (calls[-1]["model"], calls[-1]["effort"]) == ("base-1", "high")
+    await client.patch("/api/settings", json={"values": {"llm_deep_model": "deep-9"}})
+    await summarize({"style": "bullets", "deep": True})
+    assert (calls[-1]["model"], calls[-1]["effort"]) == ("deep-9", "high")
+
+    # Sans corps : type par défaut des réglages ; un type inconnu retombe sur « standard ».
+    await client.patch("/api/settings", json={"values": {"llm_default_style": "simple"}})
+    assert '"style": "simple"' in await summarize()
+    assert '"style": "standard"' in await summarize({"style": "inconnu"})
+
+    stored = (await client.get("/api/sync", params={"since": "2000-01-01T00:00:00+00:00", "limit": 500})).json()["summaries"]
+    styles = sorted(s["style"] for s in stored if s["entry_id"] == entry_id)
+    assert styles == sorted(["oneline", "oneline", "detailed", "question", "question", "bullets", "simple", "standard"])
+    await client.patch("/api/settings", json={"values": {"llm_default_style": "standard", "llm_instructions": "", "llm_deep_model": ""}})
+
+
 async def test_sync_pagination_with_identical_timestamps(client: AsyncClient):
     """Des centaines d'entrées créées dans la même seconde ne doivent pas bloquer le curseur."""
     from fluxus.db import session_scope

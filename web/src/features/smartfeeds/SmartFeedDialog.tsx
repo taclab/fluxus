@@ -15,8 +15,6 @@ interface Props {
   open: boolean
   /** Flux intelligent à modifier ; null pour une création. */
   smartFeed: SmartFeed | null
-  /** Portée préremplie à la création (« créer depuis cet article »). */
-  preset?: { scope_kind: 'feed' | 'category'; scope_id: number } | null
   onClose: () => void
   onSaved?: (sf: SmartFeed) => void
 }
@@ -39,12 +37,12 @@ interface Draft {
   summary_daily_cap: number
 }
 
-function blank(preset?: Props['preset']): Draft {
+function blank(): Draft {
   return {
     name: '',
     position: null,
-    scope_kind: preset?.scope_kind ?? 'all',
-    scope_id: preset?.scope_id ?? null,
+    scope_kind: 'all',
+    scope_id: null,
     mode: 'keywords',
     keywords_any: [],
     keywords_all: [],
@@ -86,8 +84,8 @@ function definitionOf(d: Draft): SmartFeedDefinitionIn {
   }
 }
 
-export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: Props) {
-  const [draft, setDraft] = useState<Draft>(() => (smartFeed ? fromSmartFeed(smartFeed) : blank(preset)))
+export function SmartFeedDialog({ open, smartFeed, onClose, onSaved }: Props) {
+  const [draft, setDraft] = useState<Draft>(() => (smartFeed ? fromSmartFeed(smartFeed) : blank()))
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [preview, setPreview] = useState<{ state: 'idle' | 'loading' | 'ok' | 'error' | 'offline'; count?: number; samples?: { id: number; title: string; feed_id: number; published_at: string }[]; message?: string }>({ state: 'idle' })
@@ -101,11 +99,11 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
 
   useEffect(() => {
     if (open) {
-      setDraft(smartFeed ? fromSmartFeed(smartFeed) : blank(preset))
+      setDraft(smartFeed ? fromSmartFeed(smartFeed) : blank())
       setConfirmDelete(false)
       setPreview({ state: 'idle' })
     }
-  }, [open, smartFeed, preset])
+  }, [open, smartFeed])
 
   // Aperçu en direct, debounce 500 ms, sur le serveur.
   const definitionKey = JSON.stringify(definitionOf(draft))

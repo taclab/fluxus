@@ -8,10 +8,11 @@ import type { Theme } from '../../app/theme'
 import { useTheme } from '../../app/useTheme'
 import { TypographyPicker } from '../../components/TypographyPicker'
 import { useConfirm, useToast } from '../../components/feedback'
-import { Button, Field, IconButton, Input, Select, Spinner } from '../../components/ui'
+import { Button, Field, IconButton, Input, Select, Spinner, Textarea } from '../../components/ui'
 import { clearDatabase, db } from '../../db/db'
 import { resetDashboardLayout } from '../dashboard/useDashboardLayout'
 import { BackupSection } from './BackupSection'
+import { SUMMARY_STYLES } from '../summary/summaryStyles'
 import { setViewMode, useDefaultViewMode } from '../entries/useViewMode'
 import { LAYOUT_GROUPS, VIEW_MODE_SPECS, modesFor, type ListLayout } from '../entries/viewMode'
 import { saveBlob } from '../../lib/download'
@@ -62,6 +63,12 @@ export function SettingsPage() {
   useEffect(() => {
     void load()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Lien « Personnaliser » du menu des résumés (`/settings#summaries`) : la section n'existe qu'une
+  // fois les réglages chargés.
+  useEffect(() => {
+    if (settings && window.location.hash === '#summaries') document.getElementById('summaries')?.scrollIntoView({ block: 'start' })
+  }, [settings])
 
   function set(key: string, value: string) {
     setValues((v) => {
@@ -188,7 +195,7 @@ export function SettingsPage() {
         </div>
       ) : (
         <div className="mx-auto max-w-2xl px-4 py-6 space-y-8">
-          <Section title={ts.summaries.title} description={ts.summaries.description}>
+          <Section id="summaries" title={ts.summaries.title} description={ts.summaries.description}>
             <Field label={ts.summaries.provider}>
               <Select value={provider} onChange={(e) => set('llm_provider', e.target.value)}>
                 <option value="anthropic">Anthropic (Claude)</option>
@@ -242,6 +249,28 @@ export function SettingsPage() {
                   </option>
                 ))}
               </Select>
+            </Field>
+            <Field label={ts.summaries.defaultStyle} hint={ts.summaries.defaultStyleHint}>
+              <Select value={values.llm_default_style ?? 'standard'} onChange={(e) => set('llm_default_style', e.target.value)} data-testid="default-summary-style">
+                {SUMMARY_STYLES.map((s) => (
+                  <option key={s} value={s}>
+                    {t.reader.summary.styles[s].label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label={ts.summaries.instructions} hint={ts.summaries.instructionsHint}>
+              <Textarea
+                rows={3}
+                maxLength={1000}
+                value={values.llm_instructions ?? ''}
+                onChange={(e) => set('llm_instructions', e.target.value)}
+                placeholder={ts.summaries.instructionsPlaceholder}
+                data-testid="summary-instructions"
+              />
+            </Field>
+            <Field label={ts.summaries.deepModel} hint={ts.summaries.deepModelHint}>
+              <Input value={values.llm_deep_model ?? ''} onChange={(e) => set('llm_deep_model', e.target.value)} placeholder={values.llm_model || undefined} autoComplete="off" />
             </Field>
             {stats && (
               <p className="text-xs text-muted">
@@ -496,9 +525,9 @@ function LayoutSketch({ layout }: { layout: ListLayout }) {
   )
 }
 
-function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+function Section({ id, title, description, children }: { id?: string; title: string; description?: string; children: ReactNode }) {
   return (
-    <section className="space-y-4 rounded-2xl border border-app bg-panel p-5">
+    <section id={id} className="scroll-mt-4 space-y-4 rounded-2xl border border-app bg-panel p-5">
       <div>
         <h2 className="font-semibold text-app">{title}</h2>
         {description && <p className="text-sm text-muted mt-0.5">{description}</p>}

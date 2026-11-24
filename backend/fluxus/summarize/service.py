@@ -140,8 +140,16 @@ async def summarize_entry(
     usage: LlmUsage | None = None,
     max_output_tokens: int | None = None,
     source: tuple[str, str] | None = None,
+    style: str | None = None,
+    question: str | None = None,
+    deep: bool = False,
 ) -> AsyncIterator[SummaryEvent]:
     """Générateur d'événements : status → delta* → done, ou error.
+
+    `style` : type de résumé (`prompts.STYLES`), sinon le type par défaut des réglages ; `question`
+    (type « question ») : question libre du lecteur ; `deep` : modèle approfondi (réglage
+    `llm_deep_model`, sinon le modèle courant) à l'effort maximal. Un résumé existant du même type
+    (et de la même question) est renvoyé tel quel sauf `force`.
 
     `origin="auto"` et `smart_feed_id` marquent un résumé déclenché par un flux intelligent ;
     `model_override` remplace le modèle des réglages (modèle économique des résumés automatiques) ;
@@ -157,7 +165,8 @@ async def summarize_entry(
             return
         run = _Run(usage=usage)
         try:
-            async for event in _generate(run, session, entry_id, force, origin, smart_feed_id, model_override, max_output_tokens, source):
+            options = _Options(style=style, question=question, deep=deep)
+            async for event in _generate(run, session, entry_id, force, origin, smart_feed_id, model_override, max_output_tokens, source, options):
                 yield event
         finally:
             # Génération interrompue sans être soldée (client SSE parti, job annulé à son délai) : la
@@ -165,6 +174,15 @@ async def summarize_entry(
             # de l'annulation en cours. L'appel a pu être facturé : on compte ce qu'on en sait.
             if not run.settled and run.usage is not None and run.usage.id is not None:
                 await asyncio.shield(_abandon(run.usage.id, run.known_tokens()))
+
+
+@dataclass
+class _Options:
+    """Demande du lecteur : type, question libre, mode approfondi."""
+
+    style: str | None = None
+    question: str | None = None
+    deep: bool = False
 
 
 @dataclass
@@ -186,8 +204,8 @@ async def _generate(
     model_override: str | None,
     max_output_tokens: int | None,
     source: tuple[str, str] | None,
+    options: _Options,
 ) -> AsyncIterator[SummaryEvent]:
-    out_cap = max(1, min(4000, max_output_tokens)) if max_output_tokens is not None else 4000
     usage = run.usage
 
     async def settle(status: str, tokens: int) -> None:
@@ -205,21 +223,34 @@ async def _generate(
         yield SummaryEvent("error", {"message": "Article introuvable"})
         return
 
+    settings = await get_all_settings(session)
+    question = (options.question or "").strip()[: prompts.MAX_QUESTION_CHARS] or None
+    default_style = settings.get("llm_default_style")
+    if default_style == "question":  # sans question, ce n'est pas un type par défaut possible
+        default_style = None
+    style = "question" if question else prompts.style_or_default(options.style or default_style)
+    if style == "question" and question is None:
+        await settle("failed", 0)
+        yield SummaryEvent("error", {"message": "Question vide"})
+        return
+    style_cap = prompts.STYLES[style].max_output_tokens
+    out_cap = max(1, min(style_cap, max_output_tokens)) if max_output_tokens is not None else style_cap
+
     if not force:
-        existing = (
-            await session.execute(
-                select(Summary).where(Summary.entry_id == entry_id).order_by(Summary.created_at.desc()).limit(1)
-            )
-        ).scalar_one_or_none()
+        same = select(Summary).where(Summary.entry_id == entry_id, Summary.style == style)
+        if question is not None:
+            same = same.where(Summary.question == question)
+        existing = (await session.execute(same.order_by(Summary.created_at.desc()).limit(1))).scalar_one_or_none()
         if existing is not None:
             if usage is not None:
                 await settle("done", 0)  # réservation libérée : rien n'a été appelé
             yield SummaryEvent("done", {"summary": _summary_dict(existing), "cached": True})
             return
 
-    settings = await get_all_settings(session)
     if model_override:
         settings = {**settings, "llm_model": model_override}
+    if options.deep:
+        settings = {**settings, "llm_model": (settings.get("llm_deep_model") or "").strip() or settings.get("llm_model", ""), "llm_effort": "high"}
     try:
         summarizer = build_summarizer(settings)
     except SummarizerError as exc:
@@ -250,7 +281,7 @@ async def _generate(
         return
 
     language = settings.get("llm_language", "fr")
-    system = prompts.system_prompt(language)
+    system = prompts.system_prompt(language, settings.get("llm_instructions", ""))
     total_usage = Usage()
     full_text: list[str] = []
     stream = None
@@ -277,11 +308,11 @@ async def _generate(
                 total_usage.output_tokens += stream.usage.output_tokens
                 stream = None
             yield SummaryEvent("status", {"message": "Fusion des résumés…"})
-            user_prompt = prompts.merge_prompt(entry.title, entry.url, kind, partials)
+            user_prompt = prompts.merge_prompt(entry.title, entry.url, kind, partials, style, question)
         elif kind == "video":
-            user_prompt = prompts.video_prompt(entry.title, entry.url, text)
+            user_prompt = prompts.video_prompt(entry.title, entry.url, text, style, question)
         else:
-            user_prompt = prompts.article_prompt(entry.title, entry.url, text)
+            user_prompt = prompts.article_prompt(entry.title, entry.url, text, style, question)
 
         yield SummaryEvent("status", {"message": "Rédaction du résumé…"})
         stream = summarizer.stream(system, user_prompt, max_tokens=out_cap)
@@ -308,6 +339,8 @@ async def _generate(
         provider=summarizer.name,
         model=summarizer.model[:100],
         prompt_version=prompts.PROMPT_VERSION,
+        style=style,
+        question=question,
         text_md="".join(full_text).strip(),
         input_tokens=total_usage.input_tokens,
         output_tokens=total_usage.output_tokens,
@@ -336,6 +369,8 @@ def _summary_dict(s: Summary) -> dict:
         "id": s.id,
         "entry_id": s.entry_id,
         "kind": s.kind,
+        "style": s.style,
+        "question": s.question,
         "provider": s.provider,
         "model": s.model,
         "text_md": s.text_md,

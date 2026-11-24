@@ -3,13 +3,13 @@ import { READING_FONTS, READING_SIZES, READING_WIDTHS, type ReadingPrefs } from 
 import { useReadingPrefs } from '../app/useReadingPrefs'
 import { useT } from '../i18n'
 
-/** Choix de la combinaison de polices, de la taille et de la largeur de colonne. `compact` pour le popover du lecteur. */
-export function TypographyPicker({ compact }: { compact?: boolean }) {
+/** Choix de la combinaison de polices, de la taille et de la largeur de colonne (Paramètres → Lecture). */
+export function TypographyPicker() {
   const t = useT().app.typography
   const [prefs, update] = useReadingPrefs()
   return (
-    <div className={clsx('space-y-4', compact && 'space-y-3')}>
-      <div className={clsx('grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3')} role="radiogroup" aria-label={t.fontsLabel}>
+    <div className="space-y-4">
+      <div className="grid gap-2 grid-cols-2 sm:grid-cols-3" role="radiogroup" aria-label={t.fontsLabel}>
         {READING_FONTS.map((f) => {
           const active = prefs.font === f.id
           return (
@@ -26,28 +26,26 @@ export function TypographyPicker({ compact }: { compact?: boolean }) {
               )}
             >
               <span className="flex items-baseline gap-2">
-                <span className={clsx('text-2xl font-bold leading-none text-app', compact && 'text-xl')} style={{ fontFamily: f.headingCss }}>
+                <span className="text-2xl font-bold leading-none text-app" style={{ fontFamily: f.headingCss }}>
                   A
                 </span>
-                <span className={clsx('text-2xl leading-none text-app', compact && 'text-xl')} style={{ fontFamily: f.bodyCss }}>
+                <span className="text-2xl leading-none text-app" style={{ fontFamily: f.bodyCss }}>
                   a
                 </span>
                 <span className="ml-auto text-sm font-medium text-app">{t.fonts[f.id].label}</span>
               </span>
-              {!compact && <span className="mt-1.5 text-xs text-muted leading-snug">{t.fonts[f.id].description}</span>}
-              {!compact && (
-                <span className="mt-1 text-[11px] text-muted">
-                  {f.body}
-                  {f.heading !== f.body && t.headings(f.heading)}
-                </span>
-              )}
+              <span className="mt-1.5 text-xs text-muted leading-snug">{t.fonts[f.id].description}</span>
+              <span className="mt-1 text-[11px] text-muted">
+                {f.body}
+                {f.heading !== f.body && t.headings(f.heading)}
+              </span>
             </button>
           )
         })}
       </div>
 
-      <div className={clsx('grid gap-3', compact ? 'grid-cols-1' : 'sm:grid-cols-2')}>
-        <Segmented label={t.sizeLabel} value={prefs.size} options={READING_SIZES.map((s) => ({ id: s.id, label: compact ? `${s.px}` : t.sizes[s.id] }))} onChange={(size) => update({ size: size as ReadingPrefs['size'] })} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Segmented label={t.sizeLabel} value={prefs.size} options={READING_SIZES.map((s) => ({ id: s.id, label: t.sizes[s.id] }))} onChange={(size) => update({ size: size as ReadingPrefs['size'] })} />
         <Segmented label={t.widthLabel} value={prefs.width} options={READING_WIDTHS.map((w) => ({ id: w.id, label: t.widths[w.id] }))} onChange={(width) => update({ width: width as ReadingPrefs['width'] })} />
       </div>
     </div>

@@ -187,6 +187,9 @@ class Summary(Base):
     provider: Mapped[str] = mapped_column(String(50), default="anthropic")
     model: Mapped[str] = mapped_column(String(100))
     prompt_version: Mapped[str] = mapped_column(String(20), default="v1")
+    # Type de résumé (`summarize/prompts.STYLES`) ; `question` porte la question libre du type « question ».
+    style: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
+    question: Mapped[str | None] = mapped_column(Text, nullable=True)
     text_md: Mapped[str] = mapped_column(Text)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)

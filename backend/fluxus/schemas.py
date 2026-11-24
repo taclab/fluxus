@@ -205,10 +205,19 @@ class FetchContentIn(BaseModel):
     mode: Literal["http", "browser", "auto"] = "auto"
 
 
+class SummarizeIn(BaseModel):
+    # Type de résumé (`summarize/prompts.STYLES`) ; inconnu ou absent : type par défaut des réglages.
+    style: str | None = Field(default=None, max_length=20)
+    question: str | None = Field(default=None, max_length=500)
+    deep: bool = False
+
+
 class SummaryOut(BaseModel):
     id: int
     entry_id: int
     kind: str
+    style: str
+    question: str | None
     provider: str
     model: str
     text_md: str

@@ -4,6 +4,22 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
+## Non publié
+
+### Nouveautés
+- Types de résumé, au menu du bouton ✨ du lecteur (choix avant toute génération ; le raccourci `r`
+  produit directement le type par défaut) et du titre du résumé : standard, en une phrase, liste de points, détaillé
+  (partie par partie, pour les longs contenus), faits et opinions, version simplifiée. Chaque type
+  est conservé à part ; un type déjà généré s'affiche sans nouvel appel.
+- Question libre sur un article ou une vidéo, depuis le même menu.
+- Option « Approfondi » : modèle plus puissant (réglage dédié, sinon le modèle habituel) à l'effort
+  maximal.
+- Interface allégée : plus de bouton « Créer un flux intelligent » dans le lecteur (« + nouveau »
+  de la barre latérale reste), ni de bascule de thème en bas de la barre latérale (*Paramètres →
+  Apparence*), ni de bouton de typographie dans le lecteur (*Paramètres → Lecture*).
+- *Paramètres → Résumés* : type par défaut (aussi celui des résumés automatiques), consignes
+  personnelles ajoutées à chaque résumé, modèle approfondi.
+
 ## 1.0.5 — 24 novembre 2026
 
 ### Nouveautés

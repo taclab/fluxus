@@ -11,8 +11,10 @@ CHUNK_THRESHOLD = 250_000
 CHUNK_SIZE = 120_000
 # Plafond de sortie d'un résumé partiel (mode découpé).
 CHUNK_OUTPUT_TOKENS = 2000
-# Consignes et enrobage d'un appel.
-PROMPT_OVERHEAD_TOKENS = 300
+# Consignes et enrobage d'un appel : règles, consigne du type de résumé, consignes personnelles et
+# question du lecteur à leur longueur maximale (`prompts.MAX_INSTRUCTIONS_CHARS`, `MAX_QUESTION_CHARS`),
+# dans l'écriture la plus coûteuse (idéogrammes : 1,5 token par caractère). Vérifié par les tests.
+PROMPT_OVERHEAD_TOKENS = 3000
 
 
 def chunks(text: str, size: int = CHUNK_SIZE) -> list[str]:

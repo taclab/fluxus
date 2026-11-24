@@ -6,7 +6,6 @@ import { Link } from 'react-router-dom'
 
 import type { Category, Feed, SmartFeed } from '../../api/client'
 import { createDevicePref, idList } from '../../app/devicePref'
-import { ThemeToggle } from '../../components/ThemeToggle'
 import { IconButton } from '../../components/ui'
 import { db } from '../../db/db'
 import { syncNow } from '../../sync/engine'
@@ -98,7 +97,6 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
         <Link to="/abonnements" title={t.subscriptionsTitle} aria-label={t.subscriptions} className="flex items-center rounded-lg p-1.5 text-muted hover:text-app hover:bg-muted" data-testid="sidebar-subscriptions">
           <ListChecks className="size-4" />
         </Link>
-        <ThemeToggle />
         <div className="flex-1" />
         <SyncBadge />
       </div>

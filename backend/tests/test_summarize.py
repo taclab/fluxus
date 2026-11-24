@@ -42,13 +42,34 @@ def test_prompts_mention_structure():
     assert "français" in prompts.system_prompt("fr")
 
 
+def test_style_prompts_and_user_text_limits():
+    from fluxus.summarize.estimate import PROMPT_OVERHEAD_TOKENS, text_tokens
+
+    for name, style in prompts.STYLES.items():
+        assert style.article and style.video, name
+        assert style.article in prompts.article_prompt("T", None, "texte", name)
+        assert style.video in prompts.merge_prompt("T", None, "video", ["a"], name)
+    assert prompts.style_or_default("inconnu") == "standard"
+    # Consignes personnelles et question tronquées : l'estimation les couvre à leur plafond.
+    system = prompts.system_prompt("fr", "x" * 5000)
+    assert "x" * prompts.MAX_INSTRUCTIONS_CHARS in system and "x" * (prompts.MAX_INSTRUCTIONS_CHARS + 1) not in system
+    # Pire cas : consignes et question en idéogrammes, type le plus long, enrobage de l'appel.
+    worst = max(
+        text_tokens(prompts.system_prompt("fr", "語" * 5000))
+        + text_tokens(builder("Titre", "https://exemple.org/article", "", name, "語" * 5000))
+        for name in prompts.STYLES
+        for builder in (prompts.article_prompt, prompts.video_prompt)
+    )
+    assert worst <= PROMPT_OVERHEAD_TOKENS, worst
+
+
 # --- Audit du 12/11, constat 29 : l'estimation couvre ce qui est réellement consommé ------------------
 
 
 def test_estimate_latin_text_is_about_three_chars_per_token():
-    from fluxus.summarize.estimate import estimate_input_tokens
+    from fluxus.summarize.estimate import PROMPT_OVERHEAD_TOKENS, estimate_input_tokens
 
-    assert estimate_input_tokens("Un article en français, accentué. " * 100) == 3400 // 3 + 300
+    assert estimate_input_tokens("Un article en français, accentué. " * 100) == 3400 // 3 + PROMPT_OVERHEAD_TOKENS
 
 
 def test_estimate_does_not_underestimate_cjk_and_cyrillic():
@@ -59,14 +80,14 @@ def test_estimate_does_not_underestimate_cjk_and_cyrillic():
 
 
 def test_estimate_covers_intermediate_calls_of_chunked_mode():
-    from fluxus.summarize.estimate import CHUNK_THRESHOLD, chunks, estimate_input_tokens
+    from fluxus.summarize.estimate import CHUNK_THRESHOLD, PROMPT_OVERHEAD_TOKENS, chunks, estimate_input_tokens
 
     text = ("mot " * 30 + "\n") * 2500  # 302 500 caractères : mode découpé
     assert len(text) > CHUNK_THRESHOLD
     parts = len(chunks(text))
     assert parts >= 3
     # Chaque partie : consignes, résumé partiel produit (2000) puis relu par la fusion (2000).
-    assert estimate_input_tokens(text) == len(text) // 3 + 300 + parts * 4300
+    assert estimate_input_tokens(text) == len(text) // 3 + PROMPT_OVERHEAD_TOKENS + parts * (PROMPT_OVERHEAD_TOKENS + 4000)
 
 
 # --- Constat 33 : réponses bornées hors safe_get --------------------------------------------------------

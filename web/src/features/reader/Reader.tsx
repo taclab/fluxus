@@ -1,18 +1,19 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, Sparkles, Star, Type, WandSparkles } from 'lucide-react'
+import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, Sparkles, Star } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type Feed } from '../../api/client'
 import { ThemeToggle } from '../../components/ThemeToggle'
-import { TypographyPicker } from '../../components/TypographyPicker'
 import { useToast } from '../../components/feedback'
 import { EmptyState, IconButton, Kbd, Spinner } from '../../components/ui'
 import { db, toLocalEntry } from '../../db/db'
 import { fullDate, hostname } from '../../lib/format'
 import { sanitizeArticle } from '../../lib/markdown'
 import { recordChange } from '../../sync/engine'
+import { SummaryMenu } from '../summary/SummaryMenu'
 import { SummaryPanel } from '../summary/SummaryPanel'
+import { summaryKey, type SummaryRequest } from '../summary/summaryStyles'
 import { openExternal } from '../../lib/links'
 import { FeedIcon } from '../feeds/FeedIcon'
 import { getLocale, useT } from '../../i18n'
@@ -22,10 +23,9 @@ interface Props {
   onBack?: () => void
   summaryRequested: number // compteur incrémenté par le raccourci "r"
   fullContentRequested: number // compteur incrémenté par le raccourci "f"
-  onCreateSmartFeed?: (feedId: number) => void
 }
 
-export function Reader({ entryId, onBack, summaryRequested, fullContentRequested, onCreateSmartFeed }: Props) {
+export function Reader({ entryId, onBack, summaryRequested, fullContentRequested }: Props) {
   const tt = useT()
   const t = tt.reader
   const raw = useLiveQuery(async () => (entryId ? ((await db.entries.get(entryId)) ?? null) : null), [entryId])
@@ -38,8 +38,16 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
   const [extracting, setExtracting] = useState(false)
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [summaryAuto, setSummaryAuto] = useState(false)
-  const [typoOpen, setTypoOpen] = useState(false)
-  const typoRef = useRef<HTMLDivElement>(null)
+  // ✨ ouvre le menu des types ; le choix est transmis au panneau (compteur : un même choix répété
+  // doit être rejoué). « Approfondi » est partagé entre ce menu et celui du panneau.
+  const [summaryMenuOpen, setSummaryMenuOpen] = useState(false)
+  const [summaryRequest, setSummaryRequest] = useState<{ nonce: number; value: SummaryRequest } | null>(null)
+  const [summaryDeep, setSummaryDeep] = useState(false)
+  const summaryMenuRef = useRef<HTMLDivElement>(null)
+  const readySummaries = useLiveQuery(
+    async () => new Set((entryId ? await db.summaries.where('entry_id').equals(entryId).toArray() : []).map(summaryKey)),
+    [entryId],
+  )
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<HTMLIFrameElement>(null)
   const toast = useToast()
@@ -54,19 +62,22 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
     setShowFull(true)
     setSummaryOpen(Boolean(entry.has_summary))
     setSummaryAuto(false)
+    setSummaryMenuOpen(false)
+    setSummaryRequest(null)
+    setSummaryDeep(false) // plus cher : jamais reporté d'un article à l'autre
   }
   useEffect(() => {
     containerRef.current?.scrollTo({ top: 0 })
   }, [shownId])
 
   useEffect(() => {
-    if (!typoOpen) return
+    if (!summaryMenuOpen) return
     const close = (e: MouseEvent) => {
-      if (!typoRef.current?.contains(e.target as Node)) setTypoOpen(false)
+      if (!summaryMenuRef.current?.contains(e.target as Node)) setSummaryMenuOpen(false)
     }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
-  }, [typoOpen])
+  }, [summaryMenuOpen])
 
   // Marque comme lu une seule fois, à l'ouverture : « marquer non lu » doit ensuite rester possible.
   const markedRead = useRef<number | null>(null)
@@ -183,16 +194,6 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
         <span className="md:hidden">
           <ThemeToggle size="md" />
         </span>
-        <div className="relative" ref={typoRef}>
-          <IconButton label={t.typography} active={typoOpen} onClick={() => setTypoOpen((o) => !o)}>
-            <Type className="size-5" />
-          </IconButton>
-          {typoOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-2xl border border-app bg-panel p-4 shadow-xl" data-typo-popover>
-              <TypographyPicker compact />
-            </div>
-          )}
-        </div>
         <IconButton label={entry.read ? t.markUnread : t.markRead} onClick={() => void recordChange(entry.id, { read: !entry.read })}>
           {entry.read ? <CircleCheck className="size-5" /> : <Circle className="size-5" />}
         </IconButton>
@@ -209,21 +210,25 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
             {extracting ? <Loader2 className="size-5 animate-spin" /> : <FileText className="size-5" />}
           </IconButton>
         )}
-        <IconButton
-          label={t.summarize}
-          active={summaryOpen}
-          onClick={() => {
-            setSummaryOpen(true)
-            setSummaryAuto(true)
-          }}
-        >
-          <Sparkles className="size-5" />
-        </IconButton>
-        {onCreateSmartFeed && (
-          <IconButton label={t.createSmartFeed} onClick={() => onCreateSmartFeed(entry.feed_id)} className="hidden sm:inline-flex">
-            <WandSparkles className="size-5" />
+        <div className="relative" ref={summaryMenuRef}>
+          <IconButton label={t.summarize} active={summaryOpen || summaryMenuOpen} onClick={() => setSummaryMenuOpen((o) => !o)} aria-haspopup="menu" aria-expanded={summaryMenuOpen} data-testid="reader-summarize">
+            <Sparkles className="size-5" />
           </IconButton>
-        )}
+          {summaryMenuOpen && (
+            <SummaryMenu
+              ready={readySummaries ?? new Set()}
+              deep={summaryDeep}
+              onDeepChange={setSummaryDeep}
+              onPick={(value) => {
+                setSummaryMenuOpen(false)
+                setSummaryAuto(false)
+                setSummaryOpen(true)
+                setSummaryRequest((r) => ({ nonce: (r?.nonce ?? 0) + 1, value }))
+              }}
+              onClose={() => setSummaryMenuOpen(false)}
+            />
+          )}
+        </div>
         {entry.url && (
           <IconButton label={t.openOriginal} onClick={() => openExternal(entry.url)}>
             <ExternalLink className="size-5" />
@@ -264,7 +269,17 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
             </div>
           )}
 
-          {summaryOpen && <SummaryPanel key={entry.id} entryId={entry.id} isVideo={isVideo} autoStart={summaryAuto} onClose={() => setSummaryOpen(false)} onSeek={isVideo ? seek : undefined} />}
+          {summaryOpen && <SummaryPanel
+              key={entry.id}
+              entryId={entry.id}
+              isVideo={isVideo}
+              autoStart={summaryAuto}
+              request={summaryRequest}
+              deep={summaryDeep}
+              onDeepChange={setSummaryDeep}
+              onClose={() => setSummaryOpen(false)}
+              onSeek={isVideo ? seek : undefined}
+            />}
 
           {entry.extraction_status === 'failed' && !isVideo && (
             <p className="text-xs text-muted rounded-lg bg-muted px-3 py-2">

@@ -71,8 +71,8 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [editFeed, setEditFeed] = useState<Feed | null>(null)
   const [editCategory, setEditCategory] = useState<{ open: boolean; category: Category | null }>({ open: false, category: null })
-  const [editSmart, setEditSmart] = useState<{ open: boolean; smartFeed: SmartFeed | null; preset: { scope_kind: 'feed' | 'category'; scope_id: number } | null }>({ open: false, smartFeed: null, preset: null })
-  const openSmartEditor = useCallback((sf: SmartFeed | null, preset: { scope_kind: 'feed' | 'category'; scope_id: number } | null = null) => setEditSmart({ open: true, smartFeed: sf, preset }), [])
+  const [editSmart, setEditSmart] = useState<{ open: boolean; smartFeed: SmartFeed | null }>({ open: false, smartFeed: null })
+  const openSmartEditor = useCallback((sf: SmartFeed | null) => setEditSmart({ open: true, smartFeed: sf }), [])
   const [summaryTick, setSummaryTick] = useState(0)
   const [fullTick, setFullTick] = useState(0)
   // Ordre des articles affichés par la liste (navigation j/k, ← →, position « n / total »). La liste le
@@ -194,7 +194,6 @@ export function Layout() {
             onBack={isTablet ? undefined : () => setEntry(null)}
             summaryRequested={summaryTick}
             fullContentRequested={fullTick}
-            onCreateSmartFeed={(feedId) => openSmartEditor(null, { scope_kind: 'feed', scope_id: feedId })}
           />
         </div>
       )}
@@ -206,7 +205,6 @@ export function Layout() {
             onBack={() => setEntry(null)}
             summaryRequested={summaryTick}
             fullContentRequested={fullTick}
-            onCreateSmartFeed={(feedId) => openSmartEditor(null, { scope_kind: 'feed', scope_id: feedId })}
           />
         </ReaderModal>
       )}
@@ -217,7 +215,6 @@ export function Layout() {
       <SmartFeedDialog
         open={editSmart.open}
         smartFeed={editSmart.smartFeed}
-        preset={editSmart.preset}
         onClose={() => setEditSmart((s) => ({ ...s, open: false }))}
         onSaved={(sf) => setView({ kind: 'smart', id: sf.id })}
       />

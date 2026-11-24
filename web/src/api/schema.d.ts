@@ -659,7 +659,8 @@ export interface paths {
         put?: never;
         /**
          * Summarize
-         * @description Flux SSE : événements `status`, `delta`, `done`, `error`.
+         * @description Flux SSE : événements `status`, `delta`, `done`, `error`. Corps facultatif : type de résumé,
+         *     question libre, mode approfondi (sans corps : type par défaut des réglages).
          */
         post: operations["summarize_api_entries__entry_id__summarize_post"];
         delete?: never;
@@ -1451,6 +1452,18 @@ export interface components {
             /** Budget Remaining */
             budget_remaining: number;
         };
+        /** SummarizeIn */
+        SummarizeIn: {
+            /** Style */
+            style?: string | null;
+            /** Question */
+            question?: string | null;
+            /**
+             * Deep
+             * @default false
+             */
+            deep: boolean;
+        };
         /** SummaryOut */
         SummaryOut: {
             /** Id */
@@ -1459,6 +1472,10 @@ export interface components {
             entry_id: number;
             /** Kind */
             kind: string;
+            /** Style */
+            style: string;
+            /** Question */
+            question: string | null;
             /** Provider */
             provider: string;
             /** Model */
@@ -2969,7 +2986,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SummarizeIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

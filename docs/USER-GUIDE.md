@@ -48,8 +48,7 @@ layout.
 A smart feed is a **topic view**: "everything about X in my feeds". It appears in the sidebar with
 its unread count, can be a dashboard widget source, and works offline.
 
-Create one with « + nouveau » in the sidebar, or from the reader with the wand (scope prefilled with
-the article's feed). The editor offers:
+Create one with « + nouveau » in the sidebar. The editor offers:
 
 - a **scope**: all feeds, a folder or a feed;
 - a **keyword** filter (any of, all of, none of), case- and accent-insensitive, or a **regular
@@ -124,7 +123,7 @@ Reordering requires being online.
 
 ## Reading typography
 
-The **Aa** button in the reader, or *Paramètres → Lecture*, offers six bundled font pairings
+*Paramètres → Lecture* offers six bundled font pairings
 (identical offline and on Android): Éditorial (Source Serif 4 + Inter, default), Littéraire
 (Literata), Journal (Lora + Montserrat), Moderne (Inter), Lisible (Atkinson Hyperlegible) and
 Système; plus four text sizes and three column widths. Stored per device.
@@ -136,6 +135,21 @@ feed content. For a YouTube video it fetches subtitles (French, then English, th
 available) and produces chapters; clicking a timestamp seeks the video. A summary is stored:
 reopening it costs nothing, ↻ regenerates it. Without subtitles, the app says so and does not try
 to transcribe audio.
+
+✨ in the reader opens a menu first, as in Inoreader, so the type is chosen before anything is
+generated; the `r` shortcut generates the default type directly. The title of the summary panel
+opens the same menu:
+
+- **a question field**: ask anything about the article or video, the answer relies only on it;
+- **the summary type**: standard (gist, key points, takeaway), one sentence, bullet points,
+  detailed (section by section, for long content), facts vs. opinions, simplified. Each type is
+  stored separately: a type marked « déjà prêt » shows instantly, and the other summaries of the
+  article stay one click away under the summary;
+- **Approfondi** (in-depth): the next summary uses a more capable model at maximum effort, slower
+  and more expensive — useful when a long article gets a shallow summary;
+- **Personnaliser** leads to *Paramètres → Résumés*: default type (also used by automatic
+  summaries), personal instructions added to every summary (« I'm a developer, keep the figures »),
+  and the in-depth model (empty: the usual model at maximum effort).
 
 ## Search
 

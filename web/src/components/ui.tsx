@@ -10,6 +10,7 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -83,6 +84,18 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
       {...props}
       className={clsx(
         'h-10 w-full rounded-lg border border-app bg-panel px-3 text-sm text-app placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent-400',
+        className,
+      )}
+    />
+  )
+}
+
+export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={clsx(
+        'w-full rounded-lg border border-app bg-panel px-3 py-2 text-sm text-app placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent-400',
         className,
       )}
     />
