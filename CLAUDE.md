@@ -16,7 +16,7 @@ npm run gen:api                                # après tout changement de route
 
 ## Règles du projet
 
-- Langue de l'interface, des messages d'erreur `detail` et des commentaires : français.
+- Langue : commentaires et messages d'erreur `detail` en français. L'interface est bilingue (français, anglais) : tout texte visible passe par `web/src/i18n` (`useT()` dans un composant, `getT()` au moment de l'appel ailleurs, jamais au chargement d'un module), dans le catalogue de sa zone (`messages/<zone>.ts`, `fr` puis `en: typeof fr`) ; aucun texte en dur dans un composant. Le texte français d'un libellé existant ne change pas sans raison (les E2E sélectionnent en français, contexte `fr-FR`).
 - Messages de commit en anglais. Le README et les guides de `docs/` (hors ARCHITECTURE et audits) sont en anglais ; README court, le détail va dans `docs/`.
 - Confirmation : `useConfirm()` (`components/feedback.ts`, fournisseur dans `ui.tsx`), jamais `window.confirm` (le navigateur peut le bloquer en silence et renvoyer faux).
 - Toute modification d'une entrée visible par un client met `entry.updated_at = now` (pivot de la sync). Toute écriture de `read`/`starred` pose aussi `read_changed_at`/`starred_changed_at` (horloges par champ, seule base de la résolution des conflits de sync ; jamais `updated_at`).

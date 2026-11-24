@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react'
 
 import type { View } from '../../../app/view'
 import { hostname, relativeDate } from '../../../lib/format'
+import { useT } from '../../../i18n'
 import { FeedIcon } from '../../feeds/FeedIcon'
 import { useDashboardData } from '../dashboardContext'
 import { widgetTitle, type StarredWidget as StarredWidgetModel, type WidgetWidth } from '../layout'
@@ -22,6 +23,7 @@ interface Props {
 
 export function StarredWidget({ widget, editing, actions, onOpenEntry, onOpenView, handleProps, dragging }: Props) {
   const data = useDashboardData()
+  const t = useT()
   const { title } = widgetTitle(widget, data.categoryMap, data.feedMap)
   const entries = useLiveQuery(() => latestStarred(widget.limit), [widget.limit])
   const items = entries ?? []
@@ -35,7 +37,7 @@ export function StarredWidget({ widget, editing, actions, onOpenEntry, onOpenVie
       width={widget.width as WidgetWidth}
       loading={entries === undefined}
       empty={items.length === 0}
-      emptyLabel="Aucun favori. Appuyez sur s dans un article pour l’ajouter."
+      emptyLabel={t.dashboard.starred.empty}
       onOpen={() => onOpenView({ kind: 'starred' })}
       actions={actions}
       handleProps={handleProps}

@@ -108,7 +108,11 @@ def run(page, ctx, errors):
     page.click("[data-testid=add-widget]")
     page.select_option("[data-testid=widget-type]", "news")
     page.select_option("[data-testid=widget-source]", f"smart:{sf['id']}")
+    n_widgets = page.locator("[data-widget]").count()
     page.click("[data-testid=widget-submit]")
+    # Le nouveau widget arrive après un rendu complet de la grille (lent sur un gros tableau de bord) :
+    # sans cette attente, `.last` désignerait encore le dernier widget « Nouveautés » existant.
+    page.wait_for_function(f"document.querySelectorAll('[data-widget]').length > {n_widgets}", timeout=15000)
     widget = page.locator("[data-widget-type=news]").last
     widget.locator("[data-entry-id]").first.wait_for(timeout=15000)
     assert "Test sujet" in widget.inner_text()

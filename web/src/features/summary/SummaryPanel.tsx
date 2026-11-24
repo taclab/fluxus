@@ -9,6 +9,7 @@ import { Button, IconButton } from '../../components/ui'
 import { db } from '../../db/db'
 import { formatTokens } from '../../lib/format'
 import { renderSummary } from '../../lib/markdown'
+import { useT } from '../../i18n'
 
 interface Props {
   entryId: number
@@ -21,6 +22,8 @@ interface Props {
 type Phase = 'idle' | 'streaming' | 'done' | 'error'
 
 export function SummaryPanel({ entryId, isVideo, autoStart, onClose, onSeek }: Props) {
+  const tt = useT()
+  const t = tt.reader.summary
   // undefined = requête en cours ; null = aucun résumé stocké.
   const stored = useLiveQuery(
     () => db.summaries.where('entry_id').equals(entryId).sortBy('created_at').then((s) => (s.at(-1) as SummaryOut | undefined) ?? null),
@@ -41,10 +44,10 @@ export function SummaryPanel({ entryId, isVideo, autoStart, onClose, onSeek }: P
       setPhase('streaming')
       setError(null)
       setText('')
-      setStatus('Connexion…')
+      setStatus(t.connecting)
       if (!isOnline()) {
         setPhase('error')
-        setError('Le résumé nécessite une connexion au serveur.')
+        setError(t.offline)
         return
       }
       try {
@@ -59,18 +62,18 @@ export function SummaryPanel({ entryId, isVideo, autoStart, onClose, onSeek }: P
             setText(summary.text_md)
             setPhase('done')
           } else if (evt.event === 'error') {
-            setError(String(data.message ?? 'Erreur'))
+            setError(String(data.message ?? tt.common.error))
             setPhase('error')
           }
         }
         setPhase((p) => (p === 'streaming' ? 'done' : p))
       } catch (err) {
         if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'Erreur')
+        setError(err instanceof Error ? err.message : tt.common.error)
         setPhase('error')
       }
     },
-    [entryId],
+    [entryId, t, tt],
   )
 
   useEffect(() => {
@@ -103,29 +106,29 @@ export function SummaryPanel({ entryId, isVideo, autoStart, onClose, onSeek }: P
     <aside className="rounded-2xl border border-accent-200 dark:border-accent-800/60 bg-accent-50/60 dark:bg-accent-900/10 p-5 space-y-3">
       <div className="flex items-center gap-2">
         <Sparkles className="size-4 text-accent-600 dark:text-accent-300" />
-        <h2 className="text-sm font-semibold text-app flex-1">Résumé</h2>
+        <h2 className="text-sm font-semibold text-app flex-1">{t.title}</h2>
         {stored && phase !== 'streaming' && (
-          <span className="text-[11px] text-muted hidden sm:inline" title={`${formatTokens(stored.input_tokens)} tokens en entrée, ${formatTokens(stored.output_tokens)} en sortie`}>
+          <span className="text-[11px] text-muted hidden sm:inline" title={t.tokens(formatTokens(stored.input_tokens), formatTokens(stored.output_tokens))}>
             {stored.model}
           </span>
         )}
         {(stored || phase === 'done' || phase === 'error') && (
-          <IconButton label="Régénérer" size="sm" onClick={() => void run(true)} disabled={phase === 'streaming'}>
+          <IconButton label={t.regenerate} size="sm" onClick={() => void run(true)} disabled={phase === 'streaming'}>
             <RefreshCw className="size-4" />
           </IconButton>
         )}
-        <IconButton label="Fermer" size="sm" onClick={onClose}>
+        <IconButton label={t.close} size="sm" onClick={onClose}>
           <X className="size-4" />
         </IconButton>
       </div>
 
       {phase === 'streaming' && !text && (
-        <p className="text-sm text-muted animate-soft-pulse">{status || 'Rédaction du résumé…'}</p>
+        <p className="text-sm text-muted animate-soft-pulse">{status || t.writing}</p>
       )}
 
       {phase === 'idle' && !stored && !autoStart && (
         <Button size="sm" variant="primary" onClick={() => void run(false)}>
-          <Sparkles className="size-4" /> Résumer {isVideo ? 'la vidéo' : "l'article"}
+          <Sparkles className="size-4" /> {isVideo ? t.summarizeVideo : t.summarizeArticle}
         </Button>
       )}
 

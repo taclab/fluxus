@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import type { View } from '../../../app/view'
 import type { LocalEntry } from '../../../db/db'
 import { relativeDate } from '../../../lib/format'
+import { useT } from '../../../i18n'
 import { recordBulkRead } from '../../../sync/engine'
 import { useDashboardData } from '../dashboardContext'
 import { widgetTitle, type WidgetWidth, type YoutubeWidget as YoutubeWidgetModel } from '../layout'
@@ -22,6 +23,7 @@ interface Props {
 
 export function YoutubeWidget({ widget, editing, actions, onOpenEntry, onOpenView, handleProps, dragging }: Props) {
   const data = useDashboardData()
+  const t = useT()
   const { title, orphan } = widgetTitle(widget, data.categoryMap, data.feedMap)
   const categoryId = widget.source.kind === 'category' ? widget.source.id : null
   const feedIds = youtubeFeedIds(data.feeds, categoryId)
@@ -45,7 +47,7 @@ export function YoutubeWidget({ widget, editing, actions, onOpenEntry, onOpenVie
       orphan={orphan}
       loading={entries === undefined && !data.ready}
       empty={data.ready && items.length === 0}
-      emptyLabel={feedIds.length === 0 ? 'Aucun flux YouTube' : 'Aucune vidéo non vue'}
+      emptyLabel={feedIds.length === 0 ? t.dashboard.youtube.noFeeds : t.dashboard.youtube.noUnwatched}
       onOpen={openView ? () => onOpenView(openView) : undefined}
       onMarkAllRead={() => {
         const ids = items.filter((e) => !e.read).map((e) => e.id)

@@ -17,34 +17,22 @@ import { api, isOnline, unwrap, type Category, type Feed, type Schemas } from '.
 import { useConfirm, useToast } from '../../components/feedback'
 import { Button, EmptyState, IconButton, Input, Select } from '../../components/ui'
 import { db } from '../../db/db'
-import { agoDate, formatTokens, hostname, plural, untilDate } from '../../lib/format'
+import { compareText, useT } from '../../i18n'
+import { agoDate, formatTokens, hostname, untilDate } from '../../lib/format'
 import { syncNow } from '../../sync/engine'
 import { setViewMode, useDefaultViewMode } from '../entries/useViewMode'
 import { VIEW_MODE_SPECS, type ViewMode } from '../entries/viewMode'
 import { CategoryDialog, FeedDialog, ViewModeSelect } from './FeedDialog'
 import { FeedIcon } from './FeedIcon'
-import { EXTRACTION_OPTIONS, deleteFeeds, intervalLabel, intervalOptions, updateFeed, updateFeeds, type ExtractionMode, type FeedChanges, type FeedUpdateChanges } from './feedSettings'
+import { EXTRACTION_OPTIONS, deleteFeeds, formatMinutes, intervalLabel, intervalOptions, updateFeed, updateFeeds, type ExtractionMode, type FeedChanges, type FeedUpdateChanges } from './feedSettings'
 
 type FeedStats = Schemas['FeedStats']
 type StatusFilter = 'all' | 'active' | 'paused' | 'error' | 'auto' | 'full'
 type SortKey = 'order' | 'title' | 'fetched' | 'activity' | 'errors'
 
-const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: 'all', label: 'Tous les états' },
-  { id: 'active', label: 'Actifs' },
-  { id: 'paused', label: 'En pause' },
-  { id: 'error', label: 'En erreur' },
-  { id: 'auto', label: 'Résumés automatiques' },
-  { id: 'full', label: 'Article complet toujours' },
-]
+const STATUS_FILTERS: StatusFilter[] = ['all', 'active', 'paused', 'error', 'auto', 'full']
 
-const SORTS: { id: SortKey; label: string }[] = [
-  { id: 'order', label: 'Par dossier' },
-  { id: 'title', label: 'Nom' },
-  { id: 'fetched', label: 'Dernière récupération' },
-  { id: 'activity', label: 'Articles sur 7 jours' },
-  { id: 'errors', label: 'Erreurs' },
-]
+const SORTS: SortKey[] = ['order', 'title', 'fetched', 'activity', 'errors']
 
 /** Seuil au-delà duquel un flux est signalé en erreur (même règle que la barre latérale). */
 const ERROR_THRESHOLD = 2
@@ -77,6 +65,8 @@ export function SubscriptionsPage() {
   const navigate = useNavigate()
   const toast = useToast()
   const confirm = useConfirm()
+  const t = useT()
+  const tp = t.subscriptions.page
   const feeds = useLiveQuery(() => db.feeds.toArray(), []) ?? EMPTY_FEEDS
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? EMPTY_CATEGORIES
   const defaultMode = useDefaultViewMode()
@@ -136,13 +126,13 @@ export function SubscriptionsPage() {
       const sorted = [...visible].sort((a, b) => {
         switch (sort) {
           case 'title':
-            return a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' })
+            return compareText(a.title, b.title, { sensitivity: 'base' })
           case 'fetched':
             return (b.last_fetched_at ? Date.parse(b.last_fetched_at) : 0) - (a.last_fetched_at ? Date.parse(a.last_fetched_at) : 0)
           case 'activity':
             return (stats?.get(b.id)?.entries_7d ?? 0) - (stats?.get(a.id)?.entries_7d ?? 0)
           case 'errors':
-            return b.error_count - a.error_count || a.title.localeCompare(b.title, 'fr')
+            return b.error_count - a.error_count || compareText(a.title, b.title)
           default:
             return 0
         }
@@ -190,7 +180,7 @@ export function SubscriptionsPage() {
   const run = useCallback(
     async (action: () => Promise<unknown>, success?: string) => {
       if (!isOnline()) {
-        toast('Modification impossible hors ligne', 'error')
+        toast(tp.offlineEdit, 'error')
         return false
       }
       setBusy(true)
@@ -199,13 +189,13 @@ export function SubscriptionsPage() {
         if (success) toast(success, 'success')
         return true
       } catch (err) {
-        toast(err instanceof Error ? err.message : 'Erreur', 'error')
+        toast(err instanceof Error ? err.message : t.common.error, 'error')
         return false
       } finally {
         setBusy(false)
       }
     },
-    [toast],
+    [toast, tp, t],
   )
 
   const saveOne = useCallback((feed: Feed, changes: FeedUpdateChanges) => void run(() => updateFeed(feed.id, changes)), [run])
@@ -215,18 +205,18 @@ export function SubscriptionsPage() {
     void run(async () => {
       await updateFeeds(selectedIds, changes)
       if ('auto_summary' in changes) void loadStats()
-    }, `${label} : ${selectedIds.length} ${plural(selectedIds.length, 'flux', 'flux')}`)
+    }, tp.bulkDone(label, selectedIds.length))
 
   async function refreshSelected() {
     await run(async () => {
       for (const id of selectedIds) unwrap(await api().POST('/api/feeds/{feed_id}/refresh', { params: { path: { feed_id: id } } }))
       window.setTimeout(() => void syncNow(), 5000)
-    }, `Rafraîchissement lancé pour ${selectedIds.length} flux`)
+    }, tp.refreshStarted(selectedIds.length))
   }
 
   async function removeSelected() {
-    if (!(await confirm({ title: `Se désabonner de ${selectedIds.length} flux ?`, message: 'Leurs articles seront supprimés.', confirmLabel: 'Se désabonner', danger: true }))) return
-    if (await run(() => deleteFeeds(selectedIds), 'Désabonné')) setSelected(new Set())
+    if (!(await confirm({ title: tp.unsubscribeTitle(selectedIds.length), message: tp.unsubscribeMessage, confirmLabel: tp.unsubscribe, danger: true }))) return
+    if (await run(() => deleteFeeds(selectedIds), tp.unsubscribed)) setSelected(new Set())
   }
 
   const counts = useMemo(
@@ -238,18 +228,18 @@ export function SubscriptionsPage() {
   return (
     <div className="flex h-full flex-col bg-app">
       <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-app bg-panel px-2">
-        <IconButton label="Retour" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}>
+        <IconButton label={tp.back} onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/'))}>
           <ChevronLeft className="size-5" />
         </IconButton>
-        <h1 className="font-semibold">Abonnements</h1>
+        <h1 className="font-semibold">{tp.title}</h1>
         <span className="min-w-0 truncate text-sm text-muted tabular-nums">
-          {feeds.length} flux
-          {counts.paused > 0 && ` · ${counts.paused} en pause`}
-          {counts.errors > 0 && ` · ${counts.errors} en erreur`}
+          {tp.feedCount(feeds.length)}
+          {counts.paused > 0 && ` · ${tp.pausedCount(counts.paused)}`}
+          {counts.errors > 0 && ` · ${tp.errorCount(counts.errors)}`}
         </span>
         <div className="flex-1" />
         <Button size="sm" variant="ghost" onClick={() => navigate('/settings')}>
-          Paramètres
+          {tp.settings}
         </Button>
       </header>
 
@@ -257,50 +247,50 @@ export function SubscriptionsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[12rem] flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un flux (nom, adresse)…" className="h-9 pl-8" aria-label="Rechercher un flux" data-testid="subs-search" />
+            <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tp.searchPlaceholder} className="h-9 pl-8" aria-label={tp.searchLabel} data-testid="subs-search" />
           </div>
           <div className="grid w-full grid-cols-3 gap-2 md:flex md:w-auto">
-            <Select value={folder} onChange={(e) => setFolder(e.target.value)} className={filterSelect} aria-label="Dossier" data-testid="subs-folder">
-              <option value="any">Tous les dossiers</option>
+            <Select value={folder} onChange={(e) => setFolder(e.target.value)} className={filterSelect} aria-label={tp.folderLabel} data-testid="subs-folder">
+              <option value="any">{tp.allFolders}</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.title}
                 </option>
               ))}
-              <option value="none">Sans dossier</option>
+              <option value="none">{tp.noFolder}</option>
             </Select>
-            <Select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} className={filterSelect} aria-label="État" data-testid="subs-status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} className={filterSelect} aria-label={tp.statusLabel} data-testid="subs-status">
               {STATUS_FILTERS.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
+                <option key={s} value={s}>
+                  {tp.status[s]}
                 </option>
               ))}
             </Select>
-            <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className={filterSelect} aria-label="Tri" data-testid="subs-sort">
+            <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className={filterSelect} aria-label={tp.sortLabel} data-testid="subs-sort">
               {SORTS.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
+                <option key={s} value={s}>
+                  {tp.sort[s]}
                 </option>
               ))}
             </Select>
           </div>
         </div>
         <p className="text-xs text-muted">
-          Présentation par défaut : {VIEW_MODE_SPECS[defaultMode].label} (Paramètres) · un flux sans présentation suit son dossier.
+          {tp.defaultViewMode(VIEW_MODE_SPECS[defaultMode].label)}
           {budget && (
             <>
               {' '}
-              · Résumés automatiques : {counts.auto} {plural(counts.auto, 'flux', 'flux')}, {formatTokens(budget.tokens_today)} / {formatTokens(budget.budget)} tokens aujourd’hui
-              {budget.budget > 0 && budget.tokens_today >= budget.budget && <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">budget atteint</span>}
+              {tp.autoSummaries(counts.auto, formatTokens(budget.tokens_today), formatTokens(budget.budget))}
+              {budget.budget > 0 && budget.tokens_today >= budget.budget && <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">{tp.budgetReached}</span>}
             </>
           )}
-          {!online && <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">Hors ligne : consultation seulement.</span>}
+          {!online && <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">{tp.offline}</span>}
         </p>
       </div>
 
       <div className="flex-1 overflow-auto">
         {visible.length === 0 ? (
-          <EmptyState icon={<Search className="size-10" />} title={feeds.length ? 'Aucun flux ne correspond' : 'Aucun abonnement'} hint={feeds.length ? 'Modifiez la recherche ou les filtres.' : 'Ajoutez un flux depuis la barre latérale.'} />
+          <EmptyState icon={<Search className="size-10" />} title={feeds.length ? tp.noMatch : tp.empty} hint={feeds.length ? tp.noMatchHint : tp.emptyHint} />
         ) : (
           <>
             {/* Tableau (tablette et bureau) */}
@@ -308,16 +298,16 @@ export function SubscriptionsPage() {
               <thead className="sticky top-0 z-[5] border-b border-app bg-panel text-left text-xs uppercase tracking-wide text-muted">
                 <tr>
                   <th className="w-10 px-3 py-2">
-                    <input type="checkbox" className="size-4 accent-accent-600" checked={allVisibleSelected} onChange={(e) => toggleMany(visible.map((f) => f.id), e.target.checked)} aria-label="Tout sélectionner" />
+                    <input type="checkbox" className="size-4 accent-accent-600" checked={allVisibleSelected} onChange={(e) => toggleMany(visible.map((f) => f.id), e.target.checked)} aria-label={tp.selectAll} />
                   </th>
-                  <th className="px-2 py-2 font-medium">Flux</th>
-                  <th className="px-2 py-2 font-medium">État</th>
-                  <th className="px-2 py-2 font-medium">Récupération</th>
-                  <th className="px-2 py-2 font-medium">Intervalle</th>
-                  <th className="px-2 py-2 font-medium">Article complet</th>
-                  <th className="px-2 py-2 font-medium">Résumés auto</th>
-                  <th className="px-2 py-2 font-medium">Présentation</th>
-                  <th className="px-2 py-2 text-right font-medium">7 j</th>
+                  <th className="px-2 py-2 font-medium">{t.subscriptions.columns.feed}</th>
+                  <th className="px-2 py-2 font-medium">{t.subscriptions.columns.status}</th>
+                  <th className="px-2 py-2 font-medium">{t.subscriptions.columns.fetch}</th>
+                  <th className="px-2 py-2 font-medium">{t.subscriptions.columns.interval}</th>
+                  <th className="px-2 py-2 font-medium">{t.subscriptions.columns.fullArticle}</th>
+                  <th className="px-2 py-2 font-medium">{t.subscriptions.columns.autoSummaries}</th>
+                  <th className="px-2 py-2 font-medium">{t.subscriptions.columns.viewMode}</th>
+                  <th className="px-2 py-2 text-right font-medium">{t.subscriptions.columns.last7d}</th>
                   <th className="w-20 px-2 py-2" />
                 </tr>
               </thead>
@@ -357,11 +347,11 @@ export function SubscriptionsPage() {
             <ul className="md:hidden" data-testid="subs-cards">
               {groups.map((g) => (
                 <li key={g.key}>
-                  {sort === 'order' && <p className="bg-muted px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted">{g.category?.title ?? 'Sans dossier'}</p>}
+                  {sort === 'order' && <p className="bg-muted px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted">{g.category?.title ?? tp.noFolder}</p>}
                   <ul>
                     {g.feeds.map((f) => (
                       <li key={f.id} className="flex items-center gap-3 border-b border-app px-3 py-2.5">
-                        <input type="checkbox" className="size-4 shrink-0 accent-accent-600" checked={selected.has(f.id)} onChange={() => toggle(f.id)} aria-label={`Sélectionner ${f.title}`} />
+                        <input type="checkbox" className="size-4 shrink-0 accent-accent-600" checked={selected.has(f.id)} onChange={() => toggle(f.id)} aria-label={tp.select(f.title)} />
                         <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setEditFeed(f)}>
                           <FeedIcon feed={f} />
                           <span className="min-w-0 flex-1">
@@ -369,7 +359,7 @@ export function SubscriptionsPage() {
                             <span className="mt-0.5 flex flex-wrap gap-1">
                               <StatusBadge feed={f} />
                               <Badge>{intervalLabel(f)}</Badge>
-                              {f.auto_summary && <Badge tone="accent">Résumés auto</Badge>}
+                              {f.auto_summary && <Badge tone="accent">{t.subscriptions.badge.autoSummaries}</Badge>}
                               {f.view_mode && <Badge>{VIEW_MODE_SPECS[f.view_mode].label}</Badge>}
                             </span>
                           </span>
@@ -419,16 +409,17 @@ function Badge({ children, tone = 'muted' }: { children: ReactNode; tone?: 'mute
 }
 
 function StatusBadge({ feed }: { feed: Feed }) {
-  if (feed.disabled) return <Badge tone="warn">En pause</Badge>
+  const tb = useT().subscriptions.badge
+  if (feed.disabled) return <Badge tone="warn">{tb.paused}</Badge>
   if (hasError(feed))
     return (
       <span title={feed.last_error ?? undefined}>
         <Badge tone="error">
-          <AlertTriangle className="size-3" /> Erreur ×{feed.error_count}
+          <AlertTriangle className="size-3" /> {tb.error(feed.error_count)}
         </Badge>
       </span>
     )
-  return <Badge>Actif</Badge>
+  return <Badge>{tb.active}</Badge>
 }
 
 const cellSelect = 'h-8 max-w-[12rem] px-2 text-xs'
@@ -453,27 +444,28 @@ function GroupRow({
   onEdit: (c: Category) => void
   onViewMode: (c: Category, v: ViewMode | '') => void
 }) {
+  const tp = useT().subscriptions
   const ids = feeds.map((f) => f.id)
   const all = ids.every((id) => selected.has(id))
   return (
     <tr className="bg-muted/60" data-testid={category ? `subs-group-${category.id}` : 'subs-group-none'}>
       <td className="px-3 py-1.5">
-        <input type="checkbox" className="size-4 accent-accent-600" checked={all} onChange={(e) => onToggle(ids, e.target.checked)} aria-label={`Sélectionner le dossier ${category?.title ?? 'Sans dossier'}`} />
+        <input type="checkbox" className="size-4 accent-accent-600" checked={all} onChange={(e) => onToggle(ids, e.target.checked)} aria-label={tp.group.select(category?.title ?? tp.page.noFolder)} />
       </td>
       <td colSpan={6} className="px-2 py-1.5">
-        <span className="font-semibold text-app">{category?.title ?? 'Sans dossier'}</span>
+        <span className="font-semibold text-app">{category?.title ?? tp.page.noFolder}</span>
         <span className="ml-2 text-xs text-muted">
-          {feeds.length} {plural(feeds.length, 'flux', 'flux')}
+          {tp.page.feedCount(feeds.length)}
         </span>
       </td>
       <td className="px-2 py-1.5">
         {category && (
           <ViewModeSelect
             value={category.view_mode ?? ''}
-            inheritLabel={`Défaut (${VIEW_MODE_SPECS[defaultMode].label})`}
+            inheritLabel={tp.group.defaultMode(VIEW_MODE_SPECS[defaultMode].label)}
             onChange={(v) => onViewMode(category, v)}
             disabled={disabled}
-            aria-label={`Présentation du dossier ${category.title}`}
+            aria-label={tp.group.viewModeOf(category.title)}
             className={cellSelect}
           />
         )}
@@ -481,7 +473,7 @@ function GroupRow({
       <td />
       <td className="px-2 py-1.5 text-right">
         {category && (
-          <IconButton label={`Modifier le dossier ${category.title}`} size="sm" onClick={() => onEdit(category)} disabled={disabled}>
+          <IconButton label={tp.group.edit(category.title)} size="sm" onClick={() => onEdit(category)} disabled={disabled}>
             <Pencil className="size-3.5" />
           </IconButton>
         )}
@@ -511,9 +503,11 @@ function FeedRow({
   onSave: (changes: FeedUpdateChanges) => void
   onEdit: () => void
 }) {
+  const t = useT()
+  const tr = t.subscriptions.row
   const [cap, setCap] = useState(String(feed.summary_daily_cap))
   useEffect(() => setCap(String(feed.summary_daily_cap)), [feed.summary_daily_cap])
-  const inherited = category?.view_mode ? `Dossier (${VIEW_MODE_SPECS[category.view_mode].label})` : `Défaut (${VIEW_MODE_SPECS[defaultMode].label})`
+  const inherited = category?.view_mode ? tr.folderMode(VIEW_MODE_SPECS[category.view_mode].label) : t.subscriptions.group.defaultMode(VIEW_MODE_SPECS[defaultMode].label)
 
   function commitCap() {
     const n = Number(cap)
@@ -525,7 +519,7 @@ function FeedRow({
   return (
     <tr className={clsx('border-b border-app align-middle hover:bg-muted/40', selected && 'bg-accent-50/60 dark:bg-accent-900/10')} data-feed-row={feed.id}>
       <td className="px-3 py-2">
-        <input type="checkbox" className="size-4 accent-accent-600" checked={selected} onChange={onToggle} aria-label={`Sélectionner ${feed.title}`} />
+        <input type="checkbox" className="size-4 accent-accent-600" checked={selected} onChange={onToggle} aria-label={t.subscriptions.page.select(feed.title)} />
       </td>
       <td className="max-w-[18rem] px-2 py-2">
         <div className="flex items-center gap-2">
@@ -541,26 +535,26 @@ function FeedRow({
         </div>
       </td>
       <td className="px-2 py-2">
-        <button type="button" onClick={() => onSave({ disabled: !feed.disabled })} disabled={disabled} className="group inline-flex items-center gap-1 disabled:cursor-not-allowed" title={feed.disabled ? 'Reprendre' : 'Mettre en pause'} data-testid="subs-toggle-pause">
+        <button type="button" onClick={() => onSave({ disabled: !feed.disabled })} disabled={disabled} className="group inline-flex items-center gap-1 disabled:cursor-not-allowed" title={feed.disabled ? tr.resume : tr.pause} data-testid="subs-toggle-pause">
           <StatusBadge feed={feed} />
           {feed.disabled ? <CirclePlay className="size-3.5 text-muted opacity-0 group-hover:opacity-100" /> : <CirclePause className="size-3.5 text-muted opacity-0 group-hover:opacity-100" />}
         </button>
       </td>
       <td className="whitespace-nowrap px-2 py-2 text-xs text-muted">
-        <div>{feed.last_fetched_at ? agoDate(feed.last_fetched_at) : 'jamais'}</div>
-        <div>{feed.disabled ? '—' : `prochaine ${untilDate(feed.next_fetch_at)}`}</div>
+        <div>{feed.last_fetched_at ? agoDate(feed.last_fetched_at) : t.common.never}</div>
+        <div>{feed.disabled ? '—' : tr.next(untilDate(feed.next_fetch_at))}</div>
       </td>
       <td className="px-2 py-2">
-        <Select value={feed.fetch_interval_fixed_min ?? 0} onChange={(e) => onSave({ fetch_interval_fixed_min: Number(e.target.value) })} disabled={disabled} className={cellSelect} aria-label={`Intervalle de ${feed.title}`} title={intervalLabel(feed)}>
+        <Select value={feed.fetch_interval_fixed_min ?? 0} onChange={(e) => onSave({ fetch_interval_fixed_min: Number(e.target.value) })} disabled={disabled} className={cellSelect} aria-label={tr.intervalOf(feed.title)} title={intervalLabel(feed)}>
           {intervalOptions(feed).map((o) => (
             <option key={o.minutes} value={o.minutes}>
-              {o.minutes === 0 ? `Auto (${intervalLabel(feed).replace('Auto · ', '')})` : o.label.replace('Toutes les ', '').replace('Une fois par jour', '24 h')}
+              {o.minutes === 0 ? tr.autoInterval(formatMinutes(feed.fetch_interval_min)) : formatMinutes(o.minutes)}
             </option>
           ))}
         </Select>
       </td>
       <td className="px-2 py-2">
-        <Select value={feed.extraction_mode} onChange={(e) => onSave({ extraction_mode: e.target.value as ExtractionMode })} disabled={disabled} className={cellSelect} aria-label={`Article complet de ${feed.title}`}>
+        <Select value={feed.extraction_mode} onChange={(e) => onSave({ extraction_mode: e.target.value as ExtractionMode })} disabled={disabled} className={cellSelect} aria-label={tr.fullArticleOf(feed.title)}>
           {EXTRACTION_OPTIONS.map((o) => (
             <option key={o.id} value={o.id}>
               {o.short}
@@ -576,7 +570,7 @@ function FeedRow({
             checked={feed.auto_summary}
             onChange={(e) => onSave({ auto_summary: e.target.checked })}
             disabled={disabled}
-            aria-label={`Résumés automatiques de ${feed.title}`}
+            aria-label={tr.autoSummariesOf(feed.title)}
             data-testid="subs-auto-summary"
           />
           {feed.auto_summary ? (
@@ -591,32 +585,32 @@ function FeedRow({
                 onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                 disabled={disabled}
                 className="h-7 w-14 rounded-md border border-app bg-panel px-1.5 text-xs"
-                aria-label={`Quota quotidien de ${feed.title}`}
-                title="Résumés automatiques au plus par jour"
+                aria-label={tr.dailyCapOf(feed.title)}
+                title={tr.dailyCapHint}
               />
-              <span className="text-xs text-muted tabular-nums" title="Résumés automatiques aujourd’hui / quota">
+              <span className="text-xs text-muted tabular-nums" title={tr.todayHint}>
                 <Sparkles className="mr-0.5 inline size-3" />
                 {stats?.auto_summaries_today ?? '–'}/{feed.summary_daily_cap}
               </span>
             </>
           ) : (
-            <span className="text-xs text-muted">Non</span>
+            <span className="text-xs text-muted">{tr.no}</span>
           )}
         </div>
       </td>
       <td className="px-2 py-2">
-        <ViewModeSelect value={feed.view_mode ?? ''} inheritLabel={inherited} onChange={(v) => onSave({ view_mode: v || 'inherit' })} disabled={disabled} aria-label={`Présentation de ${feed.title}`} className={cellSelect} />
+        <ViewModeSelect value={feed.view_mode ?? ''} inheritLabel={inherited} onChange={(v) => onSave({ view_mode: v || 'inherit' })} disabled={disabled} aria-label={tr.viewModeOf(feed.title)} className={cellSelect} />
       </td>
-      <td className="px-2 py-2 text-right text-xs tabular-nums text-muted" title={stats ? `${stats.entries_30d} sur 30 jours${stats.last_entry_at ? ` · dernier article ${agoDate(stats.last_entry_at)}` : ''}` : undefined}>
+      <td className="px-2 py-2 text-right text-xs tabular-nums text-muted" title={stats ? `${tr.activity(stats.entries_30d)}${stats.last_entry_at ? tr.lastEntry(agoDate(stats.last_entry_at)) : ''}` : undefined}>
         {stats ? stats.entries_7d : '–'}
       </td>
       <td className="whitespace-nowrap px-2 py-2 text-right">
         {feed.site_url && (
-          <a href={feed.site_url} target="_blank" rel="noreferrer" className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-muted hover:text-app" aria-label={`Ouvrir le site de ${feed.title}`}>
+          <a href={feed.site_url} target="_blank" rel="noreferrer" className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-muted hover:text-app" aria-label={tr.openSite(feed.title)}>
             <ExternalLink className="size-3.5" />
           </a>
         )}
-        <IconButton label={`Modifier ${feed.title}`} size="sm" onClick={onEdit}>
+        <IconButton label={tr.edit(feed.title)} size="sm" onClick={onEdit}>
           <Pencil className="size-3.5" />
         </IconButton>
       </td>
@@ -642,6 +636,9 @@ function BulkBar({
   onRefresh: () => void
   onDelete: () => void
 }) {
+  const t = useT()
+  const tb = t.subscriptions.bulk
+  const noFolder = t.subscriptions.page.noFolder
   // Liste déroulante « action » : revient sur son intitulé après chaque choix.
   const pick = (label: string, options: { value: string; label: string }[], apply: (v: string) => void, testId: string) => (
     <Select
@@ -667,57 +664,57 @@ function BulkBar({
     <div className="shrink-0 border-t border-app bg-panel px-3 py-2 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]" data-testid="subs-bulk">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium tabular-nums">
-          {count} {plural(count, 'sélectionné')}
+          {tb.selected(count)}
         </span>
-        <IconButton label="Désélectionner" size="sm" onClick={onClear}>
+        <IconButton label={tb.clear} size="sm" onClick={onClear}>
           <X className="size-4" />
         </IconButton>
         <span className="mx-1 h-5 border-l border-app" />
-        <Button size="sm" variant="ghost" onClick={() => onChanges({ disabled: true }, 'Mis en pause')} disabled={disabled} data-testid="bulk-pause">
-          <CirclePause className="size-4" /> Pause
+        <Button size="sm" variant="ghost" onClick={() => onChanges({ disabled: true }, tb.paused)} disabled={disabled} data-testid="bulk-pause">
+          <CirclePause className="size-4" /> {tb.pause}
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => onChanges({ disabled: false }, 'Repris')} disabled={disabled} data-testid="bulk-resume">
-          <CirclePlay className="size-4" /> Reprendre
+        <Button size="sm" variant="ghost" onClick={() => onChanges({ disabled: false }, tb.resumed)} disabled={disabled} data-testid="bulk-resume">
+          <CirclePlay className="size-4" /> {tb.resume}
         </Button>
         {pick(
-          'Déplacer',
-          [...categories.map((c) => ({ value: String(c.id), label: c.title })), { value: 'none', label: 'Sans dossier' }],
-          (v) => onChanges(v === 'none' ? { clear_category: true } : { category_id: Number(v) }, 'Déplacé'),
+          tb.move,
+          [...categories.map((c) => ({ value: String(c.id), label: c.title })), { value: 'none', label: noFolder }],
+          (v) => onChanges(v === 'none' ? { clear_category: true } : { category_id: Number(v) }, tb.moved),
           'bulk-move',
         )}
         {pick(
-          'Présentation',
-          [{ value: 'inherit', label: 'Hériter (dossier ou défaut)' }, ...Object.entries(VIEW_MODE_SPECS).map(([id, s]) => ({ value: id, label: s.label }))],
-          (v) => onChanges({ view_mode: v as FeedChanges['view_mode'] }, 'Présentation'),
+          tb.viewMode,
+          [{ value: 'inherit', label: tb.inherit }, ...Object.entries(VIEW_MODE_SPECS).map(([id, s]) => ({ value: id, label: s.label }))],
+          (v) => onChanges({ view_mode: v as FeedChanges['view_mode'] }, tb.viewMode),
           'bulk-view',
         )}
         {pick(
-          'Article complet',
+          tb.fullArticle,
           EXTRACTION_OPTIONS.map((o) => ({ value: o.id, label: o.short })),
-          (v) => onChanges({ extraction_mode: v as ExtractionMode }, 'Article complet'),
+          (v) => onChanges({ extraction_mode: v as ExtractionMode }, tb.fullArticle),
           'bulk-extraction',
         )}
         {pick(
-          'Intervalle',
+          tb.interval,
           intervalOptions().map((o) => ({ value: String(o.minutes), label: o.label })),
-          (v) => onChanges({ fetch_interval_fixed_min: Number(v) }, 'Intervalle'),
+          (v) => onChanges({ fetch_interval_fixed_min: Number(v) }, tb.interval),
           'bulk-interval',
         )}
         {pick(
-          'Résumés auto',
+          tb.autoSummaries,
           [
-            { value: 'on', label: 'Activer' },
-            { value: 'off', label: 'Désactiver' },
+            { value: 'on', label: tb.enable },
+            { value: 'off', label: tb.disable },
           ],
-          (v) => onChanges({ auto_summary: v === 'on' }, v === 'on' ? 'Résumés automatiques activés' : 'Résumés automatiques désactivés'),
+          (v) => onChanges({ auto_summary: v === 'on' }, v === 'on' ? tb.autoOn : tb.autoOff),
           'bulk-auto',
         )}
         <div className="flex-1" />
         <Button size="sm" variant="ghost" onClick={onRefresh} disabled={disabled}>
-          <RefreshCw className="size-4" /> Rafraîchir
+          <RefreshCw className="size-4" /> {tb.refresh}
         </Button>
         <Button size="sm" variant="ghost" className="text-red-600 dark:text-red-400" onClick={onDelete} disabled={disabled} data-testid="bulk-delete">
-          <Trash2 className="size-4" /> Se désabonner
+          <Trash2 className="size-4" /> {tb.unsubscribe}
         </Button>
       </div>
     </div>

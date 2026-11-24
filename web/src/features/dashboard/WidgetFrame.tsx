@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, CheckCheck, ChevronRight, GripVertical, MoreHorizon
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 import { IconButton, Spinner } from '../../components/ui'
+import { useT } from '../../i18n'
 import { WIDTHS, WIDTH_LABEL, type WidgetWidth } from './layout'
 
 export interface WidgetActions {
@@ -34,6 +35,7 @@ interface Props {
 }
 
 export function WidgetFrame({ widgetId, widgetType, title, count, editing, width, orphan, loading, empty, emptyLabel, onOpen, onMarkAllRead, actions, handleProps, dragging, children }: Props) {
+  const t = useT().dashboard.frame
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -62,8 +64,8 @@ export function WidgetFrame({ widgetId, widgetType, title, count, editing, width
           <button
             type="button"
             data-dnd-handle
-            aria-label="Déplacer le widget"
-            title="Glisser pour déplacer"
+            aria-label={t.move}
+            title={t.dragToMove}
             className="touch-none cursor-grab active:cursor-grabbing -ml-2 rounded-md p-1 text-muted hover:text-app hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
             {...handleProps}
           >
@@ -71,7 +73,7 @@ export function WidgetFrame({ widgetId, widgetType, title, count, editing, width
           </button>
         )}
         {onOpen && !orphan ? (
-          <button type="button" onClick={onOpen} className="group flex items-center gap-2 min-w-0 text-left" title="Ouvrir">
+          <button type="button" onClick={onOpen} className="group flex items-center gap-2 min-w-0 text-left" title={t.open}>
             <h2 className="truncate text-[15px] font-semibold tracking-tight">{title}</h2>
             {count !== undefined && count > 0 && (
               <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted group-hover:bg-accent-100 group-hover:text-accent-700 dark:group-hover:bg-accent-900/40 dark:group-hover:text-accent-200">
@@ -88,21 +90,21 @@ export function WidgetFrame({ widgetId, widgetType, title, count, editing, width
         )}
         <div className="flex-1" />
         {onMarkAllRead && !editing && !orphan && (
-          <IconButton label="Tout marquer comme lu" size="sm" onClick={onMarkAllRead} disabled={empty}>
+          <IconButton label={t.markAllRead} size="sm" onClick={onMarkAllRead} disabled={empty}>
             <CheckCheck className="size-4" />
           </IconButton>
         )}
         {editing && (
           <div className="relative" ref={menuRef}>
-            <IconButton label="Options du widget" size="sm" onClick={() => setMenuOpen((o) => !o)} active={menuOpen}>
+            <IconButton label={t.options} size="sm" onClick={() => setMenuOpen((o) => !o)} active={menuOpen}>
               <MoreHorizontal className="size-4" />
             </IconButton>
             {menuOpen && (
               <div role="menu" className="absolute right-0 top-full z-20 mt-1 w-56 rounded-xl border border-app bg-panel p-1 shadow-lg text-sm">
-                <MenuItem icon={<ArrowUp className="size-4" />} label="Monter" onClick={actions.onMoveUp} close={() => setMenuOpen(false)} />
-                <MenuItem icon={<ArrowDown className="size-4" />} label="Descendre" onClick={actions.onMoveDown} close={() => setMenuOpen(false)} />
+                <MenuItem icon={<ArrowUp className="size-4" />} label={t.moveUp} onClick={actions.onMoveUp} close={() => setMenuOpen(false)} />
+                <MenuItem icon={<ArrowDown className="size-4" />} label={t.moveDown} onClick={actions.onMoveDown} close={() => setMenuOpen(false)} />
                 <div className="flex items-center gap-1 px-2 py-1.5 text-muted">
-                  <span className="flex-1 text-xs">Largeur</span>
+                  <span className="flex-1 text-xs">{t.width}</span>
                   {WIDTHS.map((w) => (
                     <button
                       key={w}
@@ -120,8 +122,8 @@ export function WidgetFrame({ widgetId, widgetType, title, count, editing, width
                     </button>
                   ))}
                 </div>
-                <MenuItem icon={<Settings2 className="size-4" />} label="Configurer…" onClick={actions.onConfigure} close={() => setMenuOpen(false)} />
-                <MenuItem icon={<Trash2 className="size-4" />} label="Retirer" danger onClick={actions.onRemove} close={() => setMenuOpen(false)} />
+                <MenuItem icon={<Settings2 className="size-4" />} label={t.configure} onClick={actions.onConfigure} close={() => setMenuOpen(false)} />
+                <MenuItem icon={<Trash2 className="size-4" />} label={t.remove} danger onClick={actions.onRemove} close={() => setMenuOpen(false)} />
               </div>
             )}
           </div>
@@ -132,16 +134,16 @@ export function WidgetFrame({ widgetId, widgetType, title, count, editing, width
         {orphan ? (
           <div className="flex flex-col items-center gap-3 p-6 text-center text-sm text-muted">
             <Unlink className="size-6" />
-            <p>La cible de ce widget n’existe plus.</p>
+            <p>{t.orphan}</p>
             <div className="flex gap-2">
               {actions.onConfigure && (
                 <button type="button" onClick={actions.onConfigure} className="rounded-lg border border-app px-3 py-1.5 text-app hover:bg-muted">
-                  Changer la source
+                  {t.changeSource}
                 </button>
               )}
               {actions.onRemove && (
                 <button type="button" onClick={actions.onRemove} className="rounded-lg border border-app px-3 py-1.5 text-red-600 dark:text-red-400 hover:bg-muted">
-                  Retirer
+                  {t.remove}
                 </button>
               )}
             </div>
@@ -151,7 +153,7 @@ export function WidgetFrame({ widgetId, widgetType, title, count, editing, width
             <Spinner />
           </div>
         ) : empty ? (
-          <p className="p-6 text-center text-sm text-muted">{emptyLabel ?? 'Rien de nouveau'}</p>
+          <p className="p-6 text-center text-sm text-muted">{emptyLabel ?? t.nothingNew}</p>
         ) : (
           children
         )}

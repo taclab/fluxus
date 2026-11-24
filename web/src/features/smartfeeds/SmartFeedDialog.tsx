@@ -7,6 +7,7 @@ import { api, ApiError, isOnline, unwrap, type SmartFeed, type SmartFeedDefiniti
 import { useToast } from '../../components/feedback'
 import { Button, Dialog, Field, Input, Select } from '../../components/ui'
 import { db } from '../../db/db'
+import { compareText, useT } from '../../i18n'
 import { relativeDate } from '../../lib/format'
 import { syncNow } from '../../sync/engine'
 
@@ -91,10 +92,12 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [preview, setPreview] = useState<{ state: 'idle' | 'loading' | 'ok' | 'error' | 'offline'; count?: number; samples?: { id: number; title: string; feed_id: number; published_at: string }[]; message?: string }>({ state: 'idle' })
   const toast = useToast()
+  const t = useT()
+  const tt = t.smartfeeds.dialog
   const categories = useLiveQuery(() => db.categories.orderBy('position').toArray(), []) ?? []
   const feeds = useLiveQuery(() => db.feeds.toArray(), [])
   const feedMap = useMemo(() => new Map((feeds ?? []).map((f) => [f.id, f])), [feeds])
-  const feedsSorted = useMemo(() => [...(feeds ?? [])].sort((a, b) => a.title.localeCompare(b.title, 'fr')), [feeds])
+  const feedsSorted = useMemo(() => [...(feeds ?? [])].sort((a, b) => compareText(a.title, b.title)), [feeds])
 
   useEffect(() => {
     if (open) {
@@ -125,7 +128,7 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
         const res = unwrap(await api().POST('/api/smart-feeds/preview', { body: d }))
         if (!cancelled) setPreview({ state: 'ok', count: res.count, samples: res.samples })
       } catch (err) {
-        if (!cancelled) setPreview({ state: 'error', message: err instanceof Error ? err.message : 'Erreur' })
+        if (!cancelled) setPreview({ state: 'error', message: err instanceof Error ? err.message : t.common.error })
       }
     }, 500)
     return () => {
@@ -136,7 +139,7 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
 
   async function save() {
     if (!draft.name.trim()) {
-      toast('Donnez un nom au flux intelligent', 'error')
+      toast(tt.nameRequired, 'error')
       return
     }
     setBusy(true)
@@ -146,12 +149,12 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
         ? unwrap(await api().PUT('/api/smart-feeds/{smart_feed_id}', { params: { path: { smart_feed_id: smartFeed.id } }, body }))
         : unwrap(await api().POST('/api/smart-feeds', { body }))
       await db.smartFeeds.put(saved)
-      toast(smartFeed ? 'Flux intelligent mis à jour' : `Flux intelligent « ${saved.name} » créé`, 'success')
+      toast(smartFeed ? tt.updated : tt.created(saved.name), 'success')
       onSaved?.(saved)
       onClose()
       void syncNow()
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Enregistrement impossible', 'error')
+      toast(err instanceof ApiError ? err.message : tt.saveFailed, 'error')
     } finally {
       setBusy(false)
     }
@@ -163,11 +166,11 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
     try {
       unwrap(await api().DELETE('/api/smart-feeds/{smart_feed_id}', { params: { path: { smart_feed_id: smartFeed.id } } }))
       await db.smartFeeds.delete(smartFeed.id)
-      toast('Flux intelligent supprimé', 'success')
+      toast(tt.deleted, 'success')
       onClose()
       void syncNow()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Erreur', 'error')
+      toast(err instanceof Error ? err.message : t.common.error, 'error')
     } finally {
       setBusy(false)
     }
@@ -180,31 +183,31 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
     <Dialog
       open={open}
       onClose={onClose}
-      title={smartFeed ? 'Modifier le flux intelligent' : 'Nouveau flux intelligent'}
+      title={smartFeed ? tt.editTitle : tt.newTitle}
       width="max-w-2xl"
       footer={
         confirmDelete ? (
           <>
-            <span className="mr-auto self-center text-sm text-muted">Supprimer ce flux intelligent ? Les articles ne sont pas touchés.</span>
+            <span className="mr-auto self-center text-sm text-muted">{tt.confirmDelete}</span>
             <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
-              Non
+              {t.common.no}
             </Button>
             <Button variant="danger" onClick={() => void remove()} loading={busy}>
-              Supprimer
+              {t.common.delete}
             </Button>
           </>
         ) : (
           <>
             {smartFeed && (
               <Button variant="ghost" className="mr-auto text-red-600 dark:text-red-400" onClick={() => setConfirmDelete(true)}>
-                Supprimer
+                {t.common.delete}
               </Button>
             )}
             <Button variant="ghost" onClick={onClose}>
-              Annuler
+              {t.common.cancel}
             </Button>
             <Button variant="primary" onClick={() => void save()} loading={busy} data-testid="smartfeed-submit">
-              {smartFeed ? 'Enregistrer' : 'Créer'}
+              {smartFeed ? t.common.save : t.common.create}
             </Button>
           </>
         )
@@ -213,10 +216,10 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
       <div className="grid gap-5 md:grid-cols-[1fr_16rem]">
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Nom">
-              <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Intelligence artificielle" autoFocus data-testid="smartfeed-name" />
+            <Field label={tt.name}>
+              <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={tt.namePlaceholder} autoFocus data-testid="smartfeed-name" />
             </Field>
-            <Field label="Portée">
+            <Field label={tt.scope}>
               <Select
                 value={scopeValue}
                 data-testid="smartfeed-scope"
@@ -229,10 +232,10 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
                   }
                 }}
               >
-                <option value="all">Tous les flux</option>
-                {scopeOrphan && <option value={scopeValue}>Portée supprimée</option>}
+                <option value="all">{tt.allFeeds}</option>
+                {scopeOrphan && <option value={scopeValue}>{tt.scopeDeleted}</option>}
                 {categories.length > 0 && (
-                  <optgroup label="Catégories">
+                  <optgroup label={tt.categories}>
                     {categories.map((c) => (
                       <option key={c.id} value={`category:${c.id}`}>
                         {c.title}
@@ -240,7 +243,7 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
                     ))}
                   </optgroup>
                 )}
-                <optgroup label="Flux">
+                <optgroup label={tt.feeds}>
                   {feedsSorted.map((f) => (
                     <option key={f.id} value={`feed:${f.id}`}>
                       {f.title || f.url}
@@ -251,36 +254,36 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
             </Field>
           </div>
 
-          <div className="flex rounded-lg border border-app bg-muted p-0.5 text-sm" role="radiogroup" aria-label="Mode">
+          <div className="flex rounded-lg border border-app bg-muted p-0.5 text-sm" role="radiogroup" aria-label={tt.mode}>
             {(['keywords', 'regex'] as const).map((m) => (
               <button key={m} type="button" role="radio" aria-checked={draft.mode === m} onClick={() => setDraft({ ...draft, mode: m })} className={clsx('flex-1 rounded-md px-3 py-1.5 font-medium', draft.mode === m ? 'bg-panel text-app shadow-sm' : 'text-muted hover:text-app')}>
-                {m === 'keywords' ? 'Mots-clés' : 'Expression régulière (expert)'}
+                {m === 'keywords' ? tt.keywords : tt.regexMode}
               </button>
             ))}
           </div>
 
           {draft.mode === 'keywords' ? (
             <div className="space-y-3">
-              <KeywordsInput label="Au moins un de" hint="Entrée ou virgule pour ajouter. Sans casse ni accents." values={draft.keywords_any} onChange={(v) => setDraft({ ...draft, keywords_any: v })} testId="kw-any" />
-              <KeywordsInput label="Tous ces mots" values={draft.keywords_all} onChange={(v) => setDraft({ ...draft, keywords_all: v })} testId="kw-all" />
-              <KeywordsInput label="Aucun de" values={draft.keywords_none} onChange={(v) => setDraft({ ...draft, keywords_none: v })} testId="kw-none" />
+              <KeywordsInput label={tt.anyOf} hint={tt.anyOfHint} values={draft.keywords_any} onChange={(v) => setDraft({ ...draft, keywords_any: v })} testId="kw-any" />
+              <KeywordsInput label={tt.allOf} values={draft.keywords_all} onChange={(v) => setDraft({ ...draft, keywords_all: v })} testId="kw-all" />
+              <KeywordsInput label={tt.noneOf} values={draft.keywords_none} onChange={(v) => setDraft({ ...draft, keywords_none: v })} testId="kw-none" />
             </div>
           ) : (
-            <Field label="Expression régulière" hint="Moteur PostgreSQL, insensible à la casse, appliquée au texte sans accents (écrivez « eleve » pour « élève »). Pas de références arrière ; quantificateurs ≤ 255. Ex. : \\m(gpu|cuda)\\M">
-              <Input value={draft.regex ?? ''} onChange={(e) => setDraft({ ...draft, regex: e.target.value })} placeholder="\\m(gpu|cuda)\\M" className="font-mono" data-testid="smartfeed-regex" />
+            <Field label={tt.regex} hint={tt.regexHint}>
+              <Input value={draft.regex ?? ''} onChange={(e) => setDraft({ ...draft, regex: e.target.value })} placeholder={'\\m(gpu|cuda)\\M'} className="font-mono" data-testid="smartfeed-regex" />
             </Field>
           )}
 
           <fieldset className="space-y-1.5">
-            <legend className="text-sm font-medium text-app">Champs examinés</legend>
+            <legend className="text-sm font-medium text-app">{tt.fields}</legend>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
               {(
                 [
-                  ['title', 'Titre'],
-                  ['excerpt', 'Extrait du flux'],
-                  ['author', 'Auteur'],
-                  ['url', 'Adresse'],
-                  ['content', 'Contenu complet'],
+                  ['title', tt.field.title],
+                  ['excerpt', tt.field.excerpt],
+                  ['author', tt.field.author],
+                  ['url', tt.field.url],
+                  ['content', tt.field.content],
                 ] as const
               ).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-1.5">
@@ -289,41 +292,41 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
                 </label>
               ))}
             </div>
-            {draft.fields.content && <p className="text-xs text-muted">Le contenu complet n’existe que pour les articles déjà extraits (mode « Toujours » du flux, ou ouverture dans le lecteur).</p>}
+            {draft.fields.content && <p className="text-xs text-muted">{tt.contentHint}</p>}
           </fieldset>
 
           <div className="rounded-xl border border-app p-3 space-y-2">
             <label className="flex items-center gap-2 text-sm font-medium">
               <input type="checkbox" checked={draft.auto_summary} onChange={(e) => setDraft({ ...draft, auto_summary: e.target.checked })} className="size-4 accent-accent-600" data-testid="smartfeed-auto" />
-              <Sparkles className="size-4 text-accent-500" /> Résumer automatiquement les nouveaux articles
+              <Sparkles className="size-4 text-accent-500" /> {tt.autoSummary}
             </label>
             {draft.auto_summary && (
               <div className="flex items-center gap-2 text-sm text-muted">
-                <span>Au plus</span>
+                <span>{tt.capBefore}</span>
                 <Input type="number" min={1} max={200} value={draft.summary_daily_cap} onChange={(e) => setDraft({ ...draft, summary_daily_cap: Math.max(1, Math.min(200, Number(e.target.value) || 1)) })} className="w-20" />
-                <span>résumés par jour pour ce flux, dans la limite du budget global (Paramètres → Résumés). Modèle économique dédié.</span>
+                <span>{tt.capAfter}</span>
               </div>
             )}
           </div>
         </div>
 
         <aside className="rounded-xl bg-muted/60 p-3 text-sm" data-testid="smartfeed-preview">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Aperçu</p>
-          {preview.state === 'idle' && <p className="text-muted">Ajoutez un mot-clé pour voir les articles correspondants.</p>}
-          {preview.state === 'offline' && <p className="text-muted">Aperçu indisponible hors-ligne.</p>}
-          {preview.state === 'loading' && <p className="animate-soft-pulse text-muted">Recherche…</p>}
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">{tt.preview}</p>
+          {preview.state === 'idle' && <p className="text-muted">{tt.previewIdle}</p>}
+          {preview.state === 'offline' && <p className="text-muted">{tt.previewOffline}</p>}
+          {preview.state === 'loading' && <p className="animate-soft-pulse text-muted">{tt.previewLoading}</p>}
           {preview.state === 'error' && <p className="text-red-600 dark:text-red-400">{preview.message}</p>}
           {preview.state === 'ok' && (
             <>
               <p className="text-app">
-                <span className="text-2xl font-semibold tabular-nums">{preview.count}</span> <span className="text-muted">article{preview.count === 1 ? '' : 's'} sur la période conservée</span>
+                <span className="text-2xl font-semibold tabular-nums">{preview.count}</span> <span className="text-muted">{tt.previewCount(preview.count ?? 0)}</span>
               </p>
               <ul className="mt-2 space-y-1.5">
                 {preview.samples?.map((s) => (
                   <li key={s.id} className="leading-snug">
                     <span className="line-clamp-2 text-app">{s.title}</span>
                     <span className="text-[11px] text-muted">
-                      {feedMap.get(s.feed_id)?.title ?? 'Flux'} · {relativeDate(s.published_at)}
+                      {feedMap.get(s.feed_id)?.title ?? tt.feedFallback} · {relativeDate(s.published_at)}
                     </span>
                   </li>
                 ))}
@@ -338,6 +341,7 @@ export function SmartFeedDialog({ open, smartFeed, preset, onClose, onSaved }: P
 
 /** Saisie de mots-clés en puces : Entrée ou virgule ajoute, Retour arrière sur champ vide retire le dernier. */
 function KeywordsInput({ label, hint, values, onChange, testId }: { label: string; hint?: string; values: string[]; onChange: (v: string[]) => void; testId: string }) {
+  const t = useT()
   const [text, setText] = useState('')
   const commit = () => {
     const parts = text
@@ -362,12 +366,12 @@ function KeywordsInput({ label, hint, values, onChange, testId }: { label: strin
         {values.map((v) => (
           <span key={v} className="inline-flex items-center gap-1 rounded-md bg-accent-100 px-2 py-0.5 text-xs font-medium text-accent-800 dark:bg-accent-900/40 dark:text-accent-100">
             {v}
-            <button type="button" aria-label={`Retirer ${v}`} onClick={() => onChange(values.filter((x) => x !== v))} className="rounded hover:bg-accent-200/60 dark:hover:bg-accent-800/60">
+            <button type="button" aria-label={t.smartfeeds.keywords.remove(v)} onClick={() => onChange(values.filter((x) => x !== v))} className="rounded hover:bg-accent-200/60 dark:hover:bg-accent-800/60">
               <X className="size-3" />
             </button>
           </span>
         ))}
-        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} onBlur={commit} placeholder={values.length ? '' : 'mot ou expression'} className="min-w-[8rem] flex-1 bg-transparent text-sm text-app placeholder:text-muted focus:outline-none" data-testid={testId} />
+        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} onBlur={commit} placeholder={values.length ? '' : t.smartfeeds.keywords.placeholder} className="min-w-[8rem] flex-1 bg-transparent text-sm text-app placeholder:text-muted focus:outline-none" data-testid={testId} />
       </div>
       {hint && <span className="block text-xs text-muted">{hint}</span>}
     </div>

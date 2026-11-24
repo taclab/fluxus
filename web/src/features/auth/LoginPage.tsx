@@ -2,7 +2,10 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { getServerUrl, isCapacitor, setServerUrl, setToken } from '../../api/auth'
 import { api, ApiError, reconfigureClient, unwrap, type Schemas } from '../../api/client'
+import { LanguageSwitch } from '../../components/LanguageSwitch'
 import { Button, Field, Input } from '../../components/ui'
+import { useT } from '../../i18n'
+import { shortDate } from '../../lib/format'
 
 /** Saisie conservée le temps du rechargement qui suit un changement d'adresse du serveur. */
 const HANDOFF_KEY = 'fluxus.login.handoff'
@@ -25,6 +28,7 @@ function takeHandoff(): { password: string; confirm: string } | null {
 const handoff = takeHandoff()
 
 export function LoginPage() {
+  const t = useT().app.login
   const [serverUrl, setServer] = useState(getServerUrl())
   const [showServer, setShowServer] = useState(isCapacitor() || !getServerUrl())
   const [password, setPassword] = useState(handoff?.password ?? '')
@@ -68,7 +72,7 @@ export function LoginPage() {
     e.preventDefault()
     setError(null)
     if (setupRequired && password !== confirm) {
-      setError('Les deux mots de passe ne correspondent pas')
+      setError(t.passwordMismatch)
       return
     }
     setBusy(true)
@@ -95,7 +99,7 @@ export function LoginPage() {
         setToken(res.access_token)
       } else if (isCapacitor()) {
         // Sur mobile : token d'appareil longue durée plutôt qu'un JWT qui expire.
-        const name = `Android · ${new Date().toLocaleDateString('fr-FR')}`
+        const name = `Android · ${shortDate()}`
         const res = unwrap(await api().POST('/api/auth/devices', { body: { name, password } }))
         setToken(res.token)
       } else {
@@ -104,7 +108,7 @@ export function LoginPage() {
       }
     } catch (err) {
       if (err instanceof ApiError) setError(err.message)
-      else setError('Serveur injoignable. Vérifiez l’adresse.')
+      else setError(t.unreachable)
     } finally {
       setBusy(false)
     }
@@ -118,13 +122,13 @@ export function LoginPage() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Fluxus</h1>
             <p className="text-sm text-muted">
-              {setupRequired === null ? 'Connexion au serveur…' : setupRequired ? 'Première connexion : choisissez un mot de passe' : 'Connectez-vous pour continuer'}
+              {setupRequired === null ? t.connecting : setupRequired ? t.firstLogin : t.signInToContinue}
             </p>
           </div>
         </div>
 
         {showServer && (
-          <Field label="Adresse du serveur" hint="Exemple : https://fluxus.mondomaine.fr">
+          <Field label={t.serverUrl} hint={t.serverUrlHint}>
             <Input
               type="url"
               value={serverUrl}
@@ -137,7 +141,7 @@ export function LoginPage() {
           </Field>
         )}
 
-        <Field label="Mot de passe">
+        <Field label={t.password}>
           <Input
             type="password"
             value={password}
@@ -150,7 +154,7 @@ export function LoginPage() {
         </Field>
 
         {setupRequired && (
-          <Field label="Confirmer le mot de passe">
+          <Field label={t.confirmPassword}>
             <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} minLength={8} required autoComplete="new-password" />
           </Field>
         )}
@@ -158,14 +162,16 @@ export function LoginPage() {
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={setupRequired === null}>
-          {setupRequired ? 'Créer le compte' : 'Se connecter'}
+          {setupRequired ? t.createAccount : t.signIn}
         </Button>
 
         {!showServer && (
           <button type="button" onClick={() => setShowServer(true)} className="text-xs text-muted hover:text-app w-full text-center">
-            Changer l’adresse du serveur
+            {t.changeServer}
           </button>
         )}
+
+        <LanguageSwitch />
       </form>
     </div>
   )

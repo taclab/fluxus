@@ -1,5 +1,6 @@
 /** Lecture d'un flux SSE obtenu par POST (EventSource ne sait pas faire de POST). */
 
+import { getT } from '../i18n'
 import { apiUrl, authHeaders } from './client'
 
 export interface SseEvent {
@@ -14,7 +15,7 @@ export async function* postSse(path: string, signal?: AbortSignal): AsyncGenerat
     signal,
   })
   if (!response.ok || !response.body) {
-    let message = `Erreur HTTP ${response.status}`
+    let message = getT().common.httpError(response.status)
     try {
       const body = await response.json()
       if (body?.detail) message = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)

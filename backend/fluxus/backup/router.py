@@ -27,7 +27,8 @@ router = APIRouter(prefix="/api/backup", tags=["backup"])
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 MAX_IMPORT_BYTES = 1024 * 1024 * 1024
-CONFIRM_WORD = "REMPLACER"
+# Un mot par langue de l'interface (`web/src/i18n/messages/settings.ts`, `backup.confirmWord`).
+CONFIRM_WORDS = ("REMPLACER", "REPLACE")
 # Lien d'export à usage unique : le navigateur télécharge directement sur le disque (pas de copie en
 # mémoire dans l'onglet). Un seul lien valide à la fois ; seule son empreinte est stockée.
 EXPORT_TICKET_KEY = "_backup_export_ticket"
@@ -132,8 +133,8 @@ async def import_backup(request: Request, _: Auth, session: Session) -> ImportRe
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Formulaire incomplet : fichier, mot de passe et confirmation attendus")
     if file.size is not None and file.size > MAX_IMPORT_BYTES:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Sauvegarde trop volumineuse (1 Go au plus)")
-    if confirm.strip().upper() != CONFIRM_WORD:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Confirmation manquante : saisissez « {CONFIRM_WORD} »")
+    if confirm.strip().upper() not in CONFIRM_WORDS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Confirmation manquante : saisissez « REMPLACER »")
     if not await password_matches(request, session, password):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Mot de passe incorrect")
     try:

@@ -7,6 +7,7 @@
  */
 
 import type { Category, Feed, Schemas, SmartFeed } from '../../api/client'
+import { compareText } from '../../i18n'
 
 export type RootItem = { kind: 'cat'; id: number } | { kind: 'feed'; id: number }
 
@@ -37,7 +38,7 @@ export function parseDragId(id: string | number): DragRef | null {
 
 /** Tri d'affichage : position manuelle, puis titre pour les égalités (anciennes données sans position). */
 export function compareFeeds(a: Feed, b: Feed): number {
-  return (a.position ?? 0) - (b.position ?? 0) || a.title.localeCompare(b.title, 'fr')
+  return (a.position ?? 0) - (b.position ?? 0) || compareText(a.title, b.title)
 }
 
 export function groupFeeds(feeds: Feed[]): Map<number | null, Feed[]> {
@@ -57,7 +58,7 @@ export function buildDraft(categories: Category[], feeds: Feed[], smartFeeds: Sm
     ...categories.map((c) => ({ item: { kind: 'cat', id: c.id } as RootItem, position: c.position ?? 0, title: c.title })),
     ...(grouped.get(null) ?? []).map((f) => ({ item: { kind: 'feed', id: f.id } as RootItem, position: f.position ?? 0, title: f.title })),
   ]
-  rootEntries.sort((a, b) => a.position - b.position || a.title.localeCompare(b.title, 'fr'))
+  rootEntries.sort((a, b) => a.position - b.position || compareText(a.title, b.title))
   const map = new Map<number, number[]>()
   for (const [key, list] of grouped) if (key !== null) map.set(key, list.map((f) => f.id))
   for (const c of categories) if (!map.has(c.id)) map.set(c.id, [])

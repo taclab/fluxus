@@ -545,6 +545,19 @@ Classe `dark` sur `<html>`, appliquée avant le premier rendu par un script inli
 `system`. Variables CSS (`--bg`, `--fg`…) exposées comme utilitaires Tailwind (`bg-app`,
 `text-muted`, `border-app`).
 
+### Langue de l'interface
+
+Français et anglais, sans bibliothèque : `web/src/i18n/`. Un catalogue par espace de noms
+(`messages/<zone>.ts`, `fr` puis `en: typeof fr`) ; le français est la référence et le typage
+refuse une clé manquante en anglais (`i18n.test.ts` vérifie aussi la forme à l'exécution). Un
+message paramétré ou au pluriel est une fonction. Lecture par `useT()` dans un composant,
+`getT()` ailleurs, toujours au moment de l'appel (jamais une constante de module). Préférence par
+appareil (`localePref`, `fluxus.locale`), déduite de la langue du navigateur au premier lancement,
+choisie dans *Paramètres → Apparence*. `LocaleRoot` remonte l'appli quand elle change : dates
+(`lib/format.ts`, `Intl` dans la langue courante) et textes calculés hors React suivent. Les
+messages `detail` du serveur restent en français ; la langue des résumés est un réglage serveur
+distinct (`llm_language`).
+
 ### Flux intelligents côté client
 
 Dexie v3 : index multiEntry `*smart_feed_ids` sur le champ serveur, table `smartFeeds`. La vue

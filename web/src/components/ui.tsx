@@ -13,6 +13,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 
+import { useT } from '../i18n'
 import { ConfirmContext, ToastContext, type ConfirmOptions, type ToastKind } from './feedback'
 
 /* ---------- Boutons ---------- */
@@ -136,6 +137,7 @@ export function Dialog({
   footer?: ReactNode
   width?: string
 }) {
+  const t = useT().app.ui
   useEffect(() => {
     if (!open) return
     // Fenêtres empilées (confirmation au-dessus d'un éditeur) : Échap ne ferme que celle du dessus.
@@ -166,7 +168,7 @@ export function Dialog({
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-app">
           <h2 className="text-base font-semibold">{title}</h2>
-          <IconButton label="Fermer" onClick={onClose} size="sm">
+          <IconButton label={t.close} onClick={onClose} size="sm">
             <X className="size-4" />
           </IconButton>
         </div>
@@ -222,6 +224,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 /** Confirmation dans l'application : `window.confirm` peut être bloqué en silence par le navigateur
  * (« empêcher ce site d'ouvrir des boîtes de dialogue », extensions) et renvoie alors faux. */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const t = useT().app.ui
   const [pending, setPending] = useState<(ConfirmOptions & { resolve: (ok: boolean) => void }) | null>(null)
   const ask = useCallback((options: ConfirmOptions) => new Promise<boolean>((resolve) => setPending({ ...options, resolve })), [])
   const answer = useCallback(
@@ -243,10 +246,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         footer={
           <>
             <Button variant="ghost" onClick={cancel}>
-              Annuler
+              {t.cancel}
             </Button>
             <Button variant={pending?.danger ? 'danger' : 'primary'} onClick={() => answer(true)} autoFocus data-testid="confirm-ok">
-              {pending?.confirmLabel ?? 'Confirmer'}
+              {pending?.confirmLabel ?? t.confirm}
             </Button>
           </>
         }

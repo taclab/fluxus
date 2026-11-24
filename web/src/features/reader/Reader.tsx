@@ -15,6 +15,7 @@ import { recordChange } from '../../sync/engine'
 import { SummaryPanel } from '../summary/SummaryPanel'
 import { openExternal } from '../../lib/links'
 import { FeedIcon } from '../feeds/FeedIcon'
+import { getLocale, useT } from '../../i18n'
 
 interface Props {
   entryId: number | null
@@ -25,6 +26,8 @@ interface Props {
 }
 
 export function Reader({ entryId, onBack, summaryRequested, fullContentRequested, onCreateSmartFeed }: Props) {
+  const tt = useT()
+  const t = tt.reader
   const raw = useLiveQuery(async () => (entryId ? ((await db.entries.get(entryId)) ?? null) : null), [entryId])
   // Entre deux articles, useLiveQuery renvoie encore le résultat précédent jusqu'à la première émission de
   // la nouvelle requête : on le traite comme « en chargement » plutôt que d'afficher un instant l'ancien
@@ -77,7 +80,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
     async (mode: 'auto' | 'http' | 'browser' = 'auto') => {
       if (!entry) return
       if (!isOnline()) {
-        toast('Hors ligne : impossible de récupérer l’article complet', 'error')
+        toast(t.offlineFull, 'error')
         return
       }
       setExtracting(true)
@@ -91,15 +94,15 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
           const server = toLocalEntry(updated)
           await db.entries.put(current ? { ...server, read: current.read, readFlag: current.readFlag, starred: current.starred, starredFlag: current.starredFlag } : server)
         })
-        if (updated.extraction_status === 'failed') toast(updated.extraction_error ?? 'Extraction impossible', 'error')
+        if (updated.extraction_status === 'failed') toast(updated.extraction_error ?? t.extractionFailed, 'error')
         else setShowFull(true)
       } catch (err) {
-        toast(err instanceof Error ? err.message : 'Erreur', 'error')
+        toast(err instanceof Error ? err.message : tt.common.error, 'error')
       } finally {
         setExtracting(false)
       }
     },
-    [entry, toast],
+    [entry, toast, t, tt],
   )
 
   useEffect(() => {
@@ -122,7 +125,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
       <div className={clsx('flex h-full flex-col bg-app', !onBack && 'hidden md:flex')}>
         {onBack && (
           <header className="flex h-14 shrink-0 items-center gap-1 border-b border-app bg-panel px-2">
-            <IconButton label="Retour à la liste" onClick={onBack}>
+            <IconButton label={t.backToList} onClick={onBack}>
               <ChevronLeft className="size-5" />
             </IconButton>
           </header>
@@ -132,12 +135,12 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
             <Spinner />
           </div>
         ) : missing ? (
-          <EmptyState icon={<AlignLeft className="size-10" />} title="Article introuvable sur cet appareil" hint="Il n’a pas encore été synchronisé ou a été purgé de la base locale." />
+          <EmptyState icon={<AlignLeft className="size-10" />} title={t.notFoundTitle} hint={t.notFoundHint} />
         ) : (
         <EmptyState
           icon={<AlignLeft className="size-10" />}
-          title="Sélectionnez un article"
-          hint="Naviguez avec j / k, marquez comme lu avec m, mettez en favori avec s, résumez avec r."
+          title={t.selectTitle}
+          hint={t.selectHint}
           action={
             <div className="flex flex-wrap justify-center gap-1.5 text-xs text-muted mt-2">
               <Kbd>j</Kbd>
@@ -172,7 +175,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
     <article className="flex h-full flex-col bg-app">
       <header className="flex items-center gap-1 h-14 px-2 border-b border-app bg-panel shrink-0">
         {onBack && (
-          <IconButton label="Retour à la liste" onClick={onBack}>
+          <IconButton label={t.backToList} onClick={onBack}>
             <ChevronLeft className="size-5" />
           </IconButton>
         )}
@@ -181,7 +184,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
           <ThemeToggle size="md" />
         </span>
         <div className="relative" ref={typoRef}>
-          <IconButton label="Typographie de lecture" active={typoOpen} onClick={() => setTypoOpen((o) => !o)}>
+          <IconButton label={t.typography} active={typoOpen} onClick={() => setTypoOpen((o) => !o)}>
             <Type className="size-5" />
           </IconButton>
           {typoOpen && (
@@ -190,15 +193,15 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
             </div>
           )}
         </div>
-        <IconButton label={entry.read ? 'Marquer non lu (m)' : 'Marquer lu (m)'} onClick={() => void recordChange(entry.id, { read: !entry.read })}>
+        <IconButton label={entry.read ? t.markUnread : t.markRead} onClick={() => void recordChange(entry.id, { read: !entry.read })}>
           {entry.read ? <CircleCheck className="size-5" /> : <Circle className="size-5" />}
         </IconButton>
-        <IconButton label={entry.starred ? 'Retirer des favoris (s)' : 'Ajouter aux favoris (s)'} active={entry.starred} onClick={() => void recordChange(entry.id, { starred: !entry.starred })}>
+        <IconButton label={entry.starred ? t.unstar : t.star} active={entry.starred} onClick={() => void recordChange(entry.id, { starred: !entry.starred })}>
           <Star className={clsx('size-5', entry.starred && 'fill-amber-400 text-amber-400')} />
         </IconButton>
         {!isVideo && (
           <IconButton
-            label={hasFull ? (showFull ? 'Voir le contenu du flux (f)' : 'Voir l’article complet (f)') : 'Récupérer l’article complet (f)'}
+            label={hasFull ? (showFull ? t.showFeedContent : t.showFull) : t.fetchFull}
             active={hasFull && showFull}
             onClick={() => (hasFull ? setShowFull((s) => !s) : void fetchFull())}
             disabled={extracting}
@@ -207,7 +210,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
           </IconButton>
         )}
         <IconButton
-          label="Résumer (r)"
+          label={t.summarize}
           active={summaryOpen}
           onClick={() => {
             setSummaryOpen(true)
@@ -217,12 +220,12 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
           <Sparkles className="size-5" />
         </IconButton>
         {onCreateSmartFeed && (
-          <IconButton label="Créer un flux intelligent à partir de ce flux" onClick={() => onCreateSmartFeed(entry.feed_id)} className="hidden sm:inline-flex">
+          <IconButton label={t.createSmartFeed} onClick={() => onCreateSmartFeed(entry.feed_id)} className="hidden sm:inline-flex">
             <WandSparkles className="size-5" />
           </IconButton>
         )}
         {entry.url && (
-          <IconButton label="Ouvrir l’original (v)" onClick={() => openExternal(entry.url)}>
+          <IconButton label={t.openOriginal} onClick={() => openExternal(entry.url)}>
             <ExternalLink className="size-5" />
           </IconButton>
         )}
@@ -252,7 +255,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
             <div className="aspect-video w-full overflow-hidden rounded-xl bg-black">
               <iframe
                 ref={playerRef}
-                src={`https://www.youtube-nocookie.com/embed/${youtubeId}?enablejsapi=1&rel=0&hl=fr`}
+                src={`https://www.youtube-nocookie.com/embed/${youtubeId}?enablejsapi=1&rel=0&hl=${getLocale()}`}
                 title={entry.title}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
@@ -265,19 +268,19 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
 
           {entry.extraction_status === 'failed' && !isVideo && (
             <p className="text-xs text-muted rounded-lg bg-muted px-3 py-2">
-              Article complet indisponible : {entry.extraction_error}.{' '}
+              {t.fullUnavailable(entry.extraction_error ?? '')}{' '}
               <button type="button" className="underline" onClick={() => void fetchFull('browser')}>
-                Réessayer via le navigateur
+                {t.retryBrowser}
               </button>
             </p>
           )}
 
-          {html ? <div className="prose-reader text-app" dangerouslySetInnerHTML={{ __html: html }} /> : !isVideo && <p className="text-muted text-sm">Ce flux ne fournit pas de contenu. Utilisez « Article complet » pour le récupérer.</p>}
+          {html ? <div className="prose-reader text-app" dangerouslySetInnerHTML={{ __html: html }} /> : !isVideo && <p className="text-muted text-sm">{t.noContent}</p>}
 
           {entry.url && (
             <p className="pt-6 border-t border-app">
               <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-accent-600 dark:text-accent-300 hover:underline">
-                Lire sur {hostname(entry.url)} <ExternalLink className="size-3.5" />
+                {t.readOn(hostname(entry.url))} <ExternalLink className="size-3.5" />
               </a>
             </p>
           )}

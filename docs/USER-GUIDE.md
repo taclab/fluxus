@@ -1,6 +1,8 @@
 # User guide
 
-The interface is in French; labels are quoted as they appear.
+The interface is available in French and English: it follows the browser language on first launch,
+and *Settings → Appearance → Interface language* changes it (per device, like the theme). Labels
+below are quoted in French, as they appear with the French interface.
 
 ## Interface
 

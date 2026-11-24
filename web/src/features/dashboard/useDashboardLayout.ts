@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api, ApiError, apiUrl, authHeaders, isOnline, unwrap, type Category, type Feed } from '../../api/client'
 import { db, getMeta, setMeta } from '../../db/db'
+import { getT } from '../../i18n'
 import { buildDefaultLayout, parseLayout, serializeLayout, type AnyWidget, type DashboardLayout, type ParsedLayout } from './layout'
 
 const META_KEY = 'dashboard.layout'
@@ -118,7 +119,7 @@ export async function flushDashboardLayout(): Promise<void> {
     if ((await getMeta(META_KEY)) === json) await db.meta.delete(DIRTY_KEY)
   } else if (out.kind === 'conflict') {
     await adoptServer(out.serverJson, out.version)
-    onConflict?.('Disposition mise à jour depuis un autre appareil')
+    onConflict?.(getT().dashboard.layoutUpdatedElsewhere)
   }
 }
 
@@ -133,9 +134,9 @@ export async function resetDashboardLayout(): Promise<void> {
   const out = await patchServer('')
   if (out.kind === 'conflict') {
     await adoptServer(out.serverJson, out.version)
-    onConflict?.('Disposition mise à jour depuis un autre appareil')
+    onConflict?.(getT().dashboard.layoutUpdatedElsewhere)
   } else if (out.kind === 'error') {
-    throw new Error('Réinitialisation impossible : serveur injoignable')
+    throw new Error(getT().dashboard.resetUnreachable)
   }
 }
 
@@ -195,14 +196,14 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
         if (decision === 'take-server') {
           await adoptServer(settings.values.dashboard_layout, serverVersion)
           // Même contenu que le cache : c'est notre écriture, envoyée à la fermeture de l'onglet.
-          if (dirty && settings.values.dashboard_layout !== localRaw) notifyRef.current?.('Disposition mise à jour depuis un autre appareil')
+          if (dirty && settings.values.dashboard_layout !== localRaw) notifyRef.current?.(getT().dashboard.layoutUpdatedElsewhere)
         } else if (decision === 'push-local' && localRaw) {
           const out = await patchServer(localRaw)
           if (out.kind === 'ok') {
             if ((await getMeta(META_KEY)) === localRaw) await db.meta.delete(DIRTY_KEY)
           } else if (out.kind === 'conflict') {
             await adoptServer(out.serverJson, out.version)
-            notifyRef.current?.('Disposition mise à jour depuis un autre appareil')
+            notifyRef.current?.(getT().dashboard.layoutUpdatedElsewhere)
           }
         } else if (decision === 'keep-local' || decision === 'none') {
           await setKnownVersion(serverVersion)
@@ -269,7 +270,7 @@ export function useDashboardLayout(categories: Category[], feeds: Feed[], notify
             if (current === json) await db.meta.delete(DIRTY_KEY)
           } else if (out.kind === 'conflict') {
             await adoptServer(out.serverJson, out.version)
-            notifyRef.current?.('Disposition mise à jour depuis un autre appareil')
+            notifyRef.current?.(getT().dashboard.layoutUpdatedElsewhere)
           }
         })()
       }, SAVE_DELAY_MS)

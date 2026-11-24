@@ -13,26 +13,27 @@ export interface ReadingPrefs {
 }
 
 /** `body`/`heading` : noms affichés ; `bodyCss`/`headingCss` : familles CSS réelles (fontsource ajoute « Variable »). */
-export const READING_FONTS: { id: ReadingFont; label: string; body: string; heading: string; bodyCss: string; headingCss: string; description: string }[] = [
-  { id: 'editorial', label: 'Éditorial', body: 'Source Serif 4', heading: 'Inter', bodyCss: "'Source Serif 4 Variable', Georgia, serif", headingCss: "'Inter Variable', system-ui, sans-serif", description: 'Serif contemporain pour le texte, titres sans serif. Le réglage par défaut.' },
-  { id: 'literary', label: 'Littéraire', body: 'Literata', heading: 'Literata', bodyCss: "'Literata Variable', Georgia, serif", headingCss: "'Literata Variable', Georgia, serif", description: 'Serif de lecture longue, tout en serif, comme un livre numérique.' },
-  { id: 'journal', label: 'Journal', body: 'Lora', heading: 'Montserrat', bodyCss: "'Lora Variable', Georgia, serif", headingCss: "'Montserrat Variable', system-ui, sans-serif", description: 'Serif chaleureux et titres géométriques, esprit magazine.' },
-  { id: 'modern', label: 'Moderne', body: 'Inter', heading: 'Inter', bodyCss: "'Inter Variable', system-ui, sans-serif", headingCss: "'Inter Variable', system-ui, sans-serif", description: 'Tout en sans serif, net et compact.' },
-  { id: 'legible', label: 'Lisible', body: 'Atkinson Hyperlegible', heading: 'Atkinson Hyperlegible', bodyCss: "'Atkinson Hyperlegible', system-ui, sans-serif", headingCss: "'Atkinson Hyperlegible', system-ui, sans-serif", description: 'Conçue pour distinguer chaque lettre, idéale en basse vision ou sur petit écran.' },
-  { id: 'system', label: 'Système', body: 'system-ui', heading: 'system-ui', bodyCss: 'system-ui, -apple-system, sans-serif', headingCss: 'system-ui, -apple-system, sans-serif', description: 'Les polices natives de l’appareil, sans téléchargement.' },
+/** Libellés et descriptions : `t.app.typography` (catalogues de traduction). */
+export const READING_FONTS: { id: ReadingFont; body: string; heading: string; bodyCss: string; headingCss: string }[] = [
+  { id: 'editorial', body: 'Source Serif 4', heading: 'Inter', bodyCss: "'Source Serif 4 Variable', Georgia, serif", headingCss: "'Inter Variable', system-ui, sans-serif" },
+  { id: 'literary', body: 'Literata', heading: 'Literata', bodyCss: "'Literata Variable', Georgia, serif", headingCss: "'Literata Variable', Georgia, serif" },
+  { id: 'journal', body: 'Lora', heading: 'Montserrat', bodyCss: "'Lora Variable', Georgia, serif", headingCss: "'Montserrat Variable', system-ui, sans-serif" },
+  { id: 'modern', body: 'Inter', heading: 'Inter', bodyCss: "'Inter Variable', system-ui, sans-serif", headingCss: "'Inter Variable', system-ui, sans-serif" },
+  { id: 'legible', body: 'Atkinson Hyperlegible', heading: 'Atkinson Hyperlegible', bodyCss: "'Atkinson Hyperlegible', system-ui, sans-serif", headingCss: "'Atkinson Hyperlegible', system-ui, sans-serif" },
+  { id: 'system', body: 'system-ui', heading: 'system-ui', bodyCss: 'system-ui, -apple-system, sans-serif', headingCss: 'system-ui, -apple-system, sans-serif' },
 ]
 
-export const READING_SIZES: { id: ReadingSize; label: string; px: number }[] = [
-  { id: 's', label: 'Petite', px: 16 },
-  { id: 'm', label: 'Normale', px: 18 },
-  { id: 'l', label: 'Grande', px: 20 },
-  { id: 'xl', label: 'Très grande', px: 23 },
+export const READING_SIZES: { id: ReadingSize; px: number }[] = [
+  { id: 's', px: 16 },
+  { id: 'm', px: 18 },
+  { id: 'l', px: 20 },
+  { id: 'xl', px: 23 },
 ]
 
-export const READING_WIDTHS: { id: ReadingWidth; label: string; rem: number }[] = [
-  { id: 'narrow', label: 'Étroite', rem: 36 },
-  { id: 'normal', label: 'Normale', rem: 44 },
-  { id: 'wide', label: 'Large', rem: 56 },
+export const READING_WIDTHS: { id: ReadingWidth; rem: number }[] = [
+  { id: 'narrow', rem: 36 },
+  { id: 'normal', rem: 44 },
+  { id: 'wide', rem: 56 },
 ]
 
 const KEY = 'fluxus.reading'

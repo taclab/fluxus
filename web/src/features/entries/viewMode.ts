@@ -14,6 +14,7 @@ import { AlignJustify, GalleryVertical, LayoutGrid, LayoutList, Rows3 } from 'lu
 
 import type { Category, Feed, SmartFeed } from '../../api/client'
 import type { View } from '../../app/view'
+import { getT } from '../../i18n'
 
 export type ViewMode = NonNullable<Feed['view_mode']>
 export type ListLayout = 'split' | 'full'
@@ -26,21 +27,22 @@ interface ViewModeSpec {
   listClass: string
 }
 
-/** Table unique des présentations : menus, <ul>, rendu des lignes et validation en dérivent. */
+/** Table unique des présentations : menus, <ul>, rendu des lignes et validation en dérivent.
+ * `label` est un accesseur : lu dans la langue courante à chaque usage, jamais figé au chargement. */
 export const VIEW_MODE_SPECS: Record<ViewMode, ViewModeSpec> = {
-  compact: { label: 'Compacte', Icon: Rows3, layout: 'split', listClass: '' },
-  cards: { label: 'Cartes', Icon: LayoutList, layout: 'split', listClass: 'p-2 space-y-2' },
-  grid: { label: 'Grille', Icon: LayoutGrid, layout: 'full', listClass: 'grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4' },
-  magazine: { label: 'Magazine', Icon: GalleryVertical, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
-  list: { label: 'Liste', Icon: Rows3, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
-  titles: { label: 'Titres', Icon: AlignJustify, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
+  compact: { get label() { return getT().entries.viewMode.compact }, Icon: Rows3, layout: 'split', listClass: '' },
+  cards: { get label() { return getT().entries.viewMode.cards }, Icon: LayoutList, layout: 'split', listClass: 'p-2 space-y-2' },
+  grid: { get label() { return getT().entries.viewMode.grid }, Icon: LayoutGrid, layout: 'full', listClass: 'grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4' },
+  magazine: { get label() { return getT().entries.viewMode.magazine }, Icon: GalleryVertical, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
+  list: { get label() { return getT().entries.viewMode.list }, Icon: Rows3, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
+  titles: { get label() { return getT().entries.viewMode.titles }, Icon: AlignJustify, layout: 'full', listClass: 'mx-auto w-full max-w-6xl' },
 }
 export const VIEW_MODES = Object.keys(VIEW_MODE_SPECS) as ViewMode[]
 export const DEFAULT_VIEW_MODE: ViewMode = 'compact'
 
 export const LAYOUT_GROUPS: { layout: ListLayout; label: string }[] = [
-  { layout: 'split', label: 'Avec l’article à côté' },
-  { layout: 'full', label: 'Pleine largeur' },
+  { layout: 'split', get label() { return getT().entries.viewMode.layoutSplit } },
+  { layout: 'full', get label() { return getT().entries.viewMode.layoutFull } },
 ]
 
 export function modesFor(layout: ListLayout): ViewMode[] {
@@ -92,8 +94,9 @@ export function resolveViewMode(
 
 /** Libellé de l'origine, pour le menu et l'écran Abonnements. */
 export function sourceLabel(r: Pick<ResolvedViewMode, 'source' | 'inheritedFrom' | 'target'>): string {
-  if (r.target.kind === 'default') return 'Affichage par défaut (Tous, Non lus, Favoris…)'
-  if (r.source === 'own') return r.target.kind === 'category' ? 'Propre à ce dossier' : 'Propre à ce flux'
-  if (r.source === 'category') return `Hérité du dossier « ${r.inheritedFrom} »`
-  return 'Affichage par défaut'
+  const t = getT().entries.viewMode
+  if (r.target.kind === 'default') return t.sourceDefaultViews
+  if (r.source === 'own') return r.target.kind === 'category' ? t.sourceOwnFolder : t.sourceOwnFeed
+  if (r.source === 'category') return t.sourceInherited(r.inheritedFrom ?? '')
+  return t.sourceDefault
 }

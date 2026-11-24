@@ -13,7 +13,7 @@ source readers don't offer in one place:
 
 ![Dashboard](docs/screenshots/dashboard.jpg)
 
-The interface is in French. Four Docker containers, PostgreSQL as the only dependency, no external queue.
+The interface is available in French and English. Four Docker containers, PostgreSQL as the only dependency, no external queue.
 
 ## Quick start
 

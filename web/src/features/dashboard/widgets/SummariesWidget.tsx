@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react'
 
 import type { View } from '../../../app/view'
 import { relativeDate } from '../../../lib/format'
+import { useT } from '../../../i18n'
 import { useDashboardData } from '../dashboardContext'
 import { viewForSource, widgetTitle, type SummariesWidget as SummariesWidgetModel, type WidgetWidth } from '../layout'
 import { latestSummaries } from '../queries'
@@ -32,6 +33,7 @@ function firstLines(md: string): string {
 
 export function SummariesWidget({ widget, editing, actions, onOpenEntry, handleProps, dragging }: Props) {
   const data = useDashboardData()
+  const t = useT()
   const { title } = widgetTitle(widget, data.categoryMap, data.feedMap)
   const rows = useLiveQuery(() => latestSummaries(widget.limit), [widget.limit])
   const items = rows ?? []
@@ -45,7 +47,7 @@ export function SummariesWidget({ widget, editing, actions, onOpenEntry, handleP
       width={widget.width as WidgetWidth}
       loading={rows === undefined}
       empty={items.length === 0}
-      emptyLabel="Aucun résumé pour l’instant. Appuyez sur r dans un article."
+      emptyLabel={t.dashboard.summaries.empty}
       actions={actions}
       handleProps={handleProps}
       dragging={dragging}

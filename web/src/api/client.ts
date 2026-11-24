@@ -2,6 +2,7 @@ import createClient, { type Middleware } from 'openapi-fetch'
 
 import type { components, paths } from './schema'
 import { EPOCH_HEADER, knownEpoch, markEpochStale, STALE_EPOCH_CODE, STALE_EPOCH_EVENT } from '../sync/epoch'
+import { getT } from '../i18n'
 import { getServerUrl, getToken, setToken } from './auth'
 
 export type Schemas = components['schemas']
@@ -22,7 +23,7 @@ export class ApiError extends Error {
   status: number
   detail: unknown
   constructor(status: number, detail: unknown) {
-    super(typeof detail === 'string' ? detail : extractMessage(detail) ?? `Erreur HTTP ${status}`)
+    super(typeof detail === 'string' ? detail : extractMessage(detail) ?? getT().common.httpError(status))
     this.status = status
     this.detail = detail
   }

@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { api, isOnline, unwrap, type Category, type Feed, type SmartFeed } from '../../api/client'
 import { useToast } from '../../components/feedback'
 import { db } from '../../db/db'
+import { useT } from '../../i18n'
 import { syncNow } from '../../sync/engine'
 import type { View } from '../../app/view'
 import { Count, FeedIcon } from './FeedIcon'
@@ -50,6 +51,8 @@ interface Props {
 
 export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, unreadBySmartFeed, collapsed, onToggleCategory, onExpandCategory, isActive, onSelect, onEditFeed, onEditCategory, onEditSmartFeed, onAddFeed }: Props) {
   const toast = useToast()
+  const t = useT()
+  const tt = t.subscriptions.tree
   const base = useMemo(() => buildDraft(categories, feeds, smartFeeds), [categories, feeds, smartFeeds])
   const [draft, setDraft] = useState<Draft | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -166,7 +169,7 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
   const commit = useCallback(
     async (changes: ReorderChanges) => {
       if (!isOnline()) {
-        toast('Réorganisation impossible hors connexion', 'error')
+        toast(tt.offlineReorder, 'error')
         setDraft(null)
         return
       }
@@ -178,12 +181,12 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
         })
         unwrap(await api().POST('/api/subscriptions/reorder', { body: changes.body }))
       } catch (err) {
-        toast(err instanceof Error ? err.message : 'Réorganisation impossible', 'error')
+        toast(err instanceof Error ? err.message : tt.reorderFailed, 'error')
         setDraft(null)
       }
       void syncNow()
     },
-    [toast],
+    [toast, tt],
   )
 
   const finish = useCallback(
@@ -242,18 +245,18 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
   }
 
   const announcements = {
-    onDragStart: ({ active }: { active: { id: string | number } }) => `${labelFor(String(active.id))} saisi.`,
-    onDragOver: ({ over }: { over: { id: string | number } | null }) => (over ? `Déplacé vers ${labelFor(String(over.id))}.` : 'Hors de la liste.'),
-    onDragEnd: ({ over }: { over: { id: string | number } | null }) => (over ? 'Déposé.' : 'Déplacement annulé.'),
-    onDragCancel: () => 'Déplacement annulé.',
+    onDragStart: ({ active }: { active: { id: string | number } }) => tt.picked(labelFor(String(active.id))),
+    onDragOver: ({ over }: { over: { id: string | number } | null }) => (over ? tt.movedTo(labelFor(String(over.id))) : tt.outside),
+    onDragEnd: ({ over }: { over: { id: string | number } | null }) => (over ? tt.dropped : tt.cancelled),
+    onDragCancel: () => tt.cancelled,
   }
 
   function labelFor(id: string): string {
     const ref = parseDragId(id)
     if (!ref) return id
-    if (ref.kind === 'cat') return `le dossier ${catById.get(ref.id)?.title ?? ''}`
-    if (ref.kind === 'feed') return `le flux ${feedById.get(ref.id)?.title ?? ''}`
-    if (ref.kind === 'smart') return `le flux intelligent ${smartById.get(ref.id)?.name ?? ''}`
+    if (ref.kind === 'cat') return tt.folderRef(catById.get(ref.id)?.title ?? '')
+    if (ref.kind === 'feed') return tt.feedRef(feedById.get(ref.id)?.title ?? '')
+    if (ref.kind === 'smart') return tt.smartRef(smartById.get(ref.id)?.name ?? '')
     return ''
   }
 
@@ -261,12 +264,12 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
     <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragOver={applyHover} onDragMove={applyHover} onDragEnd={finish} onDragCancel={() => finish(null)} accessibility={{ announcements }}>
       <SortableContext items={items} strategy={noTransform}>
         <div className="mt-3 px-4 pb-1 flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Flux intelligents</span>
-          <button type="button" onClick={() => onEditSmartFeed(null)} className="text-[11px] text-muted hover:text-app" title="Nouveau flux intelligent" data-testid="new-smartfeed">
-            + nouveau
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">{tt.smartFeeds}</span>
+          <button type="button" onClick={() => onEditSmartFeed(null)} className="text-[11px] text-muted hover:text-app" title={tt.newSmartFeed} data-testid="new-smartfeed">
+            {tt.newSmartFeedShort}
           </button>
         </div>
-        {smartFeeds.length === 0 && <p className="px-4 pb-2 text-xs text-muted">Une recherche enregistrée à travers vos flux, par sujet.</p>}
+        {smartFeeds.length === 0 && <p className="px-4 pb-2 text-xs text-muted">{tt.smartFeedsEmpty}</p>}
         {model.smartFeeds.map((id) => {
           const sf = smartById.get(id)
           if (!sf) return null
@@ -277,9 +280,9 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
         })}
 
         <div className="mt-3 px-4 pb-1 flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Abonnements</span>
-          <button type="button" onClick={() => onEditCategory(null)} className="text-[11px] text-muted hover:text-app" title="Nouvelle catégorie">
-            + catégorie
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">{tt.subscriptions}</span>
+          <button type="button" onClick={() => onEditCategory(null)} className="text-[11px] text-muted hover:text-app" title={tt.newCategory}>
+            {tt.newCategoryShort}
           </button>
         </div>
 
@@ -323,11 +326,11 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
 
         {feeds.length === 0 && (
           <p className="px-4 py-6 text-sm text-muted">
-            Aucun abonnement pour l’instant.{' '}
+            {tt.emptyBefore}{' '}
             <button type="button" className="text-accent-600 dark:text-accent-300 underline" onClick={onAddFeed}>
-              Ajouter un flux
+              {tt.addFeed}
             </button>{' '}
-            ou importer un fichier OPML depuis les paramètres.
+            {tt.emptyAfter}
           </p>
         )}
       </SortableContext>
@@ -341,6 +344,7 @@ export function SubscriptionTree({ feeds, categories, smartFeeds, unreadByFeed, 
 const rowActive = 'bg-accent-50 dark:bg-accent-900/20 text-accent-700 dark:text-accent-200 font-medium'
 
 function SmartRow({ smartFeed: sf, orphan, count, active, dimmed, onClick, onEdit }: { smartFeed: SmartFeed; orphan: boolean; count: number; active: boolean; dimmed: boolean; onClick: () => void; onEdit: () => void }) {
+  const tt = useT().subscriptions.tree
   const { setNodeRef, listeners } = useSortable({ id: dragId({ kind: 'smart', id: sf.id }), transition: null })
   return (
     <button
@@ -353,7 +357,7 @@ function SmartRow({ smartFeed: sf, orphan, count, active, dimmed, onClick, onEdi
         e.preventDefault()
         onEdit()
       }}
-      title={orphan ? 'La catégorie ou le flux ciblé a disparu' : sf.name}
+      title={orphan ? tt.orphan : sf.name}
       style={holdStyle}
       className={clsx('flex w-full items-center gap-2.5 px-4 py-1.5 text-sm text-left min-w-0 select-none', active ? rowActive : 'text-app hover:bg-muted', dimmed && 'opacity-40')}
       {...listeners}
@@ -361,17 +365,18 @@ function SmartRow({ smartFeed: sf, orphan, count, active, dimmed, onClick, onEdi
       <Sparkles className={clsx('size-4 shrink-0', active ? 'text-accent-600 dark:text-accent-300' : 'text-accent-500/80')} />
       <span className={clsx('flex-1 truncate', count === 0 && !active && 'text-muted')}>{sf.name}</span>
       {orphan && <Unlink className="size-3.5 shrink-0 text-amber-500" />}
-      {sf.auto_summary && <span className="size-1.5 shrink-0 rounded-full bg-accent-400" title="Résumé automatique" />}
+      {sf.auto_summary && <span className="size-1.5 shrink-0 rounded-full bg-accent-400" title={tt.autoSummary} />}
       {count > 0 && <Count n={count} />}
     </button>
   )
 }
 
 function CategoryRow({ category, count, open, active, dimmed, target, onToggle, onClick, onEdit }: { category: Category; count: number; open: boolean; active: boolean; dimmed: boolean; target: boolean; onToggle: () => void; onClick: () => void; onEdit: () => void }) {
+  const tt = useT().subscriptions.tree
   const { setNodeRef, setActivatorNodeRef, listeners } = useSortable({ id: dragId({ kind: 'cat', id: category.id }), transition: null })
   return (
     <div ref={setNodeRef} className={clsx('group flex items-center pr-2 rounded-md', active && 'bg-accent-50 dark:bg-accent-900/20', dimmed && 'opacity-40', target && 'ring-2 ring-inset ring-accent-400 bg-accent-50/60 dark:bg-accent-900/30')}>
-      <button type="button" onClick={onToggle} className="pl-3 pr-1 py-2 text-muted hover:text-app" aria-label={open ? 'Replier' : 'Déplier'}>
+      <button type="button" onClick={onToggle} className="pl-3 pr-1 py-2 text-muted hover:text-app" aria-label={open ? tt.collapse : tt.expand}>
         {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
       </button>
       <button ref={setActivatorNodeRef} type="button" onClick={onClick} onDoubleClick={onEdit} style={holdStyle} className="flex flex-1 items-center gap-2 py-2 text-sm text-left min-w-0 select-none" {...listeners}>
@@ -384,6 +389,7 @@ function CategoryRow({ category, count, open, active, dimmed, target, onToggle, 
 }
 
 function FeedRow({ feed, count, active, dimmed, onClick, onEdit, indent }: { feed: Feed; count: number; active: boolean; dimmed: boolean; onClick: () => void; onEdit: () => void; indent?: boolean }) {
+  const tt = useT().subscriptions.tree
   const { setNodeRef, listeners } = useSortable({ id: dragId({ kind: 'feed', id: feed.id }), transition: null })
   return (
     <button
@@ -396,7 +402,7 @@ function FeedRow({ feed, count, active, dimmed, onClick, onEdit, indent }: { fee
         e.preventDefault()
         onEdit()
       }}
-      title={feed.last_error ? `Erreur : ${feed.last_error}` : feed.title}
+      title={feed.last_error ? tt.feedError(feed.last_error) : feed.title}
       style={holdStyle}
       className={clsx(
         'group flex w-full items-center gap-2.5 py-1.5 pr-3 text-sm text-left min-w-0 select-none',
@@ -409,7 +415,7 @@ function FeedRow({ feed, count, active, dimmed, onClick, onEdit, indent }: { fee
     >
       <FeedIcon feed={feed} />
       <span className={clsx('flex-1 truncate', count === 0 && !active && 'text-muted')}>{feed.title || feed.url}</span>
-      {feed.error_count > 2 && <span className="size-1.5 rounded-full bg-red-500 shrink-0" title={feed.last_error ?? 'Erreur'} />}
+      {feed.error_count > 2 && <span className="size-1.5 rounded-full bg-red-500 shrink-0" title={feed.last_error ?? tt.error} />}
       {count > 0 && <Count n={count} />}
     </button>
   )

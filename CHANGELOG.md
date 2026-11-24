@@ -4,6 +4,18 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
+## Non publié
+
+### Nouveautés
+- Interface en anglais en plus du français : langue du navigateur au premier lancement, choix dans
+  *Paramètres → Apparence → Langue de l'interface* (par appareil). Dates et tailles suivent la langue.
+  Choix aussi possible depuis l'écran de connexion. L'import d'une sauvegarde accepte le mot de
+  confirmation `REPLACE` en plus de `REMPLACER`.
+
+### Corrections
+- Abonnement à une chaîne YouTube par son adresse `@nom` refusé depuis l'Union européenne : la page
+  de consentement aux cookies de YouTube masquait l'identifiant de la chaîne.
+
 ## 1.0.4 — 19 novembre 2026
 
 ### Application Android

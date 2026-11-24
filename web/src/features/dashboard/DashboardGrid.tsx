@@ -17,6 +17,7 @@ import { GripVertical } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { View } from '../../app/view'
+import { getT } from '../../i18n'
 import { useDashboardData } from './dashboardContext'
 import { isKnownWidget, WIDTH_CLASS, widgetTitle, type AnyWidget, type Widget, type WidgetWidth } from './layout'
 import { WidgetFrame, type WidgetActions } from './WidgetFrame'
@@ -43,11 +44,12 @@ interface Props {
   onOpenView: (view: View) => void
 }
 
+// Annonces lues par les lecteurs d'écran : catalogue lu à l'appel (la langue peut changer).
 const announcements = {
-  onDragStart: ({ active }: { active: { id: string | number } }) => `Widget ${active.id} saisi.`,
-  onDragOver: ({ over }: { over: { id: string | number } | null }) => (over ? `Déplacé vers la position de ${over.id}.` : 'Hors de la grille.'),
-  onDragEnd: ({ over }: { over: { id: string | number } | null }) => (over ? 'Widget déposé.' : 'Déplacement annulé.'),
-  onDragCancel: () => 'Déplacement annulé.',
+  onDragStart: ({ active }: { active: { id: string | number } }) => getT().dashboard.grid.dragStart(String(active.id)),
+  onDragOver: ({ over }: { over: { id: string | number } | null }) => (over ? getT().dashboard.grid.dragOver(String(over.id)) : getT().dashboard.grid.outOfGrid),
+  onDragEnd: ({ over }: { over: { id: string | number } | null }) => (over ? getT().dashboard.grid.dropped : getT().dashboard.grid.cancelled),
+  onDragCancel: () => getT().dashboard.grid.cancelled,
 }
 
 export function DashboardGrid({ widgets, editing, onReorder, onResize, onConfigure, onRemove, onOpenEntry, onOpenView }: Props) {
@@ -155,9 +157,10 @@ function SortableWidget({ widget, editing, dragging, actions, onOpenEntry, onOpe
 
 function WidgetSwitch({ widget, editing, dragging, actions, handleProps, onOpenEntry, onOpenView }: { widget: AnyWidget; editing: boolean; dragging: boolean; actions: WidgetActions; handleProps: React.ComponentProps<typeof WidgetFrame>['handleProps']; onOpenEntry: Props['onOpenEntry']; onOpenView: Props['onOpenView'] }): ReactNode {
   if (!isKnownWidget(widget)) {
+    const t = getT().dashboard
     return (
-      <WidgetFrame widgetId={widget.id} widgetType={widget.type} title={widget.title ?? 'Widget non pris en charge'} editing={editing} width={widget.width} actions={{ onMoveUp: actions.onMoveUp, onMoveDown: actions.onMoveDown, onRemove: actions.onRemove }} handleProps={handleProps} dragging={dragging}>
-        <p className="p-6 text-center text-sm text-muted">Ce widget a été créé par une version plus récente de Fluxus.</p>
+      <WidgetFrame widgetId={widget.id} widgetType={widget.type} title={widget.title ?? t.titles.unsupported} editing={editing} width={widget.width} actions={{ onMoveUp: actions.onMoveUp, onMoveDown: actions.onMoveDown, onRemove: actions.onRemove }} handleProps={handleProps} dragging={dragging}>
+        <p className="p-6 text-center text-sm text-muted">{t.grid.unsupportedBody}</p>
       </WidgetFrame>
     )
   }
@@ -179,7 +182,7 @@ function WidgetSwitch({ widget, editing, dragging, actions, handleProps, onOpenE
 /** Fantôme compact affiché sous le pointeur pendant le déplacement. */
 function OverlayCard({ widget }: { widget: AnyWidget }) {
   const data = useDashboardData()
-  const { title } = widgetTitle(widget, data.categoryMap, data.feedMap)
+  const { title } = widgetTitle(widget, data.categoryMap, data.feedMap, data.smartFeedMap)
   return (
     <div className="flex items-center gap-2 rounded-2xl border border-accent-300 bg-panel px-4 py-3 shadow-xl text-app w-72">
       <GripVertical className="size-4 text-muted" />

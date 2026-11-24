@@ -7,6 +7,7 @@ import type { Feed } from '../../../api/client'
 import type { View } from '../../../app/view'
 import type { LocalEntry } from '../../../db/db'
 import { hostname, relativeDate } from '../../../lib/format'
+import { useT } from '../../../i18n'
 import { recordBulkRead, recordChange } from '../../../sync/engine'
 import { FeedIcon } from '../../feeds/FeedIcon'
 import { useDashboardData } from '../dashboardContext'
@@ -26,6 +27,7 @@ interface Props {
 
 export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, handleProps, dragging }: Props) {
   const data = useDashboardData()
+  const t = useT().dashboard.news
   const { title, orphan } = widgetTitle(widget, data.categoryMap, data.feedMap, data.smartFeedMap)
   const view = viewForSource(widget.source)
   const smartId = widget.source.kind === 'smart' ? widget.source.id : null
@@ -65,7 +67,7 @@ export function NewsWidget({ widget, editing, actions, onOpenEntry, onOpenView, 
       orphan={orphan}
       loading={entries === undefined && !data.ready}
       empty={data.ready && items.length === 0}
-      emptyLabel={widget.unreadOnly ? 'Tout est lu' : 'Aucun article'}
+      emptyLabel={widget.unreadOnly ? t.allRead : t.noEntries}
       onOpen={() => onOpenView(view)}
       onMarkAllRead={() => {
         const ids = items.filter((e) => !e.read).map((e) => e.id)
@@ -130,6 +132,7 @@ function Meta({ entry, feed, showFeed, className }: { entry: LocalEntry; feed?: 
 }
 
 function ItemActions({ entry, className }: { entry: LocalEntry; className?: string }) {
+  const t = useT().dashboard.news
   const stop = (fn: () => void) => (ev: MouseEvent) => {
     ev.preventDefault()
     ev.stopPropagation()
@@ -139,7 +142,7 @@ function ItemActions({ entry, className }: { entry: LocalEntry; className?: stri
     <div className={clsx('flex items-center gap-0.5', className)}>
       <button
         type="button"
-        aria-label={entry.starred ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+        aria-label={entry.starred ? t.unstar : t.star}
         onClick={stop(() => void recordChange(entry.id, { starred: !entry.starred }))}
         className={clsx('rounded-md p-1 hover:bg-muted', entry.starred ? 'text-amber-400' : 'text-muted hover:text-app')}
       >
@@ -147,7 +150,7 @@ function ItemActions({ entry, className }: { entry: LocalEntry; className?: stri
       </button>
       <button
         type="button"
-        aria-label={entry.read ? 'Marquer non lu' : 'Marquer lu'}
+        aria-label={entry.read ? t.markUnread : t.markRead}
         onClick={stop(() => void recordChange(entry.id, { read: !entry.read }))}
         className="rounded-md p-1 text-muted hover:bg-muted hover:text-app"
       >
@@ -167,6 +170,7 @@ interface ListProps {
 /* ---------- Carrousel : grandes cartes horizontales ---------- */
 
 function Carousel({ items, feedMap, showFeed, onOpen }: ListProps) {
+  const t = useT().dashboard.news
   const scroller = useRef<HTMLUListElement>(null)
   const scrollBy = (dir: -1 | 1) => scroller.current?.scrollBy({ left: dir * Math.max(240, scroller.current.clientWidth * 0.8), behavior: 'smooth' })
   return (
@@ -196,7 +200,7 @@ function Carousel({ items, feedMap, showFeed, onOpen }: ListProps) {
       </ul>
       <button
         type="button"
-        aria-label="Précédent"
+        aria-label={t.previous}
         onClick={() => scrollBy(-1)}
         className="absolute left-1 top-1/2 hidden size-9 -translate-y-1/2 items-center justify-center rounded-full border border-app bg-panel/90 text-app shadow-md backdrop-blur opacity-0 transition-opacity group-hover/carousel:opacity-100 focus-visible:opacity-100 md:flex"
       >
@@ -204,7 +208,7 @@ function Carousel({ items, feedMap, showFeed, onOpen }: ListProps) {
       </button>
       <button
         type="button"
-        aria-label="Suivant"
+        aria-label={t.next}
         onClick={() => scrollBy(1)}
         className="absolute right-1 top-1/2 hidden size-9 -translate-y-1/2 items-center justify-center rounded-full border border-app bg-panel/90 text-app shadow-md backdrop-blur opacity-0 transition-opacity group-hover/carousel:opacity-100 focus-visible:opacity-100 md:flex"
       >

@@ -14,3 +14,6 @@ if (typeof window === 'undefined') {
     window: Object.assign(new EventTarget(), { location: { origin: 'http://localhost' } }),
   })
 }
+
+// Les tests vérifient des libellés français : on fixe la langue de l'interface (sinon jsdom annonce `en-US`).
+localStorage.setItem('fluxus.locale', 'fr')

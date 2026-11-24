@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useKeyboard } from '../../app/useKeyboard'
+import { useT } from '../../i18n'
 
 interface Props {
   entryId: number
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export function ReaderModal({ entryId, index, total, onClose, onMove, children }: Props) {
+  const t = useT().reader.modal
   const box = useRef<HTMLDivElement>(null)
   const hasPrev = index > 0
   const hasNext = index !== -1 && index < total - 1
@@ -56,8 +58,8 @@ export function ReaderModal({ entryId, index, total, onClose, onMove, children }
       type="button"
       onClick={() => onMove(delta)}
       disabled={!enabled}
-      aria-label={delta === 1 ? 'Article suivant (→)' : 'Article précédent (←)'}
-      title={delta === 1 ? 'Article suivant (→)' : 'Article précédent (←)'}
+      aria-label={delta === 1 ? t.next : t.prev}
+      title={delta === 1 ? t.next : t.prev}
       data-testid={delta === 1 ? 'modal-next' : 'modal-prev'}
       className={clsx(
         'flex size-11 items-center justify-center rounded-full border border-app bg-panel text-app shadow-lg transition-opacity hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400',
@@ -69,7 +71,7 @@ export function ReaderModal({ entryId, index, total, onClose, onMove, children }
   )
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center safe-area" role="dialog" aria-modal="true" aria-label="Lecture de l’article" data-testid="reader-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center safe-area" role="dialog" aria-modal="true" aria-label={t.label} data-testid="reader-modal">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
       <div className="hidden md:block absolute left-4 top-1/2 -translate-y-1/2">{navButton(-1, hasPrev)}</div>
       <div className="hidden md:block absolute right-4 top-1/2 -translate-y-1/2">{navButton(1, hasNext)}</div>
@@ -86,7 +88,7 @@ export function ReaderModal({ entryId, index, total, onClose, onMove, children }
               {index + 1} / {total}
             </span>
           )}
-          <span className="hidden md:inline">← → pour changer d’article · Échap pour fermer</span>
+          <span className="hidden md:inline">{t.hint}</span>
           <span className="md:hidden">{navButton(1, hasNext, 'size-8 shadow-none')}</span>
         </div>
       </div>

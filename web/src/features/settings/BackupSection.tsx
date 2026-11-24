@@ -14,10 +14,10 @@ import { api, apiUrl, authHeaders, unwrap, type Schemas } from '../../api/client
 import { useToast } from '../../components/feedback'
 import { Button, Dialog, Field, Input } from '../../components/ui'
 import { downloadUrl } from '../../lib/download'
-import { fullDate, plural } from '../../lib/format'
+import { getT, useT } from '../../i18n'
+import { fullDate } from '../../lib/format'
 import { syncNow } from '../../sync/engine'
 
-const CONFIRM_WORD = 'REMPLACER'
 
 interface ArchiveHeader {
   format: string
@@ -26,15 +26,8 @@ interface ArchiveHeader {
   counts?: Record<string, number>
 }
 
-/** Table, libellé au singulier, au pluriel. */
-const COUNT_LABELS: [string, string, string][] = [
-  ['feeds', 'flux', 'flux'],
-  ['categories', 'dossier', 'dossiers'],
-  ['entries', 'article', 'articles'],
-  ['summaries', 'résumé', 'résumés'],
-  ['smart_feeds', 'flux intelligent', 'flux intelligents'],
-  ['transcripts', 'transcription', 'transcriptions'],
-]
+/** Tables comptées dans l'en-tête, dans l'ordre d'affichage (libellés : `settings.backup.counts`). */
+const COUNT_KEYS = ['feeds', 'categories', 'entries', 'summaries', 'smart_feeds', 'transcripts'] as const
 
 /** Première ligne décompressée, sans lire tout le fichier. */
 async function readHeader(file: File): Promise<ArchiveHeader> {
@@ -47,7 +40,7 @@ async function readHeader(file: File): Promise<ArchiveHeader> {
       text += value
     }
   } catch {
-    throw new Error('Fichier illisible : ce n’est pas une sauvegarde Fluxus (.jsonl.gz)')
+    throw new Error(getT().settings.backup.unreadable)
   } finally {
     void reader.cancel().catch(() => undefined)
   }
@@ -55,14 +48,16 @@ async function readHeader(file: File): Promise<ArchiveHeader> {
   try {
     header = JSON.parse(text.split('\n')[0]) as ArchiveHeader
   } catch {
-    throw new Error('Fichier illisible : ce n’est pas une sauvegarde Fluxus (.jsonl.gz)')
+    throw new Error(getT().settings.backup.unreadable)
   }
-  if (header.format !== 'fluxus-export') throw new Error('Ce fichier n’est pas une sauvegarde Fluxus')
+  if (header.format !== 'fluxus-export') throw new Error(getT().settings.backup.notBackup)
   return header
 }
 
 export function BackupSection({ onImported }: { onImported?: () => void }) {
   const toast = useToast()
+  const t = useT()
+  const tb = t.settings.backup
   const fileRef = useRef<HTMLInputElement>(null)
   const [exporting, setExporting] = useState(false)
   const [pending, setPending] = useState<{ file: File; header: ArchiveHeader } | null>(null)
@@ -77,9 +72,9 @@ export function BackupSection({ onImported }: { onImported?: () => void }) {
       // directement plutôt que de le garder en mémoire dans l'onglet.
       const { url } = unwrap(await api().POST('/api/backup/export-link'))
       downloadUrl(apiUrl(url))
-      toast('Téléchargement de la sauvegarde lancé', 'success')
+      toast(tb.downloadStarted, 'success')
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Export impossible', 'error')
+      toast(err instanceof Error ? err.message : tb.exportFailed, 'error')
     } finally {
       setExporting(false)
     }
@@ -92,7 +87,7 @@ export function BackupSection({ onImported }: { onImported?: () => void }) {
       setPassword('')
       setConfirm('')
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Fichier illisible', 'error')
+      toast(err instanceof Error ? err.message : tb.unreadableShort, 'error')
     }
   }
 
@@ -106,50 +101,50 @@ export function BackupSection({ onImported }: { onImported?: () => void }) {
       form.append('confirm', confirm)
       const res = await fetch(apiUrl('/api/backup/import'), { method: 'POST', headers: authHeaders(), body: form })
       const data = (await res.json().catch(() => ({}))) as Partial<Schemas['ImportResult']> & { detail?: string }
-      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Import impossible')
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : tb.importFailed)
       setPending(null)
-      toast(`Sauvegarde importée : ${data.counts?.feeds ?? 0} flux, ${data.counts?.entries ?? 0} articles`, 'success')
+      toast(tb.imported(data.counts?.feeds ?? 0, data.counts?.entries ?? 0), 'success')
       // L'époque du serveur a changé : la synchronisation vide le cache de cet appareil et recharge tout.
       await syncNow()
       onImported?.()
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Import impossible', 'error')
+      toast(err instanceof Error ? err.message : tb.importFailed, 'error')
     } finally {
       setImporting(false)
     }
   }
 
   const counts = pending?.header.counts ?? {}
-  const ready = password.length > 0 && confirm.trim().toUpperCase() === CONFIRM_WORD
+  const ready = password.length > 0 && confirm.trim().toUpperCase() === tb.confirmWord
 
   return (
     <>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => void exportAll()} loading={exporting} disabled={isCapacitor()} data-testid="backup-export">
-          <DatabaseBackup className="size-4" /> Exporter toute la base
+          <DatabaseBackup className="size-4" /> {tb.exportAll}
         </Button>
         <Button onClick={() => fileRef.current?.click()} data-testid="backup-import">
-          <Upload className="size-4" /> Importer une sauvegarde…
+          <Upload className="size-4" /> {tb.importBackup}
         </Button>
         <input ref={fileRef} type="file" accept=".gz,application/gzip" className="hidden" data-testid="backup-file" onChange={(e) => e.target.files?.[0] && void pick(e.target.files[0])} />
       </div>
       <p className="text-xs text-muted">
-        Un seul fichier (.jsonl.gz) : dossiers, flux et leurs réglages, articles avec leur état lu et favori, résumés, transcriptions, flux intelligents, tableau de bord et réglages. Le mot de passe, les appareils connectés et les clés API ne sont jamais inclus : saisissez les clés à nouveau sur la nouvelle instance.
-        {isCapacitor() && ' L’export se fait depuis la version web.'}
+        {tb.contents}
+        {isCapacitor() && tb.exportFromWeb}
       </p>
 
       <Dialog
         open={pending !== null}
         onClose={() => !importing && setPending(null)}
-        title="Remplacer le contenu de cette instance"
+        title={tb.dialogTitle}
         width="max-w-lg"
         footer={
           <>
             <Button variant="ghost" onClick={() => setPending(null)} disabled={importing}>
-              Annuler
+              {t.common.cancel}
             </Button>
             <Button variant="danger" onClick={() => void runImport()} loading={importing} disabled={!ready} data-testid="backup-confirm">
-              Tout remplacer
+              {tb.replaceAll}
             </Button>
           </>
         }
@@ -158,23 +153,25 @@ export function BackupSection({ onImported }: { onImported?: () => void }) {
           <div className="space-y-4 text-sm">
             <div className="rounded-lg bg-muted px-3 py-2">
               <p className="font-medium text-app">{pending.file.name}</p>
-              {pending.header.exported_at && <p className="text-xs text-muted">Exportée {fullDate(pending.header.exported_at)}</p>}
+              {pending.header.exported_at && <p className="text-xs text-muted">{tb.exportedAt(fullDate(pending.header.exported_at))}</p>}
               <p className="mt-1 text-xs text-muted" data-testid="backup-counts">
-                {COUNT_LABELS.filter(([k]) => counts[k] !== undefined)
-                  .map(([k, one, many]) => `${counts[k]} ${plural(counts[k], one, many)}`)
+                {COUNT_KEYS.filter((k) => counts[k] !== undefined)
+                  .map((k) => tb.counts[k](counts[k]))
                   .join(' · ')}
               </p>
             </div>
             <div className="flex gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-100">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <p>
-                Tout le contenu actuel de cette instance (flux, articles, résumés, flux intelligents, réglages) sera <strong>supprimé et remplacé</strong>. Le mot de passe, les appareils connectés et les clés API sont conservés. Chaque appareil rechargera ses données ; les changements pas encore synchronisés seront perdus.
+                {tb.warningBefore}
+                <strong>{tb.warningStrong}</strong>
+                {tb.warningAfter}
               </p>
             </div>
-            <Field label="Mot de passe actuel">
+            <Field label={tb.currentPassword}>
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" data-testid="backup-password" />
             </Field>
-            <Field label={`Tapez ${CONFIRM_WORD} pour confirmer`}>
+            <Field label={tb.typeToConfirm(tb.confirmWord)}>
               <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" data-testid="backup-confirm-word" />
             </Field>
           </div>

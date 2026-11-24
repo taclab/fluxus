@@ -9,6 +9,7 @@ import { useConfirm, useToast } from '../../components/feedback'
 import { Button, EmptyState, IconButton, Spinner } from '../../components/ui'
 import { db, toLocalEntry, type LocalEntry } from '../../db/db'
 import { latestForFeeds, latestForSmartFeed } from '../../db/entryQueries'
+import { getT, useT } from '../../i18n'
 import { hostname, relativeDate } from '../../lib/format'
 import { recordChange, syncNow } from '../../sync/engine'
 import { FeedIcon } from '../feeds/FeedIcon'
@@ -44,23 +45,24 @@ const PAGE = 60
 const EMPTY_FEEDS: Feed[] = []
 
 function titleFor(view: View, feeds: Map<number, Feed>, categoryTitle?: string, smartTitle?: string): string {
+  const t = getT().entries.titles
   switch (view.kind) {
     case 'all':
-      return 'Tous les articles'
+      return t.all
     case 'unread':
-      return 'Non lus'
+      return t.unread
     case 'starred':
-      return 'Favoris'
+      return t.starred
     case 'feed':
-      return feeds.get(view.id!)?.title ?? 'Flux'
+      return feeds.get(view.id!)?.title ?? t.feed
     case 'category':
-      return categoryTitle ?? 'Catégorie'
+      return categoryTitle ?? t.category
     case 'smart':
-      return smartTitle ?? 'Flux intelligent'
+      return smartTitle ?? t.smart
     case 'search':
-      return `Recherche : ${view.query}`
+      return t.search(view.query ?? '')
     default:
-      return 'Tableau de bord'
+      return t.dashboard
   }
 }
 
@@ -88,6 +90,8 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   const smartFeed = useLiveQuery(() => (view.kind === 'smart' ? db.smartFeeds.get(view.id!) : undefined), [view.kind, view.id])
   const toast = useToast()
   const confirm = useConfirm()
+  const tr = useT()
+  const t = tr.entries.list
   const [batchBusy, setBatchBusy] = useState(false)
 
   useEffect(() => {
@@ -122,7 +126,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         const page = unwrap(r)
         setRemote({ items: page.items, nextCursor: page.next_cursor ?? null, loading: false, loadingMore: false })
       })
-      .catch((err) => !cancelled && setRemote({ items: [], nextCursor: null, loading: false, loadingMore: false, error: err instanceof Error ? err.message : 'Erreur' }))
+      .catch((err) => !cancelled && setRemote({ items: [], nextCursor: null, loading: false, loadingMore: false, error: err instanceof Error ? err.message : getT().common.error }))
     return () => {
       cancelled = true
     }
@@ -143,7 +147,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
           return { ...cur, items: [...cur.items, ...page.items.filter((e) => !seen.has(e.id))], nextCursor: page.next_cursor ?? null, loadingMore: false }
         })
       })
-      .catch((err) => setRemote((cur) => (cur ? { ...cur, loadingMore: false, error: err instanceof Error ? err.message : 'Erreur' } : cur)))
+      .catch((err) => setRemote((cur) => (cur ? { ...cur, loadingMore: false, error: err instanceof Error ? err.message : getT().common.error } : cur)))
   }, [remote, view.kind, view.query, unreadOnly])
 
   // Les résultats distants sont un instantané : l'état lu/favori vient de la base locale quand elle a l'article.
@@ -255,14 +259,14 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     if (view.kind !== 'search') {
       // Le compteur de la barre latérale vaut pour tout le périmètre : on confirme au-delà d'un seuil.
       const scopeCount = unreadCount
-      if (scopeCount > CONFIRM_THRESHOLD && !(await confirm({ title: `Marquer ${scopeCount} articles comme lus ?`, confirmLabel: 'Tout marquer comme lu' }))) return
+      if (scopeCount > CONFIRM_THRESHOLD && !(await confirm({ title: t.confirmMarkRead(scopeCount), confirmLabel: t.markAllRead }))) return
     }
     setBatchBusy(true)
     try {
       const res = await markViewRead(view, feeds, displayed)
-      if (res.count > CONFIRM_THRESHOLD || res.mode === 'outbox') toast(res.mode === 'outbox' ? `${res.count} articles marqués, envoi à la prochaine synchronisation` : `${res.count} articles marqués comme lus`, 'success')
+      if (res.count > CONFIRM_THRESHOLD || res.mode === 'outbox') toast(res.mode === 'outbox' ? t.markedOutbox(res.count) : t.markedRead(res.count), 'success')
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Erreur', 'error')
+      toast(err instanceof Error ? err.message : tr.common.error, 'error')
     } finally {
       setBatchBusy(false)
     }
@@ -303,21 +307,20 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
   async function summarizeAll() {
     if (!batchTarget) return
     if (!isOnline()) {
-      toast('Le résumé nécessite une connexion au serveur', 'error')
+      toast(t.summaryNeedsServer, 'error')
       return
     }
-    const scope = unreadOnly ? 'non lus et non encore résumés' : 'non encore résumés'
-    if (!(await confirm({ title: 'Résumer les articles', message: `Résumer les articles ${scope} de « ${batchTarget} » ?\nLe budget quotidien de tokens limite le nombre de résumés lancés.`, confirmLabel: 'Résumer' }))) return
+    if (!(await confirm({ title: t.summarizeTitle, message: t.summarizeMessage(unreadOnly, batchTarget ?? ''), confirmLabel: t.summarize }))) return
     setBatchBusy(true)
     try {
       const res =
         view.kind === 'smart' && smartFeed
           ? unwrap(await api().POST('/api/smart-feeds/{smart_feed_id}/summarize-all', { params: { path: { smart_feed_id: smartFeed.id } }, body: { unread_only: unreadOnly } }))
           : unwrap(await api().POST('/api/feeds/{feed_id}/summarize-all', { params: { path: { feed_id: view.id! } }, body: { unread_only: unreadOnly } }))
-      toast(res.queued ? `${res.queued} résumé${res.queued > 1 ? 's' : ''} en cours${res.skipped_budget ? `, ${res.skipped_budget} au-delà du budget` : ''}` : res.skipped_budget ? 'Budget quotidien épuisé' : 'Rien à résumer', res.queued ? 'success' : 'info')
+      toast(res.queued ? t.summariesQueued(res.queued, res.skipped_budget) : res.skipped_budget ? t.budgetExhausted : t.nothingToSummarize, res.queued ? 'success' : 'info')
       window.setTimeout(() => void syncNow(), 30000)
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Erreur', 'error')
+      toast(err instanceof Error ? err.message : tr.common.error, 'error')
     } finally {
       setBatchBusy(false)
     }
@@ -327,11 +330,11 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
     <section className="flex h-full flex-col bg-app">
       <header className="flex items-center gap-1 h-14 px-2 border-b border-app bg-panel shrink-0">
         {onBack ? (
-          <IconButton label="Retour" onClick={onBack}>
+          <IconButton label={t.back} onClick={onBack}>
             <ChevronLeft className="size-5" />
           </IconButton>
         ) : (
-          <IconButton label="Menu" onClick={onOpenSidebar} className="lg:hidden">
+          <IconButton label={t.menu} onClick={onOpenSidebar} className="lg:hidden">
             <Menu className="size-5" />
           </IconButton>
         )}
@@ -347,7 +350,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
               autoFocus
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Rechercher…"
+              placeholder={t.searchPlaceholder}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   e.preventDefault()
@@ -360,7 +363,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
               data-search-input
             />
             <IconButton
-              label="Fermer la recherche"
+              label={t.closeSearch}
               size="sm"
               onClick={() => {
                 setSearchOpen(false)
@@ -377,34 +380,34 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
               {heading}
               {unreadCount > 0 && <span className="ml-2 text-sm font-normal text-muted tabular-nums">{unreadCount}</span>}
             </h1>
-            <IconButton label="Rechercher" onClick={() => setSearchOpen(true)} size="sm">
+            <IconButton label={t.search} onClick={() => setSearchOpen(true)} size="sm" data-search-button>
               <Search className="size-4" />
             </IconButton>
           </>
         )}
         {batchTarget && (
-          <IconButton label={unsummarized ? `Résumer les non résumés (${unsummarized} visibles)` : 'Résumer les non résumés'} size="sm" onClick={() => void summarizeAll()} disabled={batchBusy} data-testid="summarize-all">
+          <IconButton label={unsummarized ? t.summarizeAllVisible(unsummarized) : t.summarizeAll} size="sm" onClick={() => void summarizeAll()} disabled={batchBusy} data-testid="summarize-all">
             <Sparkles className={clsx('size-4', batchBusy && 'animate-pulse')} />
           </IconButton>
         )}
         {view.kind === 'smart' && smartFeed && (
           <>
             {onEditSmartFeed && (
-              <IconButton label="Modifier ce flux intelligent" size="sm" onClick={() => onEditSmartFeed(smartFeed)} data-testid="edit-smartfeed">
+              <IconButton label={t.editSmartFeed} size="sm" onClick={() => onEditSmartFeed(smartFeed)} data-testid="edit-smartfeed">
                 <Settings2 className="size-4" />
               </IconButton>
             )}
           </>
         )}
-        <IconButton label={unreadOnly ? 'Afficher tout' : 'Non lus seulement'} active={unreadOnly} onClick={() => onToggleUnread(!unreadOnly)} size="sm">
+        <IconButton label={unreadOnly ? t.showAll : t.unreadOnly} active={unreadOnly} onClick={() => onToggleUnread(!unreadOnly)} size="sm">
           <Circle className={clsx('size-4', unreadOnly && 'fill-current')} />
         </IconButton>
         <div className="relative" ref={densityRef}>
-          <IconButton label="Présentation de la liste" onClick={() => setDensityOpen((o) => !o)} active={densityOpen} size="sm" data-testid="density-menu" aria-haspopup="menu" aria-expanded={densityOpen} disabled={!viewMode}>
+          <IconButton label={t.viewMode} onClick={() => setDensityOpen((o) => !o)} active={densityOpen} size="sm" data-testid="density-menu" aria-haspopup="menu" aria-expanded={densityOpen} disabled={!viewMode}>
             <VariantIcon variant={variant} />
           </IconButton>
           {densityOpen && viewMode && (
-            <div role="menu" aria-label="Présentation de la liste" className="absolute right-0 top-full z-20 mt-1 w-60 rounded-xl border border-app bg-panel p-1 shadow-lg text-sm">
+            <div role="menu" aria-label={t.viewMode} className="absolute right-0 top-full z-20 mt-1 w-60 rounded-xl border border-app bg-panel p-1 shadow-lg text-sm">
               {LAYOUT_GROUPS.map((group) => (
                 <div key={group.layout} role="group" aria-label={group.label}>
                   <p className="px-2 pb-0.5 pt-1.5 text-xs font-medium uppercase tracking-wide text-muted">{group.label}</p>
@@ -431,13 +434,13 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
               {viewMode.source === 'own' && (
                 <button type="button" role="menuitem" onClick={() => chooseVariant('inherit')} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-muted hover:bg-muted" data-testid="view-mode-inherit">
                   <Undo2 className="size-4" />
-                  <span className="flex-1">{view.kind === 'feed' && currentFeed?.category_id != null ? 'Revenir à l’affichage du dossier' : 'Revenir à l’affichage par défaut'}</span>
+                  <span className="flex-1">{view.kind === 'feed' && currentFeed?.category_id != null ? t.backToFolder : t.backToDefault}</span>
                 </button>
               )}
             </div>
           )}
         </div>
-        <IconButton label={view.kind === 'search' ? 'Marquer les résultats affichés comme lus' : 'Tout marquer comme lu'} onClick={() => void markAllRead()} size="sm" disabled={unreadCount === 0 || batchBusy} data-testid="mark-all-read">
+        <IconButton label={view.kind === 'search' ? t.markResultsRead : t.markAllRead} onClick={() => void markAllRead()} size="sm" disabled={unreadCount === 0 || batchBusy} data-testid="mark-all-read">
           <CheckCheck className="size-4" />
         </IconButton>
       </header>
@@ -452,9 +455,9 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         {!remote?.loading && items.length === 0 && (
           <EmptyState
             icon={<CheckCheck className="size-10" />}
-            title={view.kind === 'search' ? 'Aucun résultat' : view.kind === 'smart' && !unreadOnly ? 'Aucun article ne correspond pour l’instant' : unreadOnly || view.kind === 'unread' ? 'Tout est lu' : 'Aucun article'}
-            hint={view.kind === 'search' ? undefined : unreadOnly ? 'Désactivez le filtre « non lus » pour revoir les articles.' : 'Les nouveaux articles apparaîtront ici après la prochaine synchronisation.'}
-            action={unreadOnly && view.kind !== 'unread' ? <Button size="sm" onClick={() => onToggleUnread(false)}>Afficher tout</Button> : undefined}
+            title={view.kind === 'search' ? t.noResults : view.kind === 'smart' && !unreadOnly ? t.smartNoMatch : unreadOnly || view.kind === 'unread' ? t.allRead : t.noEntries}
+            hint={view.kind === 'search' ? undefined : unreadOnly ? t.disableUnreadHint : t.nextSyncHint}
+            action={unreadOnly && view.kind !== 'unread' ? <Button size="sm" onClick={() => onToggleUnread(false)}>{t.showAll}</Button> : undefined}
           />
         )}
         <ul data-density={variant} className={VIEW_MODE_SPECS[variant].listClass || undefined}>
@@ -465,14 +468,14 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
         {(entries?.length ?? 0) >= limit && !remote && (
           <div className="flex justify-center p-4">
             <Button size="sm" variant="ghost" onClick={() => setLimit((l) => l + PAGE)}>
-              Charger plus
+              {t.loadMore}
             </Button>
           </div>
         )}
         {remote && !remote.loading && remote.nextCursor && (
           <div className="flex justify-center p-4">
             <Button size="sm" variant="ghost" onClick={loadMoreRemote} disabled={remote.loadingMore}>
-              {remote.loadingMore ? 'Chargement…' : 'Charger plus'}
+              {remote.loadingMore ? t.loading : t.loadMore}
             </Button>
           </div>
         )}
@@ -483,6 +486,7 @@ export function EntryList({ view, unreadOnly, selectedId, onSelect, onToggleUnre
 
 export function EntryRow({ entry, feed, selected, density, showFeed, onClick }: { entry: LocalEntry | EntryListItem; feed?: Feed; selected: boolean; density: Variant; showFeed: boolean; onClick: () => void }) {
   const source = feed?.title || hostname(entry.url)
+  const t = useT().entries.row
   if (isFullVariant(density)) {
     return <FullRow entry={entry} feed={feed} source={source} selected={selected} variant={density} showFeed={showFeed} onClick={onClick} />
   }
@@ -501,7 +505,7 @@ export function EntryRow({ entry, feed, selected, density, showFeed, onClick }: 
         <div className="flex gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 text-xs text-muted mb-1">
-              {!entry.read && <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label="Non lu" />}
+              {!entry.read && <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label={t.unread} />}
               {showFeed && feed && <FeedIcon feed={feed} className="size-3.5" />}
               {showFeed && <span className="truncate">{source}</span>}
               <span className="ml-auto shrink-0 tabular-nums">{relativeDate(entry.published_at)}</span>
@@ -534,12 +538,13 @@ function VariantIcon({ variant }: { variant: Variant }) {
 
 /** Actions rapides d'une ligne : favori et lu/non lu. Frères du bouton d'ouverture, au-dessus de son pseudo-élément étiré. */
 function RowActions({ entry }: { entry: LocalEntry | EntryListItem }) {
+  const t = useT().entries.row
   return (
     <span className="relative z-10 flex items-center gap-0.5 shrink-0">
-      <IconButton label={entry.starred ? 'Retirer des favoris' : 'Ajouter aux favoris'} size="sm" active={entry.starred} onClick={() => void recordChange(entry.id, { starred: !entry.starred })}>
+      <IconButton label={entry.starred ? t.unstar : t.star} size="sm" active={entry.starred} onClick={() => void recordChange(entry.id, { starred: !entry.starred })}>
         <Star className={clsx('size-4', entry.starred && 'fill-amber-400 text-amber-400')} />
       </IconButton>
-      <IconButton label={entry.read ? 'Marquer non lu' : 'Marquer lu'} size="sm" onClick={() => void recordChange(entry.id, { read: !entry.read })}>
+      <IconButton label={entry.read ? t.markUnread : t.markRead} size="sm" onClick={() => void recordChange(entry.id, { read: !entry.read })}>
         {entry.read ? <CircleCheck className="size-4" /> : <Circle className="size-4" />}
       </IconButton>
     </span>
@@ -554,10 +559,11 @@ function RowActions({ entry }: { entry: LocalEntry | EntryListItem }) {
  * contrat que la fenêtre de lecture cible pour rendre le focus à la fermeture.
  */
 function FullRow({ entry, feed, source, selected, variant, showFeed, onClick }: { entry: LocalEntry | EntryListItem; feed?: Feed; source: string; selected: boolean; variant: FullDensity; showFeed: boolean; onClick: () => void }) {
+  const t = useT().entries.row
   const titleClass = clsx('leading-snug', entry.read ? 'text-muted font-normal' : 'text-app font-semibold')
   const meta = (
     <>
-      {!entry.read && <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label="Non lu" />}
+      {!entry.read && <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label={t.unread} />}
       {showFeed && feed && <FeedIcon feed={feed} className="size-3.5" />}
       {showFeed && <span className="truncate">{source}</span>}
       {entry.starred && <Star className="size-3.5 fill-amber-400 text-amber-400 shrink-0" />}
@@ -626,7 +632,7 @@ function FullRow({ entry, feed, source, selected, variant, showFeed, onClick }: 
           onClick={onClick}
           className={clsx(rowClass, 'flex h-9 w-full items-center gap-2 border-b border-app px-4 text-left text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-400')}
         >
-          {!entry.read ? <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label="Non lu" /> : <span className="size-2 shrink-0" />}
+          {!entry.read ? <span className="size-2 rounded-full bg-accent-500 shrink-0" role="img" aria-label={t.unread} /> : <span className="size-2 shrink-0" />}
           {showFeed && feed && <FeedIcon feed={feed} className="size-3.5" />}
           <span className={clsx('flex-1 truncate', titleClass)}>{entry.title}</span>
           {showFeed && <span className="hidden md:inline w-40 truncate text-xs text-muted">{source}</span>}

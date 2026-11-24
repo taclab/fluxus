@@ -4,6 +4,7 @@ import { api, ApiError, unwrap, type Category } from '../../api/client'
 import { useToast } from '../../components/feedback'
 import { Button, Dialog, Field, Input, Select } from '../../components/ui'
 import { syncNow } from '../../sync/engine'
+import { useT } from '../../i18n'
 
 interface Choice {
   url: string
@@ -30,6 +31,8 @@ export function AddFeedDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
+  const tr = useT()
+  const t = tr.feeds.add
 
   function reset() {
     setUrl('')
@@ -46,7 +49,7 @@ export function AddFeedDialog({
           body: { url: feedUrl, category_id: categoryId ? Number(categoryId) : null, extraction_mode: 'auto' },
         }),
       )
-      toast(`Abonné à « ${feed.title} »`, 'success')
+      toast(t.subscribed(feed.title), 'success')
       reset()
       onClose()
       window.setTimeout(() => void syncNow(), 1500)
@@ -56,7 +59,7 @@ export function AddFeedDialog({
         const detail = (err.detail as { detail?: { choices?: Choice[] } })?.detail
         setChoices(detail?.choices ?? [])
       } else {
-        setError(err instanceof Error ? err.message : 'Erreur inconnue')
+        setError(err instanceof Error ? err.message : t.unknownError)
       }
     } finally {
       setBusy(false)
@@ -76,15 +79,15 @@ export function AddFeedDialog({
         reset()
         onClose()
       }}
-      title="Ajouter un flux"
+      title={t.title}
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Adresse du site ou du flux" hint="Un site, un flux RSS/Atom ou une chaîne YouTube.">
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://exemple.fr" autoFocus type="text" inputMode="url" autoCapitalize="off" />
+        <Field label={t.urlLabel} hint={t.urlHint}>
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t.urlPlaceholder} autoFocus type="text" inputMode="url" autoCapitalize="off" />
         </Field>
-        <Field label="Catégorie">
+        <Field label={t.category}>
           <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-            <option value="">Sans catégorie</option>
+            <option value="">{t.noCategory}</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.title}
@@ -95,10 +98,10 @@ export function AddFeedDialog({
 
         {choices && (
           <div className="space-y-2">
-            <p className="text-sm text-muted">Plusieurs flux trouvés, choisissez :</p>
+            <p className="text-sm text-muted">{t.severalFound}</p>
             {choices.map((c) => (
               <button key={c.url} type="button" onClick={() => void subscribe(c.url)} className="w-full text-left rounded-lg border border-app px-3 py-2 hover:bg-muted">
-                <span className="block text-sm font-medium">{c.title || 'Flux'}</span>
+                <span className="block text-sm font-medium">{c.title || t.feed}</span>
                 <span className="block text-xs text-muted truncate">{c.url}</span>
               </button>
             ))}
@@ -109,10 +112,10 @@ export function AddFeedDialog({
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" onClick={onClose}>
-            Annuler
+            {tr.common.cancel}
           </Button>
           <Button type="submit" variant="primary" loading={busy}>
-            S’abonner
+            {t.subscribe}
           </Button>
         </div>
       </form>

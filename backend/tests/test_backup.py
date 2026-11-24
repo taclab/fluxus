@@ -159,7 +159,8 @@ async def test_roundtrip_replaces_everything(client: AsyncClient):
         e = (await session.execute(select(Entry).limit(1))).scalar_one()
         await session.delete(e)
 
-    r = await _import(client, archive)
+    # Mot de l'interface anglaise ; les autres tests passent par « REMPLACER ».
+    r = await _import(client, archive, confirm="replace")
     assert r.status_code == 200, r.text
     assert r.json()["counts"]["entries"] == 5
     # Le journal LLM survit (budget du jour), ses liens vers les anciens articles sont coupés.

@@ -16,6 +16,8 @@ import { AddFeedDialog } from './AddFeedDialog'
 import { Count } from './FeedIcon'
 import { SubscriptionTree } from './SubscriptionTree'
 import { useUnreadCountsFull } from './useUnreadCounts'
+import { useT } from '../../i18n'
+import { timeOf } from '../../lib/format'
 
 interface Props {
   view: View
@@ -50,25 +52,26 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
   const expand = useCallback((id: number) => updateCollapsed((next) => next.delete(id)), [updateCollapsed])
 
   const isActive = useCallback((v: View) => view.kind === v.kind && (v.id === undefined || view.id === v.id), [view])
+  const t = useT().feeds.sidebar
 
   return (
     <nav className="flex h-full flex-col bg-panel">
       <div className="flex items-center gap-2 px-4 h-14 border-b border-app shrink-0">
         <img src="/favicon.svg" alt="" className="size-7 rounded-lg" />
         <span className="font-semibold tracking-tight text-app flex-1">Fluxus</span>
-        <IconButton label="Synchroniser" size="sm" onClick={() => void syncNow()} disabled={sync.status === 'syncing'}>
+        <IconButton label={t.sync} size="sm" onClick={() => void syncNow()} disabled={sync.status === 'syncing'}>
           <RefreshCw className={clsx('size-4', sync.status === 'syncing' && 'animate-spin')} />
         </IconButton>
-        <IconButton label="Ajouter un flux" size="sm" onClick={() => setAddOpen(true)}>
+        <IconButton label={t.addFeed} size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="size-4" />
         </IconButton>
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
-        <NavItem icon={<LayoutDashboard className="size-4" />} label="Tableau de bord" count={0} active={isActive({ kind: 'dashboard' })} onClick={() => onSelect({ kind: 'dashboard' })} />
-        <NavItem icon={<Inbox className="size-4" />} label="Tous les articles" count={totalUnread} active={isActive({ kind: 'all' })} onClick={() => onSelect({ kind: 'all' })} />
-        <NavItem icon={<Rss className="size-4" />} label="Non lus" count={totalUnread} active={isActive({ kind: 'unread' })} onClick={() => onSelect({ kind: 'unread' })} />
-        <NavItem icon={<Star className="size-4" />} label="Favoris" count={starredCount} muted active={isActive({ kind: 'starred' })} onClick={() => onSelect({ kind: 'starred' })} />
+        <NavItem icon={<LayoutDashboard className="size-4" />} label={t.dashboard} count={0} active={isActive({ kind: 'dashboard' })} onClick={() => onSelect({ kind: 'dashboard' })} />
+        <NavItem icon={<Inbox className="size-4" />} label={t.all} count={totalUnread} active={isActive({ kind: 'all' })} onClick={() => onSelect({ kind: 'all' })} />
+        <NavItem icon={<Rss className="size-4" />} label={t.unread} count={totalUnread} active={isActive({ kind: 'unread' })} onClick={() => onSelect({ kind: 'unread' })} />
+        <NavItem icon={<Star className="size-4" />} label={t.starred} count={starredCount} muted active={isActive({ kind: 'starred' })} onClick={() => onSelect({ kind: 'starred' })} />
 
         <SubscriptionTree
           feeds={feeds}
@@ -90,9 +93,9 @@ export function Sidebar({ view, onSelect, onEditFeed, onEditCategory, onEditSmar
 
       <div className="border-t border-app px-2 py-2 flex items-center gap-1 shrink-0">
         <Link to="/settings" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted hover:text-app hover:bg-muted">
-          <Settings className="size-4" /> Paramètres
+          <Settings className="size-4" /> {t.settings}
         </Link>
-        <Link to="/abonnements" title="Abonnements : gérer tous les flux" aria-label="Abonnements" className="flex items-center rounded-lg p-1.5 text-muted hover:text-app hover:bg-muted" data-testid="sidebar-subscriptions">
+        <Link to="/abonnements" title={t.subscriptionsTitle} aria-label={t.subscriptions} className="flex items-center rounded-lg p-1.5 text-muted hover:text-app hover:bg-muted" data-testid="sidebar-subscriptions">
           <ListChecks className="size-4" />
         </Link>
         <ThemeToggle />
@@ -121,12 +124,13 @@ function NavItem({ icon, label, count, active, onClick, muted }: { icon: ReactNo
 
 function SyncBadge() {
   const s = useSyncState()
-  const label = s.status === 'syncing' ? 'Synchronisation…' : s.status === 'offline' ? 'Hors ligne' : s.status === 'error' ? 'Erreur de sync' : s.lastSyncAt ? 'À jour' : ''
+  const t = useT().feeds.sidebar
+  const label = s.status === 'syncing' ? t.syncing : s.status === 'offline' ? t.offline : s.status === 'error' ? t.syncError : s.lastSyncAt ? t.upToDate : ''
   return (
-    <span className="flex items-center gap-1.5 text-[11px] text-muted pr-2" title={s.error ?? (s.lastSyncAt ? `Dernière sync : ${new Date(s.lastSyncAt).toLocaleTimeString('fr-FR')}` : '')}>
+    <span className="flex items-center gap-1.5 text-[11px] text-muted pr-2" title={s.error ?? (s.lastSyncAt ? t.lastSync(timeOf(new Date(s.lastSyncAt))) : '')}>
       <span className={clsx('size-1.5 rounded-full', s.status === 'idle' && 'bg-emerald-500', s.status === 'syncing' && 'bg-accent-500 animate-soft-pulse', s.status === 'offline' && 'bg-amber-500', s.status === 'error' && 'bg-red-500')} />
       {label}
-      {s.pendingChanges > 0 && <span>· {s.pendingChanges} en attente</span>}
+      {s.pendingChanges > 0 && <span>· {t.pending(s.pendingChanges)}</span>}
     </span>
   )
 }

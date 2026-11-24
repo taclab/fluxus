@@ -5,6 +5,7 @@
 
 import { api, unwrap, type Feed, type Schemas } from '../../api/client'
 import { db } from '../../db/db'
+import { getT } from '../../i18n'
 import { resyncIfPulling } from '../../sync/engine'
 import { forgetPendingViewModes } from '../entries/useViewMode'
 
@@ -13,49 +14,80 @@ export type ExtractionMode = NonNullable<Schemas['FeedSettingsIn']['extraction_m
 export type FeedChanges = Partial<Schemas['FeedSettingsIn']>
 export type FeedUpdateChanges = Partial<Schemas['FeedUpdate']>
 
+/** Libellés lus dans la langue courante à chaque usage (accesseurs), jamais figés au chargement. */
+function extractionOption(id: ExtractionMode, key: 'auto' | 'http' | 'browser' | 'none'): { id: ExtractionMode; label: string; short: string } {
+  return {
+    id,
+    get label() {
+      return getT().feeds.extraction[`${key}Label`]
+    },
+    get short() {
+      return getT().feeds.extraction[`${key}Short`]
+    },
+  }
+}
+
 export const EXTRACTION_OPTIONS: { id: ExtractionMode; label: string; short: string }[] = [
-  { id: 'auto', label: 'À la demande (bouton ou touche f)', short: 'À la demande' },
-  { id: 'http', label: 'Toujours, en HTTP', short: 'Toujours (HTTP)' },
-  { id: 'browser', label: 'Toujours, via le navigateur (sites JavaScript)', short: 'Toujours (navigateur)' },
-  { id: 'none', label: 'Jamais (contenu du flux seulement)', short: 'Jamais' },
+  extractionOption('auto', 'auto'),
+  extractionOption('http', 'http'),
+  extractionOption('browser', 'browser'),
+  extractionOption('none', 'none'),
 ]
 
-export const EXTRACTION_HINT =
-  '« À la demande » : l’article complet est récupéré quand vous le demandez depuis le lecteur (HTTP puis navigateur si besoin). « Toujours » : chaque nouvel article est récupéré en arrière-plan, lisible hors ligne et mieux résumé.'
+export function extractionHint(): string {
+  return getT().feeds.extraction.hint
+}
+
+export interface IntervalOption {
+  minutes: number
+  /** « Toutes les 15 min », « Automatique (adaptatif) ». */
+  label: string
+  /** Forme courte pour un tableau : « 15 min », « 24 h » (vide pour l'automatique). */
+  short: string
+}
+
+function intervalOption(minutes: number): IntervalOption {
+  return {
+    minutes,
+    get label() {
+      const t = getT().feeds.interval
+      if (minutes === 0) return t.auto
+      if (minutes === 60) return t.hourly
+      if (minutes === 1440) return t.daily
+      return t.every(formatMinutes(minutes))
+    },
+    get short() {
+      return minutes === 0 ? '' : formatMinutes(minutes)
+    },
+  }
+}
 
 /** Intervalles fixes proposés (minutes) ; 0 = adaptatif. */
-export const INTERVAL_OPTIONS: { minutes: number; label: string }[] = [
-  { minutes: 0, label: 'Automatique (adaptatif)' },
-  { minutes: 15, label: 'Toutes les 15 min' },
-  { minutes: 30, label: 'Toutes les 30 min' },
-  { minutes: 60, label: 'Toutes les heures' },
-  { minutes: 180, label: 'Toutes les 3 h' },
-  { minutes: 360, label: 'Toutes les 6 h' },
-  { minutes: 720, label: 'Toutes les 12 h' },
-  { minutes: 1440, label: 'Une fois par jour' },
-]
+export const INTERVAL_OPTIONS: IntervalOption[] = [0, 15, 30, 60, 180, 360, 720, 1440].map(intervalOption)
 
-export const INTERVAL_HINT =
-  'Automatique : l’intervalle se resserre quand le flux publie beaucoup et s’espace quand il est calme (10 min à 24 h). Un intervalle fixe s’applique tel quel.'
+export function intervalHint(): string {
+  return getT().feeds.interval.hint
+}
 
 export function formatMinutes(min: number): string {
-  if (min < 60) return `${min} min`
-  if (min % 1440 === 0) return min === 1440 ? '24 h' : `${min / 1440} j`
+  const t = getT().feeds.interval
+  if (min < 60) return t.minutes(min)
+  if (min % 1440 === 0) return min === 1440 ? t.hours(24) : t.days(min / 1440)
   const h = Math.floor(min / 60)
   const m = min % 60
-  return m ? `${h} h ${m}` : `${h} h`
+  return m ? t.hoursMinutes(h, m) : t.hours(h)
 }
 
 /** Intervalle affiché : « Auto · 45 min » ou « 3 h ». */
 export function intervalLabel(feed: Feed): string {
-  return feed.fetch_interval_fixed_min ? formatMinutes(feed.fetch_interval_fixed_min) : `Auto · ${formatMinutes(feed.fetch_interval_min)}`
+  return feed.fetch_interval_fixed_min ? formatMinutes(feed.fetch_interval_fixed_min) : getT().feeds.interval.autoValue(formatMinutes(feed.fetch_interval_min))
 }
 
 /** Options d'intervalle, complétées par la valeur fixe courante si elle n'est pas dans la liste. */
-export function intervalOptions(feed?: Feed): { minutes: number; label: string }[] {
+export function intervalOptions(feed?: Feed): IntervalOption[] {
   const fixed = feed?.fetch_interval_fixed_min
   if (!fixed || INTERVAL_OPTIONS.some((o) => o.minutes === fixed)) return INTERVAL_OPTIONS
-  return [...INTERVAL_OPTIONS, { minutes: fixed, label: `Toutes les ${formatMinutes(fixed)}` }].sort((a, b) => a.minutes - b.minutes)
+  return [...INTERVAL_OPTIONS, intervalOption(fixed)].sort((a, b) => a.minutes - b.minutes)
 }
 
 /** Réglages simples appliqués tout de suite dans Dexie (la réponse serveur fait foi ensuite). */

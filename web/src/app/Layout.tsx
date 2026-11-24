@@ -19,22 +19,27 @@ import { SmartFeedDialog } from '../features/smartfeeds/SmartFeedDialog'
 import { Reader } from '../features/reader/Reader'
 import { openExternal } from '../lib/links'
 import { ReaderModal } from '../features/reader/ReaderModal'
+import { useT } from '../i18n'
+import type { Messages } from '../i18n'
 import { useKeyboard } from './useKeyboard'
 import { useView } from './view'
 
-const SHORTCUT_HELP: [string[], string][] = [
-  [['h'], 'Tableau de bord'],
-  [['j', 'k'], 'Article suivant, précédent'],
-  [['m'], 'Lu / non lu'],
-  [['s'], 'Favori'],
-  [['v'], 'Ouvrir l’original'],
-  [['f'], 'Article complet'],
-  [['r'], 'Résumer'],
-  [['u'], 'Non lus seulement'],
-  [['/'], 'Rechercher'],
-  [['Échap'], 'Retour'],
-  [['?'], 'Cette aide'],
-]
+function shortcutHelp(t: Messages['app']['layout']): [string[], string][] {
+  const s = t.shortcuts
+  return [
+    [['h'], s.dashboard],
+    [['j', 'k'], s.nextPrev],
+    [['m'], s.read],
+    [['s'], s.star],
+    [['v'], s.original],
+    [['f'], s.full],
+    [['r'], s.summarize],
+    [['u'], s.unreadOnly],
+    [['/'], s.search],
+    [[t.escapeKey], s.back],
+    [['?'], s.help],
+  ]
+}
 
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
@@ -48,6 +53,7 @@ function useMediaQuery(query: string): boolean {
 }
 
 export function Layout() {
+  const t = useT().app.layout
   const { view, entryId, unreadOnly, setView, setEntry, setUnreadOnly, openEntryIn } = useView()
   const location = useLocation()
   const navigate = useNavigate()
@@ -101,7 +107,7 @@ export function Layout() {
 
   const goHome = useCallback(() => setView({ kind: 'dashboard' }), [setView])
   const focusSearch = useCallback(
-    () => document.querySelector<HTMLInputElement>('[data-search-input]')?.focus() ?? document.querySelector<HTMLButtonElement>('[aria-label="Rechercher"]')?.click(),
+    () => document.querySelector<HTMLInputElement>('[data-search-input]')?.focus() ?? document.querySelector<HTMLButtonElement>('[data-search-button]')?.click(),
     [],
   )
   const [helpOpen, setHelpOpen] = useState(false)
@@ -215,9 +221,9 @@ export function Layout() {
         onClose={() => setEditSmart((s) => ({ ...s, open: false }))}
         onSaved={(sf) => setView({ kind: 'smart', id: sf.id })}
       />
-      <Dialog open={helpOpen} onClose={() => setHelpOpen(false)} title="Raccourcis clavier">
+      <Dialog open={helpOpen} onClose={() => setHelpOpen(false)} title={t.shortcutsTitle}>
         <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm" data-testid="shortcuts-help">
-          {SHORTCUT_HELP.map(([keys, label]) => (
+          {shortcutHelp(t).map(([keys, label]) => (
             <Fragment key={label}>
               <dt className="flex gap-1">
                 {keys.map((k) => (

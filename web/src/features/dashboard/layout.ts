@@ -2,6 +2,7 @@
 
 import type { Category, Feed, SmartFeed } from '../../api/client'
 import type { View } from '../../app/view'
+import { compareText, getT } from '../../i18n'
 
 export const LAYOUT_VERSION = 1
 
@@ -22,7 +23,11 @@ interface WidgetBase {
 }
 
 export type NewsDisplay = 'list' | 'cards' | 'magazine' | 'carousel'
-export const DISPLAY_LABEL: Record<NewsDisplay, string> = { list: 'Liste', magazine: 'Magazine', carousel: 'Carrousel', cards: 'Cartes' }
+export const DISPLAYS: NewsDisplay[] = ['list', 'magazine', 'carousel', 'cards']
+/** Libellé d'un mode d'affichage, dans la langue courante. */
+export function displayLabel(d: NewsDisplay): string {
+  return getT().dashboard.displays[d]
+}
 export type NewsWidget = WidgetBase & { type: 'news'; source: EntrySource; limit: number; display: NewsDisplay; unreadOnly: boolean }
 export type YoutubeWidget = WidgetBase & { type: 'youtube'; source: YoutubeSource; limit: number; unreadOnly: boolean }
 export type StarredWidget = WidgetBase & { type: 'starred'; limit: number }
@@ -39,12 +44,9 @@ export type AnyWidget = Widget | UnknownWidget
 export type WidgetType = Widget['type']
 
 export const KNOWN_TYPES: WidgetType[] = ['news', 'youtube', 'starred', 'summaries', 'stats']
-export const TYPE_LABEL: Record<WidgetType, string> = {
-  news: 'Nouveautés',
-  youtube: 'Vidéos YouTube',
-  starred: 'Favoris',
-  summaries: 'Résumés récents',
-  stats: 'Statistiques',
+/** Libellé d'un type de widget, dans la langue courante. */
+export function typeLabel(type: WidgetType): string {
+  return getT().dashboard.types[type]
 }
 
 export interface DashboardLayout {
@@ -155,13 +157,13 @@ export function serializeLayout(layout: DashboardLayout): string {
 export function buildDefaultLayout(categories: Category[], feeds: Feed[]): DashboardLayout {
   const widgets: Widget[] = []
   widgets.push({ id: 'default-stats', type: 'stats', width: 6, show: { unreadByCategory: true, readToday: true, feedErrors: true, tokens: true } })
-  widgets.push({ id: 'default-feed', type: 'news', width: 6, title: 'Fil d’actualité', source: { kind: 'all' }, limit: 12, display: 'carousel', unreadOnly: true })
-  const sorted = [...categories].sort((a, b) => a.position - b.position || a.title.localeCompare(b.title, 'fr'))
+  widgets.push({ id: 'default-feed', type: 'news', width: 6, source: { kind: 'all' }, limit: 12, display: 'carousel', unreadOnly: true })
+  const sorted = [...categories].sort((a, b) => a.position - b.position || compareText(a.title, b.title))
   for (const cat of sorted) {
     widgets.push({ id: `default-cat-${cat.id}`, type: 'news', width: 3, source: { kind: 'category', id: cat.id }, limit: 5, display: 'magazine', unreadOnly: true })
   }
   if (feeds.some((f) => f.category_id == null) && categories.length > 0) {
-    widgets.push({ id: 'default-uncategorized', type: 'news', width: 3, title: 'Sans catégorie', source: { kind: 'all' }, limit: 5, display: 'magazine', unreadOnly: true })
+    widgets.push({ id: 'default-uncategorized', type: 'news', width: 3, source: { kind: 'all' }, limit: 5, display: 'magazine', unreadOnly: true })
   }
   if (feeds.some((f) => f.is_youtube)) {
     widgets.push({ id: 'default-youtube', type: 'youtube', width: 6, source: { kind: 'all_youtube' }, limit: 12, unreadOnly: true })
@@ -173,38 +175,56 @@ export function buildDefaultLayout(categories: Category[], feeds: Feed[]): Dashb
 
 /** Titre affiché : personnalisé, sinon dérivé de la cible. Renvoie `orphan: true` si la cible a disparu. */
 export function widgetTitle(w: AnyWidget, categories: Map<number, Category>, feeds: Map<number, Feed>, smartFeeds: Map<number, SmartFeed> = new Map()): { title: string; orphan: boolean } {
-  if (!isKnownWidget(w)) return { title: w.title ?? 'Widget non pris en charge', orphan: false }
-  const custom = w.title
+  const t = getT().dashboard.titles
+  if (!isKnownWidget(w)) return { title: w.title ?? t.unsupported, orphan: false }
+  const custom = defaultTitle(w) ?? w.title
   switch (w.type) {
     case 'news': {
       if (w.source.kind === 'category') {
         const c = categories.get(w.source.id)
-        return { title: custom ?? c?.title ?? 'Catégorie supprimée', orphan: !c }
+        return { title: custom ?? c?.title ?? t.deletedCategory, orphan: !c }
       }
       if (w.source.kind === 'feed') {
         const f = feeds.get(w.source.id)
-        return { title: custom ?? f?.title ?? 'Flux supprimé', orphan: !f }
+        return { title: custom ?? f?.title ?? t.deletedFeed, orphan: !f }
       }
       if (w.source.kind === 'smart') {
         const sf = smartFeeds.get(w.source.id)
-        return { title: custom ?? sf?.name ?? 'Flux intelligent supprimé', orphan: !sf }
+        return { title: custom ?? sf?.name ?? t.deletedSmartFeed, orphan: !sf }
       }
-      return { title: custom ?? 'Tous les articles', orphan: false }
+      return { title: custom ?? t.allEntries, orphan: false }
     }
     case 'youtube': {
       if (w.source.kind === 'category') {
         const c = categories.get(w.source.id)
-        return { title: custom ?? `Vidéos · ${c?.title ?? 'Catégorie supprimée'}`, orphan: !c }
+        return { title: custom ?? t.videosOf(c?.title ?? t.deletedCategory), orphan: !c }
       }
-      return { title: custom ?? 'Vidéos YouTube', orphan: false }
+      return { title: custom ?? t.youtube, orphan: false }
     }
     case 'starred':
-      return { title: custom ?? 'Derniers favoris', orphan: false }
+      return { title: custom ?? t.starred, orphan: false }
     case 'summaries':
-      return { title: custom ?? 'Résumés récents', orphan: false }
+      return { title: custom ?? t.summaries, orphan: false }
     case 'stats':
-      return { title: custom ?? 'Vue d’ensemble', orphan: false }
+      return { title: custom ?? t.stats, orphan: false }
   }
+}
+
+/**
+ * Titres des widgets automatiques « Fil d’actualité » et « Sans catégorie », traduits à l'affichage.
+ * Les dispositions enregistrées avant la traduction portent le titre français en clair : il est
+ * reconnu (identifiant + texte d'origine) et traité comme le titre par défaut, pas comme un titre
+ * personnalisé. Un titre modifié par l'utilisateur reste tel quel.
+ */
+const DEFAULT_TITLES: Record<string, { legacy: string; key: 'newsFeed' | 'uncategorized' }> = {
+  'default-feed': { legacy: 'Fil d’actualité', key: 'newsFeed' },
+  'default-uncategorized': { legacy: 'Sans catégorie', key: 'uncategorized' },
+}
+
+function defaultTitle(w: Widget): string | undefined {
+  const d = DEFAULT_TITLES[w.id]
+  if (!d || (w.title !== undefined && w.title !== d.legacy)) return undefined
+  return getT().dashboard.titles[d.key]
 }
 
 /** Widget vierge d'un type donné, pour le dialogue d'ajout. */
