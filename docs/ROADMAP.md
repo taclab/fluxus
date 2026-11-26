@@ -20,37 +20,13 @@ construit à partir des résumés.
   semaine, même après redémarrage) ; fuseau horaire de l'utilisateur à régler.
 - HTML d'e-mail sobre (styles en ligne), version texte, lien vers l'article dans Fluxus.
 
-## 2. Adresse e-mail dédiée pour recevoir des newsletters comme des flux — en cours
+## 2. Newsletters par e-mail : suites
 
-**Intention** : comme Inoreader, une adresse générée par Fluxus ; chaque newsletter qui y arrive
-devient un flux, chaque numéro un article. Fonction phare.
-
-**Décisions (26/11/2026)**
-- Réception par Cloudflare Email Routing (le domaine de l'utilisateur y est géré) sur un
-  **sous-domaine dédié** (`news.<domaine>`) avec une règle « catch-all » vers un **Email Worker**
-  fourni dans le dépôt. Le Worker POSTe le mail brut, signé (HMAC-SHA256 d'un secret partagé,
-  horodatage contre le rejeu), à `POST /api/inbound/email` ; l'instance est joignable depuis
-  Internet, pas de Tunnel.
-- Adresse inconnue ou révoquée : 404, le Worker rejette le mail chez Cloudflare. Fluxus injoignable
-  ou en erreur : le Worker renvoie le mail vers une adresse de secours vérifiée dans Cloudflare
-  (option A), jamais de rejet qui ferait désinscrire.
-- Adresses : une adresse principale qui range chaque newsletter dans son flux (`List-Id`, sinon
-  expéditeur), plus des adresses dédiées révocables (un flux par adresse). Partie locale aléatoire
-  et non devinable.
-- Ingestion indépendante du transport (`ingest_message(raw)`) : une relève IMAP pourra s'ajouter
-  pour les instances sans Cloudflare.
-
-**Pistes et contraintes**
-- Contenu : HTML de l'e-mail nettoyé (`extract/clean`), pixels de suivi et texte d'aperçu masqué
-  retirés, tableaux de mise en page aplatis ; texte pour la recherche et les résumés. Pièces jointes
-  et images `cid:` ignorées. Liens de suivi laissés tels quels (les résoudre déclencherait le clic).
-- Le mail de confirmation d'inscription doit arriver dans Fluxus pour pouvoir cliquer le lien.
-- Désinscription : lien `List-Unsubscribe` affiché dans le lecteur.
-- Sécurité : signature vérifiée avant toute lecture, taille bornée, dédoublonnage par
-  `Message-ID`, aucune requête réseau déclenchée par le contenu reçu.
-- Plus tard : désinscription « en un clic » (POST RFC 8058), images servies par le serveur pour ne
-  pas signaler l'ouverture, suggestion du flux RSS quand la newsletter en a un (Substack, Ghost…),
-  relève IMAP.
+La réception est livrée en 1.0.7 (`CHANGELOG.md`, `docs/NEWSLETTERS.md`). Restent :
+- désinscription « en un clic » (POST RFC 8058 quand `List-Unsubscribe-Post` le permet) ;
+- images servies par le serveur, pour ne pas signaler l'ouverture d'un numéro à l'expéditeur ;
+- suggestion du flux RSS quand la newsletter en a un (Substack, Ghost, Beehiiv…) ;
+- relève IMAP pour les instances sans Cloudflare (`ingest_message` est déjà indépendant du transport).
 
 ## 3. Intégration YouTube plus forte : « À regarder plus tard » comme flux
 
