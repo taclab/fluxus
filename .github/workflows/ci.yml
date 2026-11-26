@@ -65,6 +65,9 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm audit --omit=dev
+      - name: Email Worker des newsletters (signature commune avec le serveur)
+        run: node --test worker.test.mjs
+        working-directory: cloudflare/email-worker
 
   images:
     name: Images (application, renderer et son cloisonnement réseau)

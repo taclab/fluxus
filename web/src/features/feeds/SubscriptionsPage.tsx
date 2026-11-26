@@ -9,7 +9,7 @@
 
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlertTriangle, ChevronLeft, CirclePause, CirclePlay, ExternalLink, Pencil, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, CirclePause, CirclePlay, ExternalLink, Mail, Pencil, RefreshCw, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -507,6 +507,7 @@ function FeedRow({
   const tr = t.subscriptions.row
   const [cap, setCap] = useState(String(feed.summary_daily_cap))
   useEffect(() => setCap(String(feed.summary_daily_cap)), [feed.summary_daily_cap])
+  const isEmail = feed.source === 'email'
   const inherited = category?.view_mode ? tr.folderMode(VIEW_MODE_SPECS[category.view_mode].label) : t.subscriptions.group.defaultMode(VIEW_MODE_SPECS[defaultMode].label)
 
   function commitCap() {
@@ -528,8 +529,8 @@ function FeedRow({
             <Link to={`/feed/${feed.id}`} className={clsx('block truncate hover:underline', feed.disabled ? 'text-muted' : 'font-medium text-app')} title={feed.title}>
               {feed.title || hostname(feed.url)}
             </Link>
-            <span className="block truncate text-xs text-muted" title={feed.url}>
-              {hostname(feed.site_url || feed.url)}
+            <span className="block truncate text-xs text-muted" title={isEmail ? undefined : feed.url}>
+              {hostname(feed.site_url || feed.url) || (isEmail ? t.newsletters.feed.kind : '')}
             </span>
           </div>
         </div>
@@ -542,8 +543,17 @@ function FeedRow({
       </td>
       <td className="whitespace-nowrap px-2 py-2 text-xs text-muted">
         <div>{feed.last_fetched_at ? agoDate(feed.last_fetched_at) : t.common.never}</div>
-        <div>{feed.disabled ? '—' : tr.next(untilDate(feed.next_fetch_at))}</div>
+        <div>{feed.disabled || isEmail ? '—' : tr.next(untilDate(feed.next_fetch_at))}</div>
       </td>
+      {isEmail ? (
+        <td colSpan={2} className="px-2 py-2 text-xs text-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <Mail className="size-3.5" />
+            {t.newsletters.feed.kind}
+          </span>
+        </td>
+      ) : (
+        <>
       <td className="px-2 py-2">
         <Select value={feed.fetch_interval_fixed_min ?? 0} onChange={(e) => onSave({ fetch_interval_fixed_min: Number(e.target.value) })} disabled={disabled} className={cellSelect} aria-label={tr.intervalOf(feed.title)} title={intervalLabel(feed)}>
           {intervalOptions(feed).map((o) => (
@@ -562,6 +572,8 @@ function FeedRow({
           ))}
         </Select>
       </td>
+        </>
+      )}
       <td className="whitespace-nowrap px-2 py-2">
         <div className="flex items-center gap-1.5">
           <input

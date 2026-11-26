@@ -20,6 +20,7 @@ import * as subscriptions from './messages/subscriptions'
 import * as smartfeeds from './messages/smartfeeds'
 import * as dashboard from './messages/dashboard'
 import * as settings from './messages/settings'
+import * as newsletters from './messages/newsletters'
 import { getLocale, localePref, type Locale } from './locale'
 
 const catalogs = {
@@ -33,6 +34,7 @@ const catalogs = {
     smartfeeds: smartfeeds.fr,
     dashboard: dashboard.fr,
     settings: settings.fr,
+    newsletters: newsletters.fr,
   },
   en: {
     common: common.en,
@@ -44,6 +46,7 @@ const catalogs = {
     smartfeeds: smartfeeds.en,
     dashboard: dashboard.en,
     settings: settings.en,
+    newsletters: newsletters.en,
   },
 } satisfies Record<Locale, unknown>
 

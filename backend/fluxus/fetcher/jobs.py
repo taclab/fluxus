@@ -32,7 +32,7 @@ async def fetch_feed_abandoned(session: AsyncSession, job: Job) -> None:
 async def fetch_feed_job(session: AsyncSession, job: Job) -> None:
     feed_id = int(job.payload["feed_id"])
     feed = await session.get(Feed, feed_id)
-    if feed is None or feed.disabled:
+    if feed is None or feed.disabled or feed.source != "rss":
         return
     try:
         result = await refresh_feed(session, feed)

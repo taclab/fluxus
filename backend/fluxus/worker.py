@@ -98,7 +98,7 @@ async def schedule_due_feeds() -> int:
         # Avant de lire les flux : un import ne peut pas s'intercaler entre la lecture et la mise en file.
         await maintenance.guard(session)
         result = await session.execute(
-            select(Feed.id).where(Feed.disabled.is_(False), Feed.next_fetch_at <= now)
+            select(Feed.id).where(Feed.disabled.is_(False), Feed.source == "rss", Feed.next_fetch_at <= now)
         )
         for (feed_id,) in result:
             job = await queue.enqueue(

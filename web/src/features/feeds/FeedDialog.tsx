@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Mail } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { api, unwrap, type Category, type Feed } from '../../api/client'
@@ -62,6 +63,8 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
   const inherited = folder?.view_mode ? t.inheritedFolder(VIEW_MODE_SPECS[folder.view_mode].label, folder.title) : t.inheritedDefault(VIEW_MODE_SPECS[defaultMode].label)
 
   if (!feed) return null
+  const isEmail = feed.source === 'email'
+  const tn = tr.newsletters
 
   async function save() {
     if (!feed) return
@@ -74,7 +77,7 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
     try {
       await updateFeed(feed.id, {
         title,
-        url: url !== feed.url ? url : null,
+        url: !isEmail && url !== feed.url ? url : null,
         category_id: categoryId ? Number(categoryId) : null,
         clear_category: !categoryId,
         extraction_mode: mode,
@@ -127,7 +130,7 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
         <>
           {confirmDelete ? (
             <>
-              <span className="text-sm text-muted self-center mr-auto">{t.confirmDelete}</span>
+              <span className="text-sm text-muted self-center mr-auto">{isEmail ? tn.feed.deleteWarning : t.confirmDelete}</span>
               <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
                 {tr.common.no}
               </Button>
@@ -155,9 +158,16 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
         <Field label={t.titleLabel}>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} />
         </Field>
-        <Field label={t.urlLabel}>
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} type="url" />
-        </Field>
+        {isEmail ? (
+          <Link to="/settings#newsletters" onClick={onClose} className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-app hover:underline" data-testid="feed-newsletter">
+            <Mail className="size-4 text-muted" />
+            {tn.feed.kind}
+          </Link>
+        ) : (
+          <Field label={t.urlLabel}>
+            <Input value={url} onChange={(e) => setUrl(e.target.value)} type="url" />
+          </Field>
+        )}
         <Field label={tr.feeds.add.category}>
           <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">{tr.feeds.add.noCategory}</option>
@@ -171,24 +181,28 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
         <Field label={t.viewModeLabel} hint={t.viewModeHint}>
           <ViewModeSelect value={viewMode} inheritLabel={t.inherit(inherited)} onChange={setViewModeValue} />
         </Field>
-        <Field label={t.extractionLabel} hint={extractionHint()}>
-          <Select value={mode} onChange={(e) => setMode(e.target.value as ExtractionMode)}>
-            {EXTRACTION_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label={t.intervalLabel} hint={intervalHint()}>
-          <Select value={interval} onChange={(e) => setIntervalMin(Number(e.target.value))}>
-            {intervalOptions(feed).map((o) => (
-              <option key={o.minutes} value={o.minutes}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        {!isEmail && (
+          <>
+            <Field label={t.extractionLabel} hint={extractionHint()}>
+              <Select value={mode} onChange={(e) => setMode(e.target.value as ExtractionMode)}>
+                {EXTRACTION_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label={t.intervalLabel} hint={intervalHint()}>
+              <Select value={interval} onChange={(e) => setIntervalMin(Number(e.target.value))}>
+                {intervalOptions(feed).map((o) => (
+                  <option key={o.minutes} value={o.minutes}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </>
+        )}
         <div className="space-y-2">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={autoSummary} onChange={(e) => setAutoSummary(e.target.checked)} className="size-4 accent-accent-600" data-testid="feed-auto-summary" />
@@ -210,22 +224,30 @@ export function FeedDialog({ feed, categories, onClose }: { feed: Feed | null; c
 
         <div className="rounded-lg bg-muted px-3 py-2 text-xs text-muted space-y-1">
           <div className="flex justify-between">
-            <span>{t.lastFetch}</span>
+            <span>{isEmail ? tn.feed.lastReceived : t.lastFetch}</span>
             <span>{feed.last_fetched_at ? agoDate(feed.last_fetched_at) : tr.common.never}</span>
           </div>
-          <div className="flex justify-between">
-            <span>{t.nextFetch}</span>
-            <span>{feed.disabled ? t.paused : untilDate(feed.next_fetch_at)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>{t.currentInterval}</span>
-            <span>{intervalLabel(feed)}</span>
-          </div>
+          {!isEmail && (
+            <>
+              <div className="flex justify-between">
+                <span>{t.nextFetch}</span>
+                <span>{feed.disabled ? t.paused : untilDate(feed.next_fetch_at)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>{t.currentInterval}</span>
+                <span>{intervalLabel(feed)}</span>
+              </div>
+            </>
+          )}
           {feed.last_error && <div className="text-red-600 dark:text-red-400 break-words">{t.error(feed.last_error)}</div>}
           <div className="flex justify-between gap-2">
-            <button type="button" onClick={() => void refresh()} className="text-accent-600 dark:text-accent-300 underline">
-              {t.refreshNow}
-            </button>
+            {isEmail ? (
+              <span />
+            ) : (
+              <button type="button" onClick={() => void refresh()} className="text-accent-600 dark:text-accent-300 underline">
+                {t.refreshNow}
+              </button>
+            )}
             <Link to="/abonnements" className="text-accent-600 dark:text-accent-300 underline" onClick={onClose}>
               {t.manageAll}
             </Link>

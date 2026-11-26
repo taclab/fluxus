@@ -28,7 +28,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..maintenance import MAINTENANCE_LOCK_KEY, Busy
-from ..models import Category, Entry, Feed, Setting, SmartFeed, SmartFeedMatch, Summary, Transcript
+from ..models import Category, Entry, Feed, NewsletterAddress, Setting, SmartFeed, SmartFeedMatch, Summary, Transcript
 from ..settings_store import DEFAULTS, LAYOUT_VERSION_KEY, SECRET_KEYS, get_layout_version, set_setting
 
 FORMAT = "fluxus-export"
@@ -56,6 +56,7 @@ class ExportTable:
 EXPORT_TABLES: tuple[ExportTable, ...] = (
     ExportTable("categories", Category),
     ExportTable("feeds", Feed),
+    ExportTable("newsletter_addresses", NewsletterAddress),
     ExportTable("smart_feeds", SmartFeed),
     ExportTable("entries", Entry),
     ExportTable("summaries", Summary),
@@ -67,9 +68,9 @@ TABLES = {t.name: t for t in EXPORT_TABLES}
 # Vidées à l'import, dans l'ordre des dépendances (les jobs se rapportent à l'ancien contenu). Le
 # journal `llm_usage` est conservé : le budget quotidien se calcule dessus ; ses liens vers les
 # articles et flux intelligents supprimés passent à NULL (ON DELETE SET NULL).
-CLEARED = ("smart_feed_matches", "transcripts", "summaries", "jobs", "entries", "feeds", "smart_feeds", "categories")
+CLEARED = ("smart_feed_matches", "transcripts", "summaries", "jobs", "entries", "newsletter_addresses", "feeds", "smart_feeds", "categories")
 # Tables à clé `id` auto-incrémentée : séquence recalée après l'import.
-SEQUENCED = ("categories", "feeds", "smart_feeds", "entries", "summaries")
+SEQUENCED = ("categories", "feeds", "newsletter_addresses", "smart_feeds", "entries", "summaries")
 
 
 class InvalidArchive(ValueError):

@@ -387,6 +387,8 @@ async def update_feed(feed_id: int, body: FeedUpdate, _: Auth, session: Session)
     if body.title is not None:
         feed.title = body.title
     if body.url is not None and body.url != feed.url:
+        if feed.source != "rss":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "L'adresse d'un flux de newsletter ne se modifie pas")
         other = await session.execute(select(Feed.id).where(Feed.url == body.url, Feed.id != feed.id))
         if other.scalar_one_or_none() is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "Un autre flux utilise déjà cette adresse")
@@ -467,6 +469,9 @@ async def refresh_feed_now(feed_id: int, _: Auth, session: Session) -> dict:
     feed = await session.get(Feed, feed_id)
     if feed is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Flux introuvable")
+    if feed.source != "rss":
+        # Une newsletter arrive d'elle-même : rien à récupérer.
+        return {"queued": False}
     feed.next_fetch_at = datetime.now(UTC)
     await enqueue(session, "fetch_feed", {"feed_id": feed.id}, dedupe_key=f"fetch_feed:{feed.id}")
     await session.commit()
@@ -475,7 +480,7 @@ async def refresh_feed_now(feed_id: int, _: Auth, session: Session) -> dict:
 
 @router.post("/feeds/refresh-all", status_code=202)
 async def refresh_all(_: Auth, session: Session) -> dict:
-    feed_ids = (await session.execute(select(Feed.id).where(Feed.disabled.is_(False)))).scalars().all()
+    feed_ids = (await session.execute(select(Feed.id).where(Feed.disabled.is_(False), Feed.source == "rss"))).scalars().all()
     queued = 0
     for fid in feed_ids:
         if await enqueue(session, "fetch_feed", {"feed_id": fid}, dedupe_key=f"fetch_feed:{fid}"):
@@ -551,7 +556,8 @@ async def opml_import(file: UploadFile, _: Auth, session: Session) -> OpmlImport
 @router.get("/opml/export")
 async def opml_export(_: Auth, session: Session) -> Response:
     cats = (await session.execute(select(Category))).scalars().all()
-    feeds = (await session.execute(select(Feed))).scalars().all()
+    # Les newsletters n'ont pas d'adresse de flux utilisable par un autre lecteur.
+    feeds = (await session.execute(select(Feed).where(Feed.source == "rss"))).scalars().all()
     xml = build_opml(list(cats), list(feeds))
     return Response(
         content=xml,

@@ -170,17 +170,7 @@ async def _insert_new_entries(session: AsyncSession, feed: Feed, parsed: ParsedF
         new_entries.append(entry)
         new_count += 1
     await session.flush()
-    # Flux intelligents : correspondances des nouveaux articles, puis résumés automatiques sous quotas.
-    if new_entries:
-        from ..smartfeeds.service import evaluate, schedule_auto_summaries
-        from ..summarize.auto import schedule_feed_auto_summaries
-
-        # Flux « tout résumer » d'abord : sa promesse porte sur chaque nouvel article, alors qu'un job de
-        # flux intelligent peut être abandonné (règle modifiée). Clé de dédoublonnage commune : un seul résumé.
-        await schedule_feed_auto_summaries(session, feed, [e.id for e in new_entries])
-        pairs = await evaluate(session, feed, [e.id for e in new_entries])
-        if pairs:
-            await schedule_auto_summaries(session, pairs)
+    await after_new_entries(session, feed, new_entries)
     # Mode d'extraction explicite (http ou browser) = « toujours récupérer l'article complet » :
     # on planifie l'extraction en arrière-plan pour que l'article soit lisible hors-ligne.
     if feed.extraction_mode in ("http", "browser"):
@@ -194,6 +184,22 @@ async def _insert_new_entries(session: AsyncSession, feed: Feed, parsed: ParsedF
                     max_attempts=2,
                 )
     return new_count
+
+
+async def after_new_entries(session: AsyncSession, feed: Feed, new_entries: list[Entry]) -> None:
+    """Suites communes à toute arrivée d'articles (flux RSS ou newsletter reçue) : correspondances des
+    flux intelligents, puis résumés automatiques sous quotas. Les articles sont déjà en base (flush)."""
+    if not new_entries:
+        return
+    from ..smartfeeds.service import evaluate, schedule_auto_summaries
+    from ..summarize.auto import schedule_feed_auto_summaries
+
+    # Flux « tout résumer » d'abord : sa promesse porte sur chaque nouvel article, alors qu'un job de
+    # flux intelligent peut être abandonné (règle modifiée). Clé de dédoublonnage commune : un seul résumé.
+    await schedule_feed_auto_summaries(session, feed, [e.id for e in new_entries])
+    pairs = await evaluate(session, feed, [e.id for e in new_entries])
+    if pairs:
+        await schedule_auto_summaries(session, pairs)
 
 
 async def _record_error(session: AsyncSession, feed: Feed, message: str, now: datetime) -> FetchResult:

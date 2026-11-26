@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, Sparkles, Star } from 'lucide-react'
+import { AlignLeft, ChevronLeft, Circle, CircleCheck, ExternalLink, FileText, Loader2, MailX, Sparkles, Star } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, isOnline, unwrap, type Feed } from '../../api/client'
@@ -15,6 +15,7 @@ import { SummaryMenu } from '../summary/SummaryMenu'
 import { SummaryPanel } from '../summary/SummaryPanel'
 import { summaryKey, type SummaryRequest } from '../summary/summaryStyles'
 import { openExternal } from '../../lib/links'
+import { unsubscribeLink } from './unsubscribe'
 import { FeedIcon } from '../feeds/FeedIcon'
 import { getLocale, useT } from '../../i18n'
 
@@ -28,6 +29,7 @@ interface Props {
 export function Reader({ entryId, onBack, summaryRequested, fullContentRequested }: Props) {
   const tt = useT()
   const t = tt.reader
+  const tn = tt.newsletters.reader
   const raw = useLiveQuery(async () => (entryId ? ((await db.entries.get(entryId)) ?? null) : null), [entryId])
   // Entre deux articles, useLiveQuery renvoie encore le résultat précédent jusqu'à la première émission de
   // la nouvelle requête : on le traite comme « en chargement » plutôt que d'afficher un instant l'ancien
@@ -124,7 +126,8 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
   }, [summaryRequested]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (fullContentRequested > 0 && entry) {
+    // Une newsletter est déjà complète : rien à extraire (le raccourci ne fait rien).
+    if (fullContentRequested > 0 && entry && feed?.source !== 'email') {
       if (entry.extraction_status === 'done') setShowFull((s) => !s)
       else void fetchFull()
     }
@@ -173,6 +176,9 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
   const html = sanitizeArticle((showFull && hasFull ? entry.content_html : entry.summary_html) ?? '')
   const youtubeId = entry.youtube_id
   const isVideo = Boolean(youtubeId)
+  // Newsletter reçue par e-mail : le mail est l'article complet ; lien de désinscription de la liste.
+  const isEmail = feed?.source === 'email'
+  const unsubscribe = isEmail ? unsubscribeLink(entry.meta) : null
 
   const seek = (seconds: number) => {
     const win = playerRef.current?.contentWindow
@@ -200,7 +206,7 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
         <IconButton label={entry.starred ? t.unstar : t.star} active={entry.starred} onClick={() => void recordChange(entry.id, { starred: !entry.starred })}>
           <Star className={clsx('size-5', entry.starred && 'fill-amber-400 text-amber-400')} />
         </IconButton>
-        {!isVideo && (
+        {!isVideo && !isEmail && (
           <IconButton
             label={hasFull ? (showFull ? t.showFeedContent : t.showFull) : t.fetchFull}
             active={hasFull && showFull}
@@ -292,11 +298,18 @@ export function Reader({ entryId, onBack, summaryRequested, fullContentRequested
 
           {html ? <div className="prose-reader text-app" dangerouslySetInnerHTML={{ __html: html }} /> : !isVideo && <p className="text-muted text-sm">{t.noContent}</p>}
 
-          {entry.url && (
-            <p className="pt-6 border-t border-app">
-              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-accent-600 dark:text-accent-300 hover:underline">
-                {t.readOn(hostname(entry.url))} <ExternalLink className="size-3.5" />
-              </a>
+          {(entry.url || unsubscribe) && (
+            <p className="pt-6 border-t border-app flex flex-wrap gap-x-5 gap-y-2">
+              {entry.url && (
+                <a href={entry.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-accent-600 dark:text-accent-300 hover:underline">
+                  {t.readOn(hostname(entry.url))} <ExternalLink className="size-3.5" />
+                </a>
+              )}
+              {unsubscribe && (
+                <a href={unsubscribe} target="_blank" rel="noopener noreferrer" title={tn.unsubscribeTitle} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-app hover:underline" data-testid="reader-unsubscribe">
+                  <MailX className="size-3.5" /> {tn.unsubscribe}
+                </a>
+              )}
             </p>
           )}
         </div>

@@ -20,24 +20,37 @@ construit à partir des résumés.
   semaine, même après redémarrage) ; fuseau horaire de l'utilisateur à régler.
 - HTML d'e-mail sobre (styles en ligne), version texte, lien vers l'article dans Fluxus.
 
-## 2. Adresse e-mail dédiée pour recevoir des newsletters comme des flux
+## 2. Adresse e-mail dédiée pour recevoir des newsletters comme des flux — en cours
 
 **Intention** : comme Inoreader, une adresse générée par Fluxus ; chaque newsletter qui y arrive
 devient un flux, chaque numéro un article. Fonction phare.
 
+**Décisions (26/11/2026)**
+- Réception par Cloudflare Email Routing (le domaine de l'utilisateur y est géré) sur un
+  **sous-domaine dédié** (`news.<domaine>`) avec une règle « catch-all » vers un **Email Worker**
+  fourni dans le dépôt. Le Worker POSTe le mail brut, signé (HMAC-SHA256 d'un secret partagé,
+  horodatage contre le rejeu), à `POST /api/inbound/email` ; l'instance est joignable depuis
+  Internet, pas de Tunnel.
+- Adresse inconnue ou révoquée : 404, le Worker rejette le mail chez Cloudflare. Fluxus injoignable
+  ou en erreur : le Worker renvoie le mail vers une adresse de secours vérifiée dans Cloudflare
+  (option A), jamais de rejet qui ferait désinscrire.
+- Adresses : une adresse principale qui range chaque newsletter dans son flux (`List-Id`, sinon
+  expéditeur), plus des adresses dédiées révocables (un flux par adresse). Partie locale aléatoire
+  et non devinable.
+- Ingestion indépendante du transport (`ingest_message(raw)`) : une relève IMAP pourra s'ajouter
+  pour les instances sans Cloudflare.
+
 **Pistes et contraintes**
-- Réception : l'instance est auto-hébergée derrière un proxy HTTP, sans serveur de messagerie.
-  Options, de la plus simple à la plus autonome :
-  1. relève IMAP d'une boîte dédiée (job périodique) avec des adresses `boite+jeton@domaine` ;
-  2. webhook d'un service de réception (Cloudflare Email Routing + Worker, Mailgun, Postmark…) ;
-  3. conteneur SMTP entrant dans la pile Compose (MX à configurer, plus lourd à exploiter).
-- Un flux par expéditeur (ou par jeton), créé à la première réception ; titre tiré du nom de
-  l'expéditeur. Désinscription : afficher le lien `List-Unsubscribe`.
-- Contenu : HTML de l'e-mail nettoyé par `extract/clean` (pixels de suivi et liens de tracking
-  retirés, images distantes servies via le cache du service worker), texte pour la recherche et les
-  résumés. Pièces jointes ignorées.
-- Sécurité : jeton aléatoire par adresse (non devinable), révocable ; taille de message bornée ;
-  aucune requête réseau déclenchée par le contenu reçu hors `safe_get`.
+- Contenu : HTML de l'e-mail nettoyé (`extract/clean`), pixels de suivi et texte d'aperçu masqué
+  retirés, tableaux de mise en page aplatis ; texte pour la recherche et les résumés. Pièces jointes
+  et images `cid:` ignorées. Liens de suivi laissés tels quels (les résoudre déclencherait le clic).
+- Le mail de confirmation d'inscription doit arriver dans Fluxus pour pouvoir cliquer le lien.
+- Désinscription : lien `List-Unsubscribe` affiché dans le lecteur.
+- Sécurité : signature vérifiée avant toute lecture, taille bornée, dédoublonnage par
+  `Message-ID`, aucune requête réseau déclenchée par le contenu reçu.
+- Plus tard : désinscription « en un clic » (POST RFC 8058), images servies par le serveur pour ne
+  pas signaler l'ouverture, suggestion du flux RSS quand la newsletter en a un (Substack, Ghost…),
+  relève IMAP.
 
 ## 3. Intégration YouTube plus forte : « À regarder plus tard » comme flux
 

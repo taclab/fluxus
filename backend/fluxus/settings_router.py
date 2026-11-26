@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from typing import Annotated
 
@@ -28,6 +29,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 Session = Annotated[AsyncSession, Depends(get_session)]
 
 EDITABLE_KEYS = set(DEFAULTS.keys())
+DOMAIN_RE = re.compile(r"(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 MAX_LAYOUT_BYTES = 64 * 1024
 
 
@@ -141,6 +143,10 @@ async def patch_settings(body: SettingsPatch, _: Auth, session: Session) -> Sett
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Présentation inconnue")
         if key == "sync_prefetch_days" and not (value.strip().isdigit() and 1 <= int(value) <= 365):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "sync_prefetch_days doit être un entier entre 1 et 365")
+        if key == "newsletter_domain":
+            value = value.strip().lower().rstrip(".")
+            if value and not DOMAIN_RE.fullmatch(value):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Domaine de réception invalide (exemple : news.mondomaine.fr)")
         await set_setting(session, key, value.strip())
     await session.commit()
     return await get_settings_view(_, session)

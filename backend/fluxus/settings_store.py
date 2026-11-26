@@ -36,6 +36,8 @@ DEFAULTS: dict[str, str] = {
     "dashboard_layout": "",
     # Présentation de liste des vues sans présentation propre (flux, dossier ou flux intelligent).
     "default_view_mode": "compact",
+    # Domaine (ou sous-domaine) de réception des newsletters, routé vers l'Email Worker ; vide = non configuré.
+    "newsletter_domain": "",
 }
 
 # Compteur d'écritures de la disposition (clé interne, non éditable directement) : un client doit

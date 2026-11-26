@@ -16,6 +16,8 @@ from .db import get_engine
 from .entries.router import router as entries_router
 from .feeds.router import router as feeds_router
 from .maintenance import Busy
+from .newsletters.router import inbound_router as newsletters_inbound_router
+from .newsletters.router import router as newsletters_router
 from .settings_router import router as settings_router
 from .smartfeeds.router import router as smartfeeds_router
 from .summarize.router import router as summarize_router
@@ -112,6 +114,8 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(backup_router)
 app.include_router(feeds_router)
+app.include_router(newsletters_router)
+app.include_router(newsletters_inbound_router)
 app.include_router(entries_router)
 app.include_router(settings_router)
 app.include_router(smartfeeds_router)

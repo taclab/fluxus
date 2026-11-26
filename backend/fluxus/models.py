@@ -77,6 +77,8 @@ class Feed(Base):
     # none | http | browser | auto
     extraction_mode: Mapped[str] = mapped_column(String(20), default="auto")
     is_youtube: Mapped[bool] = mapped_column(Boolean, default=False)
+    # rss (récupéré périodiquement) | email (newsletter reçue par `newsletters/`, jamais récupérée)
+    source: Mapped[str] = mapped_column(String(10), default="rss", server_default="rss")
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # Présentation de la liste ; null = celle du dossier, sinon le défaut global.
     view_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -288,6 +290,24 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class NewsletterAddress(Base):
+    """Adresse de réception de newsletters (`<token>@<domaine>`). Sans flux attaché, elle range chaque
+    newsletter dans son propre flux (par `List-Id` ou expéditeur) ; avec, tout arrive dans ce flux."""
+
+    __tablename__ = "newsletter_addresses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Partie locale de l'adresse : aléatoire, non devinable.
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    label: Mapped[str] = mapped_column(String(200), default="")
+    feed_id: Mapped[int | None] = mapped_column(ForeignKey("feeds.id", ondelete="CASCADE"), nullable=True, unique=True)
+    # Dossier des flux créés à la réception (adresse qui range par newsletter).
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
+    received_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class DeviceToken(Base):

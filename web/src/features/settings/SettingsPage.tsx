@@ -12,6 +12,7 @@ import { Button, Field, IconButton, Input, Select, Spinner, Textarea } from '../
 import { clearDatabase, db } from '../../db/db'
 import { resetDashboardLayout } from '../dashboard/useDashboardLayout'
 import { BackupSection } from './BackupSection'
+import { NewsletterSection } from './NewsletterSection'
 import { SUMMARY_STYLES } from '../summary/summaryStyles'
 import { setViewMode, useDefaultViewMode } from '../entries/useViewMode'
 import { LAYOUT_GROUPS, VIEW_MODE_SPECS, modesFor, type ListLayout } from '../entries/viewMode'
@@ -64,10 +65,11 @@ export function SettingsPage() {
     void load()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Lien « Personnaliser » du menu des résumés (`/settings#summaries`) : la section n'existe qu'une
-  // fois les réglages chargés.
+  // Liens vers une section (`/settings#summaries` depuis le menu des résumés, `#newsletters` depuis un
+  // flux de newsletter) : la section n'existe qu'une fois les réglages chargés.
   useEffect(() => {
-    if (settings && window.location.hash === '#summaries') document.getElementById('summaries')?.scrollIntoView({ block: 'start' })
+    const anchor = window.location.hash.slice(1)
+    if (settings && (anchor === 'summaries' || anchor === 'newsletters')) document.getElementById(anchor)?.scrollIntoView({ block: 'start' })
   }, [settings])
 
   function set(key: string, value: string) {
@@ -381,6 +383,10 @@ export function SettingsPage() {
                 {ts.subscriptions.diskLow}
               </p>
             )}
+          </Section>
+
+          <Section id="newsletters" title={t.newsletters.section.title} description={t.newsletters.section.description}>
+            <NewsletterSection />
           </Section>
 
           <Section title={ts.backup.title} description={ts.backup.description}>

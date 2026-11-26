@@ -68,7 +68,7 @@ def _filter_iframes(html: str) -> str:
     return re.sub(r"<iframe[^>]*>(?:.*?</iframe>)?", repl, html, flags=re.IGNORECASE | re.DOTALL)
 
 
-def sanitize_html(html: str | None, base_url: str | None = None) -> str:
+def sanitize_html(html: str | None, base_url: str | None = None, *, extra_tags: frozenset[str] = frozenset()) -> str:
     if not html:
         return ""
     # Images chargées paresseusement : on promeut data-src en src avant nettoyage.
@@ -76,7 +76,7 @@ def sanitize_html(html: str | None, base_url: str | None = None) -> str:
     html = _SRCSET_RE.sub("", html)
     cleaned = nh3.clean(
         html,
-        tags=ALLOWED_TAGS,
+        tags=ALLOWED_TAGS | extra_tags,
         attributes=ALLOWED_ATTRIBUTES,
         link_rel="noopener noreferrer nofollow",
         strip_comments=True,

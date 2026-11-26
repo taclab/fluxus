@@ -52,6 +52,7 @@ class FeedOut(BaseModel):
     last_error: str | None
     extraction_mode: str
     is_youtube: bool
+    source: str = "rss"
     disabled: bool
     view_mode: ViewMode | None = None
     auto_summary: bool = False

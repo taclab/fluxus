@@ -151,6 +151,15 @@ opens the same menu:
   summaries), personal instructions added to every summary (« I'm a developer, keep the figures »),
   and the in-depth model (empty: the usual model at maximum effort).
 
+## Newsletters
+
+*Paramètres → Newsletters par e-mail* gives you addresses to subscribe to newsletters with: each
+newsletter becomes a feed (with a mail icon), each issue an article. A *sorting* address files every
+newsletter into its own feed; a *dedicated* address sends everything to one feed. Revoking an address
+rejects what is sent to it next; the feeds stay. The reader shows an **Unsubscribe** link when the
+newsletter provides one. Receiving needs a one-time setup on Cloudflare: see
+[Newsletters](NEWSLETTERS.md).
+
 ## Search
 
 Online, PostgreSQL does the search (full text over title, author and content, `websearch` syntax:

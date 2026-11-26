@@ -122,12 +122,13 @@ categories 1 ──── n feeds 1 ──── n entries 1 ──── n summ
                                     └──── 0..1 transcripts                 │
                                     └──── n smart_feed_matches n ──────────┘
 jobs            settings (clé/valeur)          device_tokens
+newsletter_addresses n ──0..1── feeds (adresse dédiée) · n ──0..1── categories (dossier des flux créés)
 ```
 
 | Table | Rôle | Colonnes notables |
 |---|---|---|
 | `categories` | dossiers de la barre latérale | `title` unique, `position` · `view_mode` (présentation, héritée par ses flux ; null = défaut) |
-| `feeds` | abonnements | `url` unique · `position` (ordre manuel dans son dossier ; sans dossier, sur la même échelle que `categories.position` : la racine mélange dossiers et flux ; un nouveau flux prend `min(position) − 1` de son conteneur) · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` · `fetch_interval_fixed_min` (null = adaptatif) · `view_mode` (null = dossier, puis défaut) · `auto_summary`, `summary_daily_cap` (résumés automatiques de tous les nouveaux articles) |
+| `feeds` | abonnements | `url` unique · `position` (ordre manuel dans son dossier ; sans dossier, sur la même échelle que `categories.position` : la racine mélange dossiers et flux ; un nouveau flux prend `min(position) − 1` de son conteneur) · `etag`, `last_modified` (GET conditionnel) · `next_fetch_at`, `fetch_interval_min` (planification adaptative) · `error_count`, `last_error` · `extraction_mode` ∈ {`none`,`http`,`browser`,`auto`} · `is_youtube` · `disabled` · `fetch_interval_fixed_min` (null = adaptatif) · `view_mode` (null = dossier, puis défaut) · `auto_summary`, `summary_daily_cap` (résumés automatiques de tous les nouveaux articles) · `source` ∈ {`rss`,`email`} (un flux `email` n'est jamais récupéré : ni planificateur, ni rafraîchissement, ni OPML ; `url` = `email:sender:<List-Id ou expéditeur>` ou `email:address:<jeton>`) |
 | `entries` | articles | `guid` unique par flux · `hash` (dédup par URL normalisée ou titre+date) · `summary_html` (contenu du flux, nettoyé) · `content_html`, `content_text`, `extraction_status` ∈ {`none`,`pending`,`done`,`failed`} · `read`, `starred` · `meta` JSONB (`youtube_id`, `cover`, `enclosures`, `extraction_method`) · `updated_at` (pivot de la synchronisation) · `search_vector` |
 | `summaries` | résumés produits | `kind` ∈ {`article`,`video`} · `provider`, `model`, `prompt_version` · `text_md` · `input_tokens`, `output_tokens` · `origin` ∈ {`manual`,`auto`} · `smart_feed_id` (SET NULL) |
 | `smart_feeds` | recherches enregistrées | `name` unique · `scope_kind` ∈ {`all`,`category`,`feed`}, `scope_id` · `mode` ∈ {`keywords`,`regex`} · `keywords_any/all/none` JSONB · `regex` (≤ 300) · `fields` JSONB (title, excerpt, author, url, content) · `auto_summary`, `summary_daily_cap` · `view_mode` |
@@ -135,6 +136,7 @@ jobs            settings (clé/valeur)          device_tokens
 | `transcripts` | sous-titres YouTube | `language`, `text`, `segments` JSONB (`start`, `duration`, `text`) |
 | `jobs` | file de travail | `type`, `payload` JSONB · `status` ∈ {`queued`,`running`,`done`,`failed`} · `run_at`, `attempts`, `max_attempts`, `locked_at` · `dedupe_key` (index unique partiel) |
 | `settings` | réglages et secrets | `key`, `value` ; les clés listées dans `SECRET_KEYS` sont chiffrées (Fernet dérivé de `FLUXUS_SECRET_KEY`) ; `_password_hash` est le mot de passe Argon2 ; `dashboard_layout` est le JSON de la disposition du tableau de bord (validé : JSON, ≤ 64 Ko, tableau `widgets`) |
+| `newsletter_addresses` | adresses de réception des newsletters | `token` unique (partie locale aléatoire, 12 caractères) · `feed_id` (adresse dédiée ; CASCADE : supprimer le flux révoque l'adresse) · `category_id` (dossier des flux créés à la réception) · `received_count`, `last_received_at` |
 | `device_tokens` | tokens de l'appli mobile | `token_hash` (SHA-256 du token `flx_…`), `last_seen_at` |
 
 Règles importantes :
@@ -333,6 +335,33 @@ Authorization: Bearer <jwt | flx_…>   (ou ?token= pour les cas sans en-tête)
 bloquent le login (`LoginRateLimiter`, en mémoire, par processus) : le plafond global rend inutile
 la falsification de `X-Forwarded-For`.
 
+### 5.7 Newsletters reçues par e-mail (`backend/fluxus/newsletters/`, `cloudflare/email-worker/`)
+
+Pas de serveur de messagerie dans la pile : Cloudflare Email Routing reçoit le courrier d'un
+sous-domaine (règle « catch-all ») et le confie à l'Email Worker du dépôt, qui le poste brut à
+`POST /api/inbound/email`. Guide d'installation : `docs/NEWSLETTERS.md`.
+
+1. **Authentification** : HMAC-SHA256 (secret `_newsletter_secret`, réglage interne chiffré, jamais
+   exporté) de `<horodatage ms>.<destinataire>.<sha256 du corps>`, fenêtre de 5 minutes. Taille
+   bornée (15 Mio) avant toute lecture du contenu. Même calcul dans `worker.js`, vérifié par un
+   vecteur commun (`tests/test_newsletter_parse.py`, `worker.test.mjs`).
+2. **`service.ingest_message(raw, destinataire)`**, indépendant du transport : garde de maintenance,
+   verrou sur l'adresse (`FOR UPDATE` : deux mails simultanés ne créent ni deux flux ni deux
+   articles), adresse inconnue → 404 (le Worker rejette le mail). Flux de l'adresse dédiée, sinon
+   flux de l'expéditeur créé à la première réception. Flux en pause : mail ignoré. Doublon de
+   `Message-ID` : ignoré.
+3. **`parse.parse_email`** (pur) : partie HTML (sinon texte mis en paragraphes), éléments masqués et
+   commentaires retirés, pixels de suivi et images `cid:` supprimés, tableaux de mise en page aplatis
+   en blocs (`div`, autorisé pour ce contenu seulement), puis `sanitize_html`. Lien « voir en ligne »
+   → `entries.url` ; `List-Unsubscribe` → `meta.unsubscribe_url` / `unsubscribe_mailto` ; première
+   grande image → `meta.cover`. Le HTML va dans `summary_html`, le texte dans `content_text`
+   (recherche, résumés) ; `extraction_status` reste `none`.
+4. **Suites** : `fetcher/service.after_new_entries` (commun avec les flux RSS) : flux intelligents
+   et résumés automatiques sous quotas.
+
+Le Worker renvoie vers l'adresse de secours tout ce que Fluxus n'a pas accepté (erreur, délai,
+mail trop gros), jamais de rejet hors 404 : une liste qui reçoit des rebonds peut désinscrire.
+
 ## 6. API HTTP
 
 Documentation vivante sur `/api/docs`. Résumé des routes (toutes sous `/api`, authentifiées sauf
@@ -349,9 +378,10 @@ mention) :
 | sync | `GET sync` (renvoie aussi `smart_feeds` ; `server_time` = horizon de visibilité des commits), `POST sync` (par champ, renvoie `conflicts`) |
 | flux intelligents | `GET/POST smart-feeds`, `GET/PUT/DELETE smart-feeds/{id}` (PUT ré-applique seulement si la définition change), `POST smart-feeds/preview`, `POST smart-feeds/{id}/summarize-all` |
 | réglages | `GET/PATCH settings` (disposition du tableau de bord versionnée : `dashboard_layout_version`, `PATCH` exige `dashboard_layout_base_version`, 409 avec la disposition courante si périmée), `GET settings/stats` |
+| newsletters | `GET newsletters` (domaine, secret configuré, adresses), `POST newsletters/addresses`, `DELETE newsletters/addresses/{id}`, `POST newsletters/secret` (nouveau secret, renvoyé une seule fois) ; `POST inbound/email`** (mail brut de l'Email Worker) |
 | système | `GET health`* |
 
-\* sans authentification (`POST devices` exige le mot de passe dans le corps).
+\* sans authentification (`POST devices` exige le mot de passe dans le corps). \*\* sans session : signature HMAC du Worker (voir 5.7).
 
 Les listes d'articles sont paginées par curseur `(published_at, id)` encodé en base64. Les erreurs
 suivent le format FastAPI `{"detail": …}` ; `300 Multiple Choices` sur `POST feeds` transporte
@@ -604,6 +634,7 @@ plateforme par `window.Capacitor.isNativePlatform()`. Le bouton retour matériel
 | Risque | Mesure | Où |
 |---|---|---|
 | SSRF via une URL de flux ou d'article | Résolution DNS puis refus des IP privées, loopback, link-local ; seuls http/https ; **revalidé à chaque redirection** ; refus aussi de 100.64.0.0/10 (`not is_global`) ; dans le service navigateur, Chromium ne sort que par une **passerelle de sortie** interne (proxy imposé au lancement, boucle locale comprise, QUIC et UDP WebRTC coupés) qui résout le nom, refuse toute adresse non publique et **se connecte à l'adresse qu'elle vient de valider** : popups, WebSocket, service workers et changement de résolution DNS y passent tous ; par-dessus, le filtre de requêtes du contexte (`context.route`) **suit lui-même les redirections** avec `route.fetch(max_redirects=0)` en revalidant chaque destination, ferme les popups et les WebSocket ; le service vit sur un réseau Compose sans Postgres ; vérifié par `scripts/check-browser-redirect.py` | `fetcher/http.safe_get`, `browser/server.py`, `docker-compose.yml` |
+| Mail forgé posté sur la route de réception des newsletters | Signature HMAC du Worker (secret partagé, horodatage à 5 min, destinataire signé), taille bornée avant lecture, adresses aléatoires de 60 bits révocables, aucune requête réseau déclenchée par le contenu reçu | `newsletters/router.py`, `newsletters/service.py` |
 | Traversée de chemin sur le repli SPA | Chemin résolu et vérifié sous le dossier statique | `main.py` |
 | Serveur au goutte-à-goutte, corps géant | Délai global 60 s, lecture en flux bornée (10 Mo / 5 Mo), upload OPML ≤ 5 Mo | `fetcher/http.safe_get`, `feeds/router.py` |
 | Secret d'exemple en production | Refus de démarrer (`validate_runtime_config`) | `config.py`, `main.py`, `worker.py` |
@@ -635,6 +666,7 @@ backend/
     settings_router.py      GET/PATCH /settings, /settings/stats
     auth/                   security (argon2, JWT, tokens), deps (require_auth), router
     feeds/                  router (catégories, flux, OPML), opml.py (parse/build)
+    newsletters/            parse (e-mail → HTML lisible, pur), service (signature, adresses, ingest_message), router (réception signée, gestion)
     entries/                router (liste paginée, états, extraction synchrone)
     fetcher/                http (client + anti-SSRF), parse (feedparser → entrées),
                             service (refresh_feed), discover (découverte), jobs (handler)

@@ -36,7 +36,11 @@ uv run ruff check fluxus tests
 DATABASE_URL=postgresql+asyncpg://fluxus:<password>@localhost:5433/fluxus_test uv run pytest   # full suite
 uv run pytest                                                      # without a database, over half is skipped
 cd ../web && npm run typecheck && npm run lint && npm test && npm run build
+cd ../cloudflare/email-worker && node --test worker.test.mjs     # newsletter Email Worker
 ```
+
+The Email Worker and the server sign incoming newsletters the same way: both test suites check the
+same signature vector, change them together.
 
 Lint is blocking (no warning tolerated). `npm test` (Vitest) covers the pure front-end rules:
 sidebar order, layouts, dashboard layout, sync merge and retention.
@@ -51,7 +55,8 @@ docker run --rm --network host -u 0 -v $PWD/scripts:/scripts:ro -v /tmp/shots:/o
   fluxus-browser python /scripts/e2e-ui.py
 ```
 
-One script per area: `scripts/e2e-*.py` (ui, dashboard, smartfeeds, layout, sidebar, subscriptions, reading, pwa, backup, i18n).
+One script per area: `scripts/e2e-*.py` (ui, dashboard, smartfeeds, layout, sidebar, subscriptions, reading, pwa, backup, i18n, newsletters).
+`e2e-newsletters.py` generates a new Worker secret: run it on a disposable instance only.
 Set `E2E_BASE` to target another instance (for example a disposable copy on :8001).
 
 The README screenshots come from `scripts/readme-screenshots.py` (English, dark theme, 2880×1800).

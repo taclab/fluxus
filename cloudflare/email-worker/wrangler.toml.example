@@ -1,0 +1,8 @@
+# Copier en wrangler.toml, puis : npx wrangler deploy && npx wrangler secret put FLUXUS_SECRET
+name = "fluxus-email"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+FLUXUS_URL = "https://fluxus.example.org"
+FALLBACK_ADDRESS = "you@example.org"

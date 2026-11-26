@@ -453,6 +453,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/newsletters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Config */
+        get: operations["get_config_api_newsletters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/newsletters/addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Address */
+        post: operations["create_address_api_newsletters_addresses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/newsletters/addresses/{address_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Address
+         * @description Révoque l'adresse : les mails suivants sont rejetés. Le flux et ses articles restent.
+         */
+        delete: operations["delete_address_api_newsletters_addresses__address_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/newsletters/secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Secret
+         * @description Nouveau secret partagé avec le Worker, affiché une seule fois ; l'ancien cesse de valoir.
+         */
+        post: operations["regenerate_secret_api_newsletters_secret_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inbound/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive Email
+         * @description Mail brut (RFC 5322) signé par le Worker : en-têtes `X-Fluxus-Timestamp` (ms),
+         *     `X-Fluxus-To` (destinataire) et `X-Fluxus-Signature` (voir `service.sign`).
+         */
+        post: operations["receive_email_api_inbound_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/entries": {
         parameters: {
             query?: never;
@@ -1000,6 +1095,11 @@ export interface components {
             extraction_mode: string;
             /** Is Youtube */
             is_youtube: boolean;
+            /**
+             * Source
+             * @default rss
+             */
+            source: string;
             /** Disabled */
             disabled: boolean;
             /** View Mode */
@@ -1112,6 +1212,15 @@ export interface components {
             /** Exported At */
             exported_at?: string | null;
         };
+        /** InboundOut */
+        InboundOut: {
+            /** Status */
+            status: string;
+            /** Feed Id */
+            feed_id: number;
+            /** Entry Id */
+            entry_id?: number | null;
+        };
         /** MarkReadIn */
         MarkReadIn: {
             /** Entry Ids */
@@ -1139,6 +1248,53 @@ export interface components {
              * @default true
              */
             read: boolean;
+        };
+        /** NewsletterAddressIn */
+        NewsletterAddressIn: {
+            /** Label */
+            label: string;
+            /**
+             * Dedicated
+             * @default false
+             */
+            dedicated: boolean;
+            /** Category Id */
+            category_id?: number | null;
+        };
+        /** NewsletterAddressOut */
+        NewsletterAddressOut: {
+            /** Id */
+            id: number;
+            /** Token */
+            token: string;
+            /** Email */
+            email: string | null;
+            /** Label */
+            label: string;
+            /** Feed Id */
+            feed_id: number | null;
+            /** Category Id */
+            category_id: number | null;
+            /** Received Count */
+            received_count: number;
+            /** Last Received At */
+            last_received_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** NewsletterConfigOut */
+        NewsletterConfigOut: {
+            /** Domain */
+            domain: string;
+            /** Secret Set */
+            secret_set: boolean;
+            /** Max Bytes */
+            max_bytes: number;
+            /** Addresses */
+            addresses: components["schemas"]["NewsletterAddressOut"][];
         };
         /** OpmlImportResult */
         OpmlImportResult: {
@@ -1209,6 +1365,11 @@ export interface components {
             id: number;
             /** Position */
             position: number;
+        };
+        /** SecretOut */
+        SecretOut: {
+            /** Secret */
+            secret: string;
         };
         /** SettingsOut */
         SettingsOut: {
@@ -2475,6 +2636,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_config_api_newsletters_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterConfigOut"];
+                };
+            };
+        };
+    };
+    create_address_api_newsletters_addresses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewsletterAddressIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsletterAddressOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_address_api_newsletters_addresses__address_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                address_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_secret_api_newsletters_secret_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretOut"];
+                };
+            };
+        };
+    };
+    receive_email_api_inbound_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundOut"];
                 };
             };
         };

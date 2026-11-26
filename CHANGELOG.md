@@ -4,6 +4,18 @@ Les versions suivent le [versionnage sémantique](https://semver.org/lang/fr/). 
 `backend/fluxus/__init__.py` (renvoyé par `/api/health`) et de `web/package.json` ; chaque version
 porte un tag git `vX.Y.Z`.
 
+## Non publié
+
+### Nouveautés
+- Newsletters par e-mail : des adresses Fluxus pour s'abonner aux newsletters ; chaque newsletter
+  devient un flux, chaque numéro un article (recherche, flux intelligents, résumés compris).
+  Réception par Cloudflare Email Routing sur un sous-domaine et un Email Worker fourni
+  (`cloudflare/email-worker/`), signé par un secret partagé ; repli vers une adresse de secours si
+  Fluxus ne répond pas. Adresse qui range chaque newsletter dans son flux, ou adresse dédiée à un
+  seul flux ; révocation. HTML nettoyé pour la lecture (texte d'aperçu masqué, pixels de suivi,
+  tableaux de mise en page aplatis). Lien « Se désinscrire » dans le lecteur. Guide :
+  `docs/NEWSLETTERS.md`.
+
 ## 1.0.6 — 24 novembre 2026
 
 ### Nouveautés
